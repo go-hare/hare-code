@@ -22,12 +22,25 @@ bun install
 bun run dev
 ```
 
-### 推荐安装方式：GitHub Release tarball
+### 推荐安装方式：GitHub Release 二进制 / tarball
 
-最稳定的安装方式是安装 GitHub Release 中上传的 `.tgz` 发布包，而不是直接从 Git 仓库源码安装。
+最稳定的安装方式是使用 GitHub Release 中上传的二进制或 `.tgz` 发布包，而不是直接从 Git 仓库源码安装。
+
+#### 多平台 release 产物命名
+
+- `hare-code-windows-x64.exe`
+- `hare-code-linux-x64`
+- `hare-code-linux-x64-baseline`
+- `hare-code-linux-arm64`
+- `hare-code-darwin-x64`
+- `hare-code-darwin-arm64`
+- `hare-code-checksums.txt`
+- `hare-code-<version>.tgz`
+
+桌面端和 Python SDK 应该优先消费上面的平台二进制；其中 Linux x64 默认建议优先使用 `hare-code-linux-x64-baseline` 以提升兼容性。`.tgz` 主要给 `npm install -g` 场景。
 
 ```bash
-# 例子：从 GitHub Release 安装
+# 例子：从 GitHub Release 安装 npm tarball
 npm install -g https://github.com/go-hare/hare-code/releases/download/v1.0.0/hare-code-1.0.0.tgz
 ```
 
@@ -65,9 +78,15 @@ bun run build
 
 ```bash
 npm run release:pack
+node scripts/build-release.mjs --target windows-x64
 ```
 
-执行后会在当前目录生成类似 `hare-code-1.0.0.tgz` 的发布包，可直接上传到 GitHub Release。
+执行后会分别生成：
+
+- 当前目录下的 `hare-code-<version>.tgz`
+- `dist/release/` 下的平台二进制
+
+GitHub Actions 发布工作流会按平台矩阵自动生成并上传这些产物。
 
 ### 版本检查
 

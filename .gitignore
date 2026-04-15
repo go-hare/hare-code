@@ -11,3 +11,5 @@ cursor.json
 scripts/media/
 .env
 bun.lock
+
+dist/
