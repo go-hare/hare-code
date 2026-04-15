@@ -1,0 +1,14 @@
+.claude/
+node_modules/
+dist/
+.bun/
+*.log
+.DS_Store
+
+# WeChat Bridge
+.wechat-bridge/
+credentials.json
+cursor.json
+scripts/media/
+.env
+bun.lock
