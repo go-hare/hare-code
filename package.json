@@ -2,46 +2,24 @@
     "name": "hare-code",
     "version": "1.0.0",
     "type": "module",
-    "workspaces": [
-        "packages/*",
-        "packages/@ant/*"
-    ],
     "bin": {
         "hare-code": "./bin/hare-code.cjs"
     },
     "files": [
         "bin",
         "dist",
-        "packages",
-        "scripts",
-        "src",
-        "tsconfig.json"
+        "README.md",
+        "ENVIRONMENT_VARIABLES.md"
     ],
     "scripts": {
         "build": "bun build src/entrypoints/cli.tsx --outdir dist --target bun",
         "dev": "bun --feature=BUDDY run src/entrypoints/cli.tsx",
-        "prepare": "bun run build",
         "wechat": "bun run scripts/wechat-bridge.ts",
         "wechat:login": "bun run scripts/wechat-bridge.ts --login",
         "prepublishOnly": "bun run build"
     },
-    "bundleDependencies": [
-        "@ant/claude-for-chrome-mcp",
-        "@ant/computer-use-input",
-        "@ant/computer-use-mcp",
-        "@ant/computer-use-swift",
-        "audio-capture-napi",
-        "color-diff-napi",
-        "image-processor-napi",
-        "modifiers-napi",
-        "url-handler-napi"
-    ],
     "dependencies": {
         "@alcalzone/ansi-tokenize": "^0.3.0",
-        "@ant/claude-for-chrome-mcp": "file:packages/@ant/claude-for-chrome-mcp",
-        "@ant/computer-use-input": "file:packages/@ant/computer-use-input",
-        "@ant/computer-use-mcp": "file:packages/@ant/computer-use-mcp",
-        "@ant/computer-use-swift": "file:packages/@ant/computer-use-swift",
         "@anthropic-ai/bedrock-sdk": "^0.26.4",
         "@anthropic-ai/claude-agent-sdk": "^0.2.87",
         "@anthropic-ai/foundry-sdk": "^0.2.3",
@@ -80,7 +58,6 @@
         "@smithy/node-http-handler": "^4.5.1",
         "ajv": "^8.18.0",
         "asciichart": "^1.5.25",
-        "audio-capture-napi": "file:packages/audio-capture-napi",
         "auto-bind": "^5.0.1",
         "axios": "^1.14.0",
         "bidi-js": "^1.0.3",
@@ -90,7 +67,6 @@
         "cli-boxes": "^4.0.1",
         "cli-highlight": "^2.1.11",
         "code-excerpt": "^4.0.0",
-        "color-diff-napi": "file:packages/color-diff-napi",
         "diff": "^8.0.4",
         "emoji-regex": "^10.6.0",
         "env-paths": "^4.0.0",
@@ -103,13 +79,11 @@
         "highlight.js": "^11.11.1",
         "https-proxy-agent": "^8.0.0",
         "ignore": "^7.0.5",
-        "image-processor-napi": "file:packages/image-processor-napi",
         "indent-string": "^5.0.0",
         "jsonc-parser": "^3.3.1",
         "lodash-es": "^4.17.23",
         "lru-cache": "^11.2.7",
         "marked": "^17.0.5",
-        "modifiers-napi": "file:packages/modifiers-napi",
         "p-map": "^7.0.4",
         "picomatch": "^4.0.4",
         "plist": "^3.1.0",
@@ -129,7 +103,6 @@
         "turndown": "^7.2.2",
         "type-fest": "^5.5.0",
         "undici": "^7.24.6",
-        "url-handler-napi": "file:packages/url-handler-napi",
         "usehooks-ts": "^3.1.1",
         "vscode-jsonrpc": "^8.2.1",
         "vscode-languageserver-protocol": "^3.17.5",

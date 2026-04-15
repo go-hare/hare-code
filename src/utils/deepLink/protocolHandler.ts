@@ -92,7 +92,7 @@ export async function handleUrlSchemeLaunch(): Promise<number | null> {
   }
 
   try {
-    const { waitForUrlEvent } = await import('url-handler-napi')
+    const { waitForUrlEvent } = await import('../../internal-packages/url-handler-napi.js')
     const url = (waitForUrlEvent as any)(5000)
     if (!url) {
       return null

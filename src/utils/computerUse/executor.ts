@@ -35,9 +35,9 @@ import type {
   ResolvePrepareCaptureResult,
   RunningApp,
   ScreenshotResult,
-} from '@ant/computer-use-mcp'
+} from '../../internal-packages/computer-use-mcp/index.js'
 
-import { API_RESIZE_PARAMS, targetImageSize } from '@ant/computer-use-mcp'
+import { API_RESIZE_PARAMS, targetImageSize } from '../../internal-packages/computer-use-mcp/index.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { execFileNoThrow } from '../execFileNoThrow.js'

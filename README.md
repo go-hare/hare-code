@@ -26,6 +26,8 @@ bun run dev
 
 需要先安装 Bun。即使用 `npm install` 安装，运行 `hare-code` 时也会调用本机 Bun。
 
+Git 安装默认不在安装阶段强制执行预构建；CLI 会优先使用仓库内提交的 `dist/cli.js`。发布与 Git 安装都以 `dist/` 作为发布工件，源码入口仅保留给本地开发。
+
 ```bash
 # npm
 npm install git+https://github.com/go-hare/hare-code.git

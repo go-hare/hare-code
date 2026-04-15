@@ -1,4 +1,4 @@
-import type { ComputerUseAPI } from '@ant/computer-use-swift'
+import type { ComputerUseAPI } from '../../internal-packages/computer-use-swift.js'
 
 let cached: ComputerUseAPI | undefined
 
@@ -17,7 +17,7 @@ export function requireComputerUseSwift(): ComputerUseAPI {
     throw new Error('@ant/computer-use-swift is macOS-only')
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return (cached ??= require('@ant/computer-use-swift') as ComputerUseAPI)
+  return (cached ??= require('../../internal-packages/computer-use-swift.js') as ComputerUseAPI)
 }
 
 export type { ComputerUseAPI }
