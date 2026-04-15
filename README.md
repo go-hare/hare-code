@@ -1,6 +1,6 @@
 # Hare Code
 
-`hare-code` 是从原项目中独立拆分出来的本体仓库，当前以源码安装方式运行。
+`hare-code` 是从原项目中独立拆分出来的本体仓库，既支持源码安装，也支持作为 Git 依赖直接安装。
 
 ## 快速开始
 
@@ -20,6 +20,24 @@ powershell -c "irm bun.sh/install.ps1 | iex"
 ```bash
 bun install
 bun run dev
+```
+
+### Git 直接安装
+
+需要先安装 Bun。即使用 `npm install` 安装，运行 `hare-code` 时也会调用本机 Bun。
+
+```bash
+# npm
+npm install git+https://github.com/go-hare/hare-code.git
+
+# bun
+bun add github:go-hare/hare-code
+```
+
+安装后可直接执行：
+
+```bash
+hare-code --version
 ```
 
 ### 构建
