@@ -22,11 +22,22 @@ bun install
 bun run dev
 ```
 
+### 推荐安装方式：GitHub Release tarball
+
+最稳定的安装方式是安装 GitHub Release 中上传的 `.tgz` 发布包，而不是直接从 Git 仓库源码安装。
+
+```bash
+# 例子：从 GitHub Release 安装
+npm install -g https://github.com/go-hare/hare-code/releases/download/v1.0.0/hare-code-1.0.0.tgz
+```
+
+这种方式安装的是已经打好的发布工件，不会触发 Git 源码安装时的 workspace / 原生依赖 / 全局安装边界问题。
+
 ### Git 直接安装
 
 需要先安装 Bun。即使用 `npm install` 安装，运行 `hare-code` 时也会调用本机 Bun。
 
-Git 安装默认不在安装阶段强制执行预构建；CLI 会优先使用仓库内提交的 `dist/cli.js`。发布与 Git 安装都以 `dist/` 作为发布工件，源码入口仅保留给本地开发。
+Git 安装默认不在安装阶段强制执行预构建；CLI 会优先使用仓库内提交的 `dist/cli.js`。但如果你的环境对 `npm install -g git+https://...` 兼容性较差，优先使用上面的 Release tarball 方案。
 
 ```bash
 # npm
@@ -49,6 +60,14 @@ bun run build
 ```
 
 构建产物默认输出到 `dist/cli.js`。
+
+### 生成 Release 包
+
+```bash
+npm run release:pack
+```
+
+执行后会在当前目录生成类似 `hare-code-1.0.0.tgz` 的发布包，可直接上传到 GitHub Release。
 
 ### 版本检查
 
