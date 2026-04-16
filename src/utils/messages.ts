@@ -103,7 +103,7 @@ import type {
 import type {
   HookEvent,
   SDKAssistantMessageError,
-} from 'src/entrypoints/agentSdkTypes.js'
+} from 'src/sdk/types.js'
 import { EXPLORE_AGENT } from 'src/tools/AgentTool/built-in/exploreAgent.js'
 import { PLAN_AGENT } from 'src/tools/AgentTool/built-in/planAgent.js'
 import { areExplorePlanAgentsEnabled } from 'src/tools/AgentTool/builtInAgents.js'

@@ -7,7 +7,7 @@ import { Box, Text, useTheme } from '../../ink.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { getEmptyToolPermissionContext } from '../../Tool.js';
 import type { LocalAgentTaskState } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
-import { getTools } from '../../tools.js';
+import { getTools } from 'src/runtime/tools-default/index.js';
 import { formatNumber } from '../../utils/format.js';
 import { extractTag } from '../../utils/messages.js';
 import { Byline } from '../design-system/Byline.js';

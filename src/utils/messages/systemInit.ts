@@ -6,7 +6,7 @@ import type {
   ApiKeySource,
   PermissionMode,
   SDKMessage,
-} from 'src/entrypoints/agentSdkTypes.js'
+} from 'src/sdk/types.js'
 import {
   AGENT_TOOL_NAME,
   LEGACY_AGENT_TOOL_NAME,

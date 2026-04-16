@@ -46,7 +46,7 @@ import {
   logBridgeSkip,
 } from './debugUtils.js'
 import type { Message } from '../types/message.js'
-import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
+import type { SDKMessage } from 'src/sdk/types.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
 import type {
   SDKControlRequest,

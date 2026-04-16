@@ -48,7 +48,7 @@ import {
   isDeferredTool,
   TOOL_SEARCH_TOOL_NAME,
 } from '../../tools/ToolSearchTool/prompt.js'
-import { getAllBaseTools } from '../../tools.js'
+import { getAllBaseTools } from 'src/runtime/tools-default/index.js'
 import type { HookProgress } from '../../types/hooks.js'
 import type {
   AssistantMessage,

@@ -62,8 +62,14 @@ function renderColorDiff(patch: StructuredPatchHunk, firstLine: string | null, f
   let perHunk = RENDER_CACHE.get(patch);
   const hit = perHunk?.get(key);
   if (hit) return hit;
-  const lines = new ColorDiff(patch, firstLine, filePath, fileContent).render(theme, width, dim);
-  if (lines === null) return null;
+  const rendered = ColorDiff.renderHunk({
+    oldStart: patch.oldStart,
+    oldLines: patch.oldLines,
+    newStart: patch.newStart,
+    newLines: patch.newLines,
+    lines: patch.lines,
+  }, filePath);
+  const lines = rendered.split('\n');
 
   // Pre-split the gutter column once (cold-cache). sliceAnsi preserves
   // styles across the cut; the Rust module already pads the gutter to

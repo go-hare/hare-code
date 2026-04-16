@@ -43,7 +43,7 @@ import { isPolicyAllowed, loadPolicyLimits, refreshPolicyLimits, waitForPolicyLi
 import { loadRemoteManagedSettings, refreshRemoteManagedSettings } from './services/remoteManagedSettings/index.js';
 import type { ToolInputJSONSchema } from './Tool.js';
 import { createSyntheticOutputTool, isSyntheticOutputToolEnabled } from './tools/SyntheticOutputTool/SyntheticOutputTool.js';
-import { getTools } from './tools.js';
+import { getTools } from 'src/runtime/tools-default/index.js';
 import { canUserConfigureAdvisor, getInitialAdvisorSetting, isAdvisorEnabled, isValidAdvisorModel, modelSupportsAdvisor } from './utils/advisor.js';
 import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js';
 import { count, uniq } from './utils/array.js';
@@ -91,6 +91,7 @@ import { launchAssistantInstallWizard, launchAssistantSessionChooser, launchInva
 import { SHOW_CURSOR } from './ink/termio/dec.js';
 import { exitWithError, exitWithMessage, getRenderContext, renderAndRun, showSetupScreens } from './interactiveHelpers.js';
 import { initBuiltinPlugins } from './plugins/bundled/index.js';
+import { createCliRuntimeHostAdapter } from './cli/index.js';
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { checkQuotaStatus } from './services/claudeAiLimits.js';
 import { getMcpToolsCommandsAndResources, prefetchAllMcpResources } from './services/mcp/client.js';
@@ -1871,9 +1872,9 @@ async function run(): Promise<CommanderCommand> {
     // (mirrors useMergedTools.ts filtering for REPL/interactive path)
     if (feature('COORDINATOR_MODE') && isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)) {
       const {
-        applyCoordinatorToolFilter
-      } = await import('./utils/toolPool.js');
-      tools = applyCoordinatorToolFilter(tools);
+        buildCoordinatorTools
+      } = await import('./runtime/tools-default/index.js');
+      tools = buildCoordinatorTools(tools);
     }
     profileCheckpoint('action_tools_loaded');
     let jsonSchema: ToolInputJSONSchema | undefined;
@@ -3034,6 +3035,9 @@ async function run(): Promise<CommanderCommand> {
       // teammates reading their own identity, not the assistant-mode leader.
       teamContext: (feature('KAIROS') ? assistantTeamContext ?? computeInitialTeamContext?.() : computeInitialTeamContext?.()) || undefined
     };
+    const runtimeHostAdapter = createCliRuntimeHostAdapter({
+      initialConversationId: getSessionId()
+    });
 
     // Add CLI initial prompt to history
     if (inputPrompt) {
@@ -3134,7 +3138,8 @@ async function run(): Promise<CommanderCommand> {
         await launchRepl(root, {
           getFpsMetrics,
           stats,
-          initialState: loaded.initialState
+          initialState: loaded.initialState,
+          runtimeHostAdapter
         }, {
           ...sessionConfig,
           mainThreadAgentDefinition: loaded.restoredAgentDef ?? mainThreadAgentDefinition,
@@ -3176,7 +3181,8 @@ async function run(): Promise<CommanderCommand> {
       await launchRepl(root, {
         getFpsMetrics,
         stats,
-        initialState
+        initialState,
+        runtimeHostAdapter
       }, {
         debug: debug || debugToStderr,
         commands,
@@ -3242,7 +3248,8 @@ async function run(): Promise<CommanderCommand> {
       await launchRepl(root, {
         getFpsMetrics,
         stats,
-        initialState
+        initialState,
+        runtimeHostAdapter
       }, {
         debug: debug || debugToStderr,
         commands,
@@ -3338,7 +3345,8 @@ async function run(): Promise<CommanderCommand> {
       await launchRepl(root, {
         getFpsMetrics,
         stats,
-        initialState: assistantInitialState
+        initialState: assistantInitialState,
+        runtimeHostAdapter
       }, {
         debug: debug || debugToStderr,
         commands: remoteCommands,
@@ -3487,7 +3495,8 @@ async function run(): Promise<CommanderCommand> {
         await launchRepl(root, {
           getFpsMetrics,
           stats,
-          initialState: remoteInitialState
+          initialState: remoteInitialState,
+          runtimeHostAdapter
         }, {
           debug: debug || debugToStderr,
           commands: remoteCommands,
@@ -3733,7 +3742,8 @@ async function run(): Promise<CommanderCommand> {
         await launchRepl(root, {
           getFpsMetrics,
           stats,
-          initialState: resumeData.initialState
+          initialState: resumeData.initialState,
+          runtimeHostAdapter
         }, {
           ...sessionConfig,
           mainThreadAgentDefinition: resumeData.restoredAgentDef ?? mainThreadAgentDefinition,
@@ -3798,7 +3808,8 @@ async function run(): Promise<CommanderCommand> {
       await launchRepl(root, {
         getFpsMetrics,
         stats,
-        initialState
+        initialState,
+        runtimeHostAdapter
       }, {
         ...sessionConfig,
         initialMessages,

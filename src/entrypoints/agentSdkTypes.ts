@@ -1,5 +1,8 @@
 /**
- * Main entrypoint for Claude Code Agent SDK types.
+ * Legacy compatibility entrypoint for Claude Code Agent SDK types.
+ *
+ * Internal code should import from src/sdk/types.js. This file remains for
+ * older consumers that still import the historical entrypoint path.
  *
  * This file re-exports the public SDK API from:
  * - sdk/coreTypes.ts - Common serializable types (messages, configs)

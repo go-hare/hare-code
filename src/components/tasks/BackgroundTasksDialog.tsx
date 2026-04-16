@@ -4,6 +4,8 @@ import figures from 'figures';
 import React, { type ReactNode, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
+import { useCliRuntimeHostAdapterMaybe, useCliRuntimeHostStateMaybe } from 'src/cli/runtime-host/index.js';
+import type { TaskState as RuntimeTaskState } from 'src/runtime/types/index.js';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import { enterTeammateView, exitTeammateView } from 'src/state/teammateViewHelpers.js';
 import type { ToolUseContext } from 'src/Tool.js';
@@ -39,6 +41,7 @@ import { BackgroundTask as BackgroundTaskComponent } from './BackgroundTask.js';
 import { DreamDetailDialog } from './DreamDetailDialog.js';
 import { InProcessTeammateDetailDialog } from './InProcessTeammateDetailDialog.js';
 import { RemoteSessionDetailDialog } from './RemoteSessionDetailDialog.js';
+import { RuntimeTaskDetailDialog, RuntimeTaskRow } from './RuntimeTaskDetailDialog.js';
 import { ShellDetailDialog } from './ShellDetailDialog.js';
 type ViewState = {
   mode: 'list';
@@ -97,6 +100,12 @@ type ListItem = {
   task: DeepImmutable<DreamTaskState>;
 } | {
   id: string;
+  type: 'runtime_task';
+  label: string;
+  status: string;
+  task: RuntimeTaskState;
+} | {
+  id: string;
   type: 'leader';
   label: string;
   status: 'running';
@@ -130,6 +139,8 @@ export function BackgroundTasksDialog({
   initialDetailTaskId
 }: Props): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
+  const runtimeHostAdapter = useCliRuntimeHostAdapterMaybe();
+  const runtimeHostState = useCliRuntimeHostStateMaybe();
   const foregroundedTaskId = useAppState(s_0 => s_0.foregroundedTaskId);
   const showSpinnerTree = useAppState(s_1 => s_1.expandedView) === 'teammates';
   const setAppState = useSetAppState();
@@ -149,12 +160,12 @@ export function BackgroundTasksDialog({
         itemId: initialDetailTaskId
       };
     }
-    const allItems = getSelectableBackgroundTasks(typedTasks, foregroundedTaskId);
+    const allItems = [...getSelectableBackgroundTasks(typedTasks, foregroundedTaskId), ...getRuntimeOnlyTasks(runtimeHostState?.tasks, typedTasks)];
     if (allItems.length === 1) {
       skippedListOnMount.current = true;
       return {
         mode: 'detail',
-        itemId: allItems[0]!.id
+        itemId: 'taskId' in allItems[0]! ? allItems[0]!.taskId : allItems[0]!.id
       };
     }
     return {
@@ -174,20 +185,22 @@ export function BackgroundTasksDialog({
     agentTasks,
     teammateTasks,
     workflowTasks,
+    runtimeTasks,
     mcpMonitors,
     dreamTasks: dreamTasks_0,
     allSelectableItems
   } = useMemo(() => {
     // Filter to only show running/pending background tasks, matching the status bar count
     const backgroundTasks = Object.values(typedTasks ?? {}).filter(isBackgroundTask);
-    const allItems_0 = backgroundTasks.map(toListItem);
+    const runtimeOnlyTasks = getRuntimeOnlyTasks(runtimeHostState?.tasks, typedTasks);
+    const allItems_0 = [...backgroundTasks.map(toListItem), ...runtimeOnlyTasks.map(toRuntimeListItem)];
     const sorted = allItems_0.sort((a, b) => {
       const aStatus = a.status;
       const bStatus = b.status;
       if (aStatus === 'running' && bStatus !== 'running') return -1;
       if (aStatus !== 'running' && bStatus === 'running') return 1;
-      const aTime = 'task' in a ? a.task.startTime : 0;
-      const bTime = 'task' in b ? b.task.startTime : 0;
+      const aTime = getListItemSortTime(a);
+      const bTime = getListItemSortTime(b);
       return bTime - aTime;
     });
     const bash = sorted.filter(item => item.type === 'local_bash');
@@ -195,10 +208,11 @@ export function BackgroundTasksDialog({
     // Exclude foregrounded task - it's being viewed in the main UI, not a background task
     const agent = sorted.filter(item_1 => item_1.type === 'local_agent' && item_1.id !== foregroundedTaskId);
     const workflows = sorted.filter(item_2 => item_2.type === 'local_workflow');
-    const monitorMcp = sorted.filter(item_3 => item_3.type === 'monitor_mcp');
-    const dreamTasks = sorted.filter(item_4 => item_4.type === 'dream');
+    const runtime = sorted.filter(item_3 => item_3.type === 'runtime_task');
+    const monitorMcp = sorted.filter(item_4 => item_4.type === 'monitor_mcp');
+    const dreamTasks = sorted.filter(item_5 => item_5.type === 'dream');
     // In spinner-tree mode, exclude teammates from the dialog (they appear in the tree)
-    const teammates = showSpinnerTree ? [] : sorted.filter(item_5 => item_5.type === 'in_process_teammate');
+    const teammates = showSpinnerTree ? [] : sorted.filter(item_6 => item_6.type === 'in_process_teammate');
     // Add leader entry when there are teammates, so users can foreground back to leader
     const leaderItem: ListItem[] = teammates.length > 0 ? [{
       id: '__leader__',
@@ -211,15 +225,16 @@ export function BackgroundTasksDialog({
       remoteSessions: remote,
       agentTasks: agent,
       workflowTasks: workflows,
+      runtimeTasks: runtime,
       mcpMonitors: monitorMcp,
       dreamTasks,
       teammateTasks: [...leaderItem, ...teammates],
       // Order MUST match JSX render order (teammates \u2192 bash \u2192 monitorMcp \u2192
-      // remote \u2192 agent \u2192 workflows \u2192 dream) so \u2193/\u2191 navigation moves the cursor
+      // remote \u2192 agent \u2192 workflows \u2192 runtime \u2192 dream) so \u2193/\u2191 navigation moves the cursor
       // visually downward.
-      allSelectableItems: [...leaderItem, ...teammates, ...bash, ...monitorMcp, ...remote, ...agent, ...workflows, ...dreamTasks]
+      allSelectableItems: [...leaderItem, ...teammates, ...bash, ...monitorMcp, ...remote, ...agent, ...workflows, ...runtime, ...dreamTasks]
     };
-  }, [typedTasks, foregroundedTaskId, showSpinnerTree]);
+  }, [typedTasks, runtimeHostState, foregroundedTaskId, showSpinnerTree]);
   const currentSelection = allSelectableItems[selectedIndex] ?? null;
 
   // Use configurable keybindings for standard navigation and confirm/cancel.
@@ -285,6 +300,8 @@ export function BackgroundTasksDialog({
         } else {
           void killRemoteAgentTask(currentSelection_0.id);
         }
+      } else if (currentSelection_0.type === 'runtime_task' && canStopRuntimeTask(currentSelection_0.task)) {
+        void stopRuntimeTask(currentSelection_0.id);
       }
     }
     if (e.key === 'f') {
@@ -318,6 +335,12 @@ export function BackgroundTasksDialog({
   async function killRemoteAgentTask(taskId_3: string): Promise<void> {
     await RemoteAgentTask.kill(taskId_3, setAppState);
   }
+  async function stopRuntimeTask(taskId_4: string): Promise<void> {
+    if (!runtimeHostAdapter) {
+      return;
+    }
+    await runtimeHostAdapter.controlTask(taskId_4, 'stop');
+  }
 
   // Wrap onDone in useEffectEvent to get a stable reference that always calls
   // the current onDone callback without causing the effect to re-fire.
@@ -325,9 +348,10 @@ export function BackgroundTasksDialog({
   useEffect(() => {
     if (viewState.mode !== 'list') {
       const task = (typedTasks ?? {})[viewState.itemId];
+      const runtimeTask = getRuntimeDetailTask(runtimeHostState?.tasks, typedTasks, viewState.itemId);
       // Workflow tasks get a grace: their detail view stays open through
       // completion so the user sees the final state before eviction.
-      if (!task || task.type !== 'local_workflow' && !isBackgroundTask(task)) {
+      if (!runtimeTask && (!task || task.type !== 'local_workflow' && !isBackgroundTask(task))) {
         // Task was removed or is no longer a background task (e.g. killed).
         // If we skipped the list on mount, close the dialog entirely.
         if (skippedListOnMount.current) {
@@ -345,7 +369,7 @@ export function BackgroundTasksDialog({
     if (selectedIndex >= totalItems && totalItems > 0) {
       setSelectedIndex(totalItems - 1);
     }
-  }, [viewState, typedTasks, selectedIndex, allSelectableItems, onDoneEvent]);
+  }, [viewState, typedTasks, runtimeHostState, selectedIndex, allSelectableItems, onDoneEvent]);
 
   // Helper to go back to list view (or close dialog if we skipped list on
   // mount AND there's still only ≤1 item). Checking current count prevents
@@ -365,7 +389,16 @@ export function BackgroundTasksDialog({
   };
 
   // If an item is selected, show the appropriate view
-  if (viewState.mode !== 'list' && typedTasks) {
+  if (viewState.mode !== 'list') {
+    const runtimeTask = getRuntimeDetailTask(runtimeHostState?.tasks, typedTasks, viewState.itemId);
+    if (runtimeTask) {
+      return <RuntimeTaskDetailDialog task={runtimeTask} onDone={() => onDone('Background tasks dialog dismissed', {
+        display: 'system'
+      })} onBack={goBackToList} onStop={canStopRuntimeTask(runtimeTask) ? () => void stopRuntimeTask(runtimeTask.taskId) : undefined} key={`runtime-${runtimeTask.taskId}`} />;
+    }
+    if (!typedTasks) {
+      return null;
+    }
     const task_0 = typedTasks[viewState.itemId];
     if (!task_0) {
       return null;
@@ -401,6 +434,7 @@ export function BackgroundTasksDialog({
   const runningBashCount = count(bashTasks, _ => _.status === 'running');
   const runningAgentCount = count(remoteSessions, __0 => __0.status === 'running' || __0.status === 'pending') + count(agentTasks, __1 => __1.status === 'running');
   const runningTeammateCount = count(teammateTasks, __2 => __2.status === 'running');
+  const runningRuntimeTaskCount = runtimeTasks.length;
   const subtitle = intersperse([...(runningTeammateCount > 0 ? [<Text key="teammates">
               {runningTeammateCount}{' '}
               {runningTeammateCount !== 1 ? 'agents' : 'agent'}
@@ -410,8 +444,11 @@ export function BackgroundTasksDialog({
             </Text>] : []), ...(runningAgentCount > 0 ? [<Text key="agents">
               {runningAgentCount}{' '}
               {runningAgentCount !== 1 ? 'active agents' : 'active agent'}
+            </Text>] : []), ...(runningRuntimeTaskCount > 0 ? [<Text key="runtime">
+              {runningRuntimeTaskCount}{' '}
+              {runningRuntimeTaskCount !== 1 ? 'runtime tasks' : 'runtime task'}
             </Text>] : [])], index => <Text key={`separator-${index}`}> · </Text>);
-  const actions = [<KeyboardShortcutHint key="upDown" shortcut="↑/↓" action="select" />, <KeyboardShortcutHint key="enter" shortcut="Enter" action="view" />, ...(currentSelection?.type === 'in_process_teammate' && currentSelection.status === 'running' ? [<KeyboardShortcutHint key="foreground" shortcut="f" action="foreground" />] : []), ...((currentSelection?.type === 'local_bash' || currentSelection?.type === 'local_agent' || currentSelection?.type === 'in_process_teammate' || currentSelection?.type === 'local_workflow' || currentSelection?.type === 'monitor_mcp' || currentSelection?.type === 'dream' || currentSelection?.type === 'remote_agent') && currentSelection.status === 'running' ? [<KeyboardShortcutHint key="kill" shortcut="x" action="stop" />] : []), ...(agentTasks.some(t => t.status === 'running') ? [<KeyboardShortcutHint key="kill-all" shortcut={killAgentsShortcut} action="stop all agents" />] : []), <KeyboardShortcutHint key="esc" shortcut="←/Esc" action="close" />];
+  const actions = [<KeyboardShortcutHint key="upDown" shortcut="↑/↓" action="select" />, <KeyboardShortcutHint key="enter" shortcut="Enter" action="view" />, ...(currentSelection?.type === 'in_process_teammate' && currentSelection.status === 'running' ? [<KeyboardShortcutHint key="foreground" shortcut="f" action="foreground" />] : []), ...((currentSelection?.type === 'local_bash' || currentSelection?.type === 'local_agent' || currentSelection?.type === 'in_process_teammate' || currentSelection?.type === 'local_workflow' || currentSelection?.type === 'monitor_mcp' || currentSelection?.type === 'dream' || currentSelection?.type === 'remote_agent') && currentSelection.status === 'running' || currentSelection?.type === 'runtime_task' && canStopRuntimeTask(currentSelection.task) ? [<KeyboardShortcutHint key="kill" shortcut="x" action="stop" />] : []), ...(agentTasks.some(t => t.status === 'running') ? [<KeyboardShortcutHint key="kill-all" shortcut={killAgentsShortcut} action="stop all agents" />] : []), <KeyboardShortcutHint key="esc" shortcut="←/Esc" action="close" />];
   const handleCancel = () => onDone('Background tasks dialog dismissed', {
     display: 'system'
   });
@@ -480,9 +517,18 @@ export function BackgroundTasksDialog({
                 </Box>
               </Box>}
 
-            {dreamTasks_0.length > 0 && <Box flexDirection="column" marginTop={teammateTasks.length > 0 || bashTasks.length > 0 || mcpMonitors.length > 0 || remoteSessions.length > 0 || agentTasks.length > 0 || workflowTasks.length > 0 ? 1 : 0}>
+            {runtimeTasks.length > 0 && <Box flexDirection="column" marginTop={teammateTasks.length > 0 || bashTasks.length > 0 || mcpMonitors.length > 0 || remoteSessions.length > 0 || agentTasks.length > 0 || workflowTasks.length > 0 ? 1 : 0}>
+                <Text dimColor>
+                  <Text bold>{'  '}Runtime tasks</Text> ({runtimeTasks.length})
+                </Text>
                 <Box flexDirection="column">
-                  {dreamTasks_0.map(item_11 => <Item key={item_11.id} item={item_11} isSelected={item_11.id === currentSelection?.id} />)}
+                  {runtimeTasks.map(item_11 => <Item key={item_11.id} item={item_11} isSelected={item_11.id === currentSelection?.id} />)}
+                </Box>
+              </Box>}
+
+            {dreamTasks_0.length > 0 && <Box flexDirection="column" marginTop={teammateTasks.length > 0 || bashTasks.length > 0 || mcpMonitors.length > 0 || remoteSessions.length > 0 || agentTasks.length > 0 || workflowTasks.length > 0 || runtimeTasks.length > 0 ? 1 : 0}>
+                <Box flexDirection="column">
+                  {dreamTasks_0.map(item_12 => <Item key={item_12.id} item={item_12} isSelected={item_12.id === currentSelection?.id} />)}
                 </Box>
               </Box>}
           </Box>}
@@ -549,65 +595,59 @@ function toListItem(task: BackgroundTaskState): ListItem {
       };
   }
 }
-function Item(t0) {
-  const $ = _c(14);
-  const {
-    item,
-    isSelected
-  } = t0;
+const TERMINAL_RUNTIME_TASK_STATUSES = new Set(['completed', 'failed', 'killed', 'cancelled']);
+function getRuntimeOnlyTasks(runtimeTasks: Record<string, RuntimeTaskState> | undefined, typedTasks: Record<string, TaskState> | undefined): RuntimeTaskState[] {
+  return Object.values(runtimeTasks ?? {}).filter(task => {
+    if (TERMINAL_RUNTIME_TASK_STATUSES.has(task.status)) {
+      return false;
+    }
+    return !typedTasks?.[task.taskId];
+  });
+}
+function getRuntimeDetailTask(runtimeTasks: Record<string, RuntimeTaskState> | undefined, typedTasks: Record<string, TaskState> | undefined, itemId: string): RuntimeTaskState | undefined {
+  const task = runtimeTasks?.[itemId];
+  if (!task || typedTasks?.[itemId] || TERMINAL_RUNTIME_TASK_STATUSES.has(task.status)) {
+    return undefined;
+  }
+  return task;
+}
+function canStopRuntimeTask(task: RuntimeTaskState): boolean {
+  return !TERMINAL_RUNTIME_TASK_STATUSES.has(task.status);
+}
+function toRuntimeListItem(task: RuntimeTaskState): ListItem {
+  return {
+    id: task.taskId,
+    type: 'runtime_task',
+    label: task.progress?.summary ?? task.description ?? task.title,
+    status: task.status,
+    task
+  };
+}
+function getListItemSortTime(item: ListItem): number {
+  if (item.type === 'leader') {
+    return 0;
+  }
+  if (item.type === 'runtime_task') {
+    return item.task.updatedAt ?? item.task.startedAt ?? item.task.createdAt ?? 0;
+  }
+  return item.task.startTime;
+}
+function Item({
+  item,
+  isSelected
+}: {
+  item: ListItem;
+  isSelected: boolean;
+}) {
   const {
     columns
   } = useTerminalSize();
   const maxActivityWidth = Math.max(30, columns - 26);
-  let t1;
-  if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
-    t1 = isCoordinatorMode();
-    $[0] = t1;
-  } else {
-    t1 = $[0];
-  }
-  const useGreyPointer = t1;
-  const t2 = useGreyPointer && isSelected;
-  const t3 = isSelected ? figures.pointer + " " : "  ";
-  let t4;
-  if ($[1] !== t2 || $[2] !== t3) {
-    t4 = <Text dimColor={t2}>{t3}</Text>;
-    $[1] = t2;
-    $[2] = t3;
-    $[3] = t4;
-  } else {
-    t4 = $[3];
-  }
-  const t5 = isSelected && !useGreyPointer ? "suggestion" : undefined;
-  let t6;
-  if ($[4] !== item.task || $[5] !== item.type || $[6] !== maxActivityWidth) {
-    t6 = item.type === "leader" ? <Text>@{TEAM_LEAD_NAME}</Text> : <BackgroundTaskComponent task={item.task} maxActivityWidth={maxActivityWidth} />;
-    $[4] = item.task;
-    $[5] = item.type;
-    $[6] = maxActivityWidth;
-    $[7] = t6;
-  } else {
-    t6 = $[7];
-  }
-  let t7;
-  if ($[8] !== t5 || $[9] !== t6) {
-    t7 = <Text color={t5}>{t6}</Text>;
-    $[8] = t5;
-    $[9] = t6;
-    $[10] = t7;
-  } else {
-    t7 = $[10];
-  }
-  let t8;
-  if ($[11] !== t4 || $[12] !== t7) {
-    t8 = <Box flexDirection="row">{t4}{t7}</Box>;
-    $[11] = t4;
-    $[12] = t7;
-    $[13] = t8;
-  } else {
-    t8 = $[13];
-  }
-  return t8;
+  const useGreyPointer = isCoordinatorMode();
+  const pointer = <Text dimColor={useGreyPointer && isSelected}>{isSelected ? figures.pointer + ' ' : '  '}</Text>;
+  const color = isSelected && !useGreyPointer ? 'suggestion' : undefined;
+  const content = item.type === 'leader' ? <Text>@{TEAM_LEAD_NAME}</Text> : item.type === 'runtime_task' ? <RuntimeTaskRow task={item.task} maxActivityWidth={maxActivityWidth} /> : <BackgroundTaskComponent task={item.task} maxActivityWidth={maxActivityWidth} />;
+  return <Box flexDirection="row">{pointer}<Text color={color}>{content}</Text></Box>;
 }
 function TeammateTaskGroups(t0) {
   const $ = _c(3);

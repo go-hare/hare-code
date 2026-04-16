@@ -10,7 +10,7 @@ import type { Command } from '../commands.js';
 import { getSlashCommandToolSkills, isBridgeSafeCommand } from '../commands.js';
 import { getRemoteSessionUrl } from '../constants/product.js';
 import { useNotifications } from '../context/notifications.js';
-import type { PermissionMode, SDKMessage } from '../entrypoints/agentSdkTypes.js';
+import type { PermissionMode, SDKMessage } from 'src/sdk/types.js';
 import type { SDKControlResponse } from '../entrypoints/sdk/controlTypes.js';
 import { Text } from '../ink.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';

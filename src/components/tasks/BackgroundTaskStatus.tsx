@@ -4,6 +4,7 @@ import * as React from 'react';
 import { useMemo, useState } from 'react';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import { stringWidth } from 'src/ink/stringWidth.js';
+import { getCliRuntimeTaskSummary, useCliRuntimeHostStateMaybe } from 'src/cli/runtime-host/index.js';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import { enterTeammateView, exitTeammateView } from 'src/state/teammateViewHelpers.js';
 import { isPanelAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
@@ -38,6 +39,8 @@ export function BackgroundTaskStatus(t0) {
     columns
   } = useTerminalSize();
   const tasks = useAppState(_temp);
+  const runtimeHostState = useCliRuntimeHostStateMaybe();
+  const runtimeTaskSummary = getCliRuntimeTaskSummary(runtimeHostState);
   const viewingAgentTaskId = useAppState(_temp2);
   let t3;
   if ($[0] !== tasks) {
@@ -193,7 +196,10 @@ export function BackgroundTaskStatus(t0) {
     return null;
   }
   if (runningTasks.length === 0) {
-    return null;
+    if (!runtimeTaskSummary) {
+      return null;
+    }
+    return <><SummaryPill selected={tasksSelected} onClick={onOpenDialog ? () => onOpenDialog(runtimeTaskSummary.taskId) : undefined}>{runtimeTaskSummary.label}</SummaryPill>{onOpenDialog && <Text dimColor={true}> · {figures.arrowDown} to view</Text>}</>;
   }
   let t8;
   if ($[37] !== runningTasks) {
@@ -203,11 +209,12 @@ export function BackgroundTaskStatus(t0) {
   } else {
     t8 = $[38];
   }
+  const summaryLabel = runtimeTaskSummary?.label ?? t8;
   let t9;
-  if ($[39] !== onOpenDialog || $[40] !== t8 || $[41] !== tasksSelected) {
-    t9 = <SummaryPill selected={tasksSelected} onClick={onOpenDialog}>{t8}</SummaryPill>;
+  if ($[39] !== onOpenDialog || $[40] !== summaryLabel || $[41] !== tasksSelected) {
+    t9 = <SummaryPill selected={tasksSelected} onClick={onOpenDialog}>{summaryLabel}</SummaryPill>;
     $[39] = onOpenDialog;
-    $[40] = t8;
+    $[40] = summaryLabel;
     $[41] = tasksSelected;
     $[42] = t9;
   } else {

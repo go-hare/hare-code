@@ -14,8 +14,11 @@ import { truncateToWidth } from '../utils/format.js';
 import { isTodoV2Enabled, type Task } from '../utils/tasks.js';
 import type { Theme } from '../utils/theme.js';
 import ThemedText from './design-system/ThemedText.js';
+import { RuntimeTaskPanelList } from './tasks/RuntimeTaskPanelList.js';
+import type { TaskState as RuntimeTaskState } from 'src/runtime/types/index.js';
 type Props = {
   tasks: Task[];
+  runtimeTasks?: RuntimeTaskState[];
   isStandalone?: boolean;
 };
 const RECENT_COMPLETED_TTL_MS = 30_000;
@@ -29,8 +32,10 @@ function byIdAsc(a: Task, b: Task): number {
 }
 export function TaskListV2({
   tasks,
+  runtimeTasks = [],
   isStandalone = false
 }: Props): React.ReactNode {
+  const todoEnabled = isTodoV2Enabled();
   const teamContext = useAppState(s => s.teamContext);
   const appStateTasks = useAppState(s_0 => s_0.tasks);
   const [, forceUpdate] = React.useState(0);
@@ -83,10 +88,10 @@ export function TaskListV2({
     const timer = setTimeout(forceUpdate_0 => forceUpdate_0((n: number) => n + 1), earliestExpiry - currentNow, forceUpdate);
     return () => clearTimeout(timer);
   }, [tasks]);
-  if (!isTodoV2Enabled()) {
+  if (!todoEnabled && runtimeTasks.length === 0) {
     return null;
   }
-  if (tasks.length === 0) {
+  if (tasks.length === 0 && runtimeTasks.length === 0) {
     return null;
   }
 
@@ -184,30 +189,32 @@ export function TaskListV2({
     }
     hiddenSummary = ` … +${parts.join(', ')}`;
   }
-  const content = <>
+  const todoContent = todoEnabled && tasks.length > 0 ? <>
       {visibleTasks.map(task_0 => <TaskItem key={task_0.id} task={task_0} ownerColor={task_0.owner ? teammateColors[task_0.owner] : undefined} openBlockers={task_0.blockedBy.filter(id_3 => unresolvedTaskIds.has(id_3))} activity={task_0.owner ? teammateActivity[task_0.owner] : undefined} ownerActive={task_0.owner ? activeTeammates.has(task_0.owner) : false} columns={columns} />)}
       {maxDisplay > 0 && hiddenSummary && <Text dimColor>{hiddenSummary}</Text>}
-    </>;
+    </> : null;
+  const runtimeContent = runtimeTasks.length > 0 ? <RuntimeTaskPanelList tasks={runtimeTasks} showHeader={true} marginTop={tasks.length > 0 ? 1 : 0} /> : null;
   if (isStandalone) {
     return <Box flexDirection="column" marginTop={1} marginLeft={2}>
-        <Box>
-          <Text dimColor>
-            <Text bold>{tasks.length}</Text>
-            {' tasks ('}
-            <Text bold>{completedCount}</Text>
-            {' done, '}
-            {inProgressCount > 0 && <>
-                <Text bold>{inProgressCount}</Text>
-                {' in progress, '}
-              </>}
-            <Text bold>{pendingCount}</Text>
-            {' open)'}
-          </Text>
-        </Box>
-        {content}
+        {tasks.length > 0 && <Box>
+            <Text dimColor>
+              <Text bold>{tasks.length}</Text>
+              {' tasks ('}
+              <Text bold>{completedCount}</Text>
+              {' done, '}
+              {inProgressCount > 0 && <>
+                  <Text bold>{inProgressCount}</Text>
+                  {' in progress, '}
+                </>}
+              <Text bold>{pendingCount}</Text>
+              {' open)'}
+            </Text>
+          </Box>}
+        {todoContent}
+        {runtimeContent}
       </Box>;
   }
-  return <Box flexDirection="column">{content}</Box>;
+  return <Box flexDirection="column">{todoContent}{runtimeContent}</Box>;
 }
 type TaskItemProps = {
   task: Task;

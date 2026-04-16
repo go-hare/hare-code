@@ -144,12 +144,19 @@ export function useAppState<R>(selector: (state: AppState) => R): R {
   const store = useAppStore();
   let t0;
   if ($[0] !== selector || $[1] !== store) {
+    let cachedState: AppState | undefined
+    let cachedSelected: R
     t0 = () => {
       const state = store.getState();
+      if (cachedState === state) {
+        return cachedSelected
+      }
       const selected = selector(state);
       if (false && state === selected) {
         throw new Error(`Your selector in \`useAppState(${selector.toString()})\` returned the original state, which is not allowed. You must instead return a property for optimised rendering.`);
       }
+      cachedState = state
+      cachedSelected = selected
       return selected;
     };
     $[0] = selector;
@@ -188,7 +195,21 @@ export function useAppStateMaybeOutsideOfProvider<R>(selector: (state: AppState)
   const store = useContext(AppStoreContext);
   let t0;
   if ($[0] !== selector || $[1] !== store) {
-    t0 = () => store ? selector(store.getState()) : undefined;
+    let cachedState: AppState | undefined
+    let cachedSelected: R | undefined
+    t0 = () => {
+      if (!store) {
+        return undefined
+      }
+      const state = store.getState()
+      if (cachedState === state) {
+        return cachedSelected
+      }
+      const selected = selector(state)
+      cachedState = state
+      cachedSelected = selected
+      return selected
+    };
     $[0] = selector;
     $[1] = store;
     $[2] = t0;

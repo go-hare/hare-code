@@ -1,10 +1,10 @@
 import { c as _c } from "react/compiler-runtime";
 import figures from 'figures';
 import React, { useCallback, useMemo, useState } from 'react';
+import { buildWorkerTools } from 'src/runtime/tools-default/index.js';
 import { mcpInfoFromString } from 'src/services/mcp/mcpStringUtils.js';
 import { isMcpTool } from 'src/services/mcp/utils.js';
 import type { Tool, Tools } from 'src/Tool.js';
-import { filterToolsForAgent } from 'src/tools/AgentTool/agentToolUtils.js';
 import { AGENT_TOOL_NAME } from 'src/tools/AgentTool/constants.js';
 import { BashTool } from 'src/tools/BashTool/BashTool.js';
 import { ExitPlanModeV2Tool } from 'src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js';
@@ -104,7 +104,7 @@ export function ToolSelector(t0) {
   } = t0;
   let t1;
   if ($[0] !== tools) {
-    t1 = filterToolsForAgent({
+    t1 = buildWorkerTools({
       tools,
       isBuiltIn: false,
       isAsync: false

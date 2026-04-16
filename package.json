@@ -2,20 +2,28 @@
     "name": "hare-code",
     "version": "1.0.0",
     "type": "module",
-    "bin": {
-        "hare-code": "./bin/hare-code.cjs"
+    "exports": {
+        ".": "./dist/sdk.js",
+        "./sdk": "./dist/sdk.js",
+        "./dist/*": "./dist/*",
+        "./package.json": "./package.json"
     },
     "files": [
-        "bin",
-        "dist",
+        "dist/sdk.js",
         "README.md",
         "ENVIRONMENT_VARIABLES.md"
     ],
     "scripts": {
-        "build": "bun build src/entrypoints/cli.tsx --outdir dist --target bun",
-        "build:release": "node scripts/build-release.mjs",
-        "dev": "bun --feature=BUDDY run src/entrypoints/cli.tsx",
+        "build": "node scripts/build-sdk.mjs",
+        "build:sdk-python-runner": "node scripts/build-sdk-python-runner.mjs",
+        "version:sync:siblings": "node scripts/sync-sibling-version.mjs",
+        "version:check:siblings": "node scripts/check-sibling-version.mjs",
+        "version:sync:cli": "node scripts/sync-sibling-version.mjs --only hare-cli",
+        "version:check:cli": "node scripts/check-sibling-version.mjs --only hare-cli",
+        "version:sync:desktop": "node scripts/sync-sibling-version.mjs --only hare-code-desktop",
+        "version:check:desktop": "node scripts/check-sibling-version.mjs --only hare-code-desktop",
         "release:pack": "bun run build && npm pack",
+        "smoke:sdk": "bun run build && bun run scripts/sdk-smoke.ts",
         "wechat": "bun run scripts/wechat-bridge.ts",
         "wechat:login": "bun run scripts/wechat-bridge.ts --login",
         "prepublishOnly": "bun run build"

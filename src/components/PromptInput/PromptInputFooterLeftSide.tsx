@@ -31,6 +31,7 @@ import { KeyboardShortcutHint } from '../design-system/KeyboardShortcutHint.js';
 import { Byline } from '../design-system/Byline.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useTasksV2 } from '../../hooks/useTasksV2.js';
+import { getCliRuntimeTaskPanelTasks, getCliRuntimeTaskSummary, useCliRuntimeHostStateMaybe } from '../../cli/runtime-host/index.js';
 import { formatDuration } from '../../utils/format.js';
 import { VoiceWarmupHint } from './VoiceIndicator.js';
 import { useVoiceEnabled } from '../../hooks/useVoiceEnabled.js';
@@ -250,6 +251,8 @@ function ModeIndicator({
   } = useTerminalSize();
   const modeCycleShortcut = useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
   const tasks = useAppState(s => s.tasks);
+  const runtimeHostState = useCliRuntimeHostStateMaybe();
+  const runtimeTaskSummary = getCliRuntimeTaskSummary(runtimeHostState);
   const teamContext = useAppState(s_0 => s_0.teamContext);
   // Set once in initialState (main.tsx --remote mode) and never mutated — lazy
   // init captures the immutable value without a subscription.
@@ -276,7 +279,8 @@ function ModeIndicator({
   const isCoordinator = feature('COORDINATOR_MODE') ? coordinatorModule?.isCoordinatorMode() === true : false;
   const runningTaskCount = useMemo(() => count(Object.values(tasks), t => isBackgroundTask(t) && !(("external" as string) === 'ant' && isPanelAgentTask(t))), [tasks]);
   const tasksV2 = useTasksV2();
-  const hasTaskItems = tasksV2 !== undefined && tasksV2.length > 0;
+  const runtimeTaskPanelTasks = getCliRuntimeTaskPanelTasks(runtimeHostState);
+  const hasTaskItems = (tasksV2 !== undefined && tasksV2.length > 0) || runtimeTaskPanelTasks.length > 0;
   const escShortcut = useShortcutDisplay('chat:cancel', 'Chat', 'esc').toLowerCase();
   const todosShortcut = useShortcutDisplay('app:toggleTodos', 'Global', 'ctrl+t');
   const killAgentsShortcut = useShortcutDisplay('chat:killAgents', 'Chat', 'ctrl+x ctrl+k');
@@ -322,7 +326,7 @@ function ModeIndicator({
   const viewedTask = viewingAgentTaskId ? tasks[viewingAgentTaskId] : undefined;
   const isViewingTeammate = viewSelectionMode === 'viewing-agent' && viewedTask?.type === 'in_process_teammate';
   const isViewingCompletedTeammate = isViewingTeammate && viewedTask != null && viewedTask.status !== 'running';
-  const hasBackgroundTasks = runningTaskCount > 0 || isViewingTeammate;
+  const hasBackgroundTasks = runningTaskCount > 0 || isViewingTeammate || runtimeTaskSummary !== undefined;
 
   // Count primary items (permission mode or coordinator mode, background tasks, and teams)
   const primaryItemCount = (isCoordinator || hasActiveMode ? 1 : 0) + (hasBackgroundTasks ? 1 : 0) + (hasTeams ? 1 : 0);

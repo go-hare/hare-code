@@ -1,69 +1,35 @@
 # Hare Code
 
-`hare-code` 是从原项目中独立拆分出来的本体仓库，既支持源码安装，也支持作为 Git 依赖直接安装。
+`hare-code` 现在是 SDK-only 包。CLI 已拆到工作区顶层 sibling 包 `../hare-cli`。
 
 ## 快速开始
 
 ### 依赖
 
 - Node.js
-- Bun
+- Bun（仅本地构建时需要）
 
-Windows 安装 Bun：
-
-```powershell
-powershell -c "irm bun.sh/install.ps1 | iex"
-```
-
-### 安装与运行
+### 安装
 
 ```bash
-bun install
-bun run dev
+npm install hare-code
 ```
 
-### 推荐安装方式：GitHub Release 二进制 / tarball
+CLI 请改用 sibling 包 `hare-cli`。
 
-最稳定的安装方式是使用 GitHub Release 中上传的二进制或 `.tgz` 发布包，而不是直接从 Git 仓库源码安装。
+### 版本联动
 
-#### 多平台 release 产物命名
-
-- `hare-code-windows-x64.exe`
-- `hare-code-linux-x64`
-- `hare-code-linux-x64-baseline`
-- `hare-code-linux-arm64`
-- `hare-code-darwin-x64`
-- `hare-code-darwin-arm64`
-- `hare-code-checksums.txt`
-- `hare-code-<version>.tgz`
-
-桌面端和 Python SDK 应该优先消费上面的平台二进制；其中 Linux x64 默认建议优先使用 `hare-code-linux-x64-baseline` 以提升兼容性。`.tgz` 主要给 `npm install -g` 场景。
+当前以 `hare-code` 作为版本真源，`hare-cli` 与 `hare-code-desktop` 都应与它保持同版本号。
 
 ```bash
-# 例子：从 GitHub Release 安装 npm tarball
-npm install -g https://github.com/go-hare/hare-code/releases/download/v1.0.0/hare-code-1.0.0.tgz
-```
+node scripts/sync-sibling-version.mjs --only hare-cli
+node scripts/check-sibling-version.mjs --only hare-cli
+node scripts/sync-sibling-version.mjs --only hare-code-desktop
+node scripts/check-sibling-version.mjs --only hare-code-desktop
 
-这种方式安装的是已经打好的发布工件，不会触发 Git 源码安装时的 workspace / 原生依赖 / 全局安装边界问题。
-
-### Git 直接安装
-
-需要先安装 Bun。即使用 `npm install` 安装，运行 `hare-code` 时也会调用本机 Bun。
-
-Git 安装默认不在安装阶段强制执行预构建；CLI 会优先使用仓库内提交的 `dist/cli.js`。但如果你的环境对 `npm install -g git+https://...` 兼容性较差，优先使用上面的 Release tarball 方案。
-
-```bash
-# npm
-npm install git+https://github.com/go-hare/hare-code.git
-
-# bun
-bun add github:go-hare/hare-code
-```
-
-安装后可直接执行：
-
-```bash
-hare-code --version
+# 或一次性同步 / 校验全部 sibling 包
+node scripts/sync-sibling-version.mjs
+node scripts/check-sibling-version.mjs
 ```
 
 ### 构建
@@ -72,35 +38,88 @@ hare-code --version
 bun run build
 ```
 
-构建产物默认输出到 `dist/cli.js`。
+构建产物默认输出到：
 
-### 生成 Release 包
+- `dist/sdk.js`
+
+### SDK 接入
+
+现在可以通过 `hare-code/sdk` 作为通用 runtime/sdk 入口接入。
+
+```ts
+import {
+  createInMemoryRuntime,
+  createRuntimeServer,
+  createRuntimeClient,
+} from 'hare-code/sdk'
+
+const { client } = await createInMemoryRuntime()
+await client.publishHostEvent({
+  type: 'system',
+  text: 'host ready',
+})
+const turnId = await client.submitInput({
+  text: 'hello runtime',
+})
+const taskId = await client.submitGoal({
+  goal: 'verify task flow',
+})
+const event = await client.waitEvent(1000)
+```
+
+当前这套入口已经覆盖：
+
+- in-memory runtime server
+- session create / list / stop
+- submit input / interrupt
+- submit goal
+- publish host event
+- task control
+- event subscribe / poll / wait / drain
+
+`createHeadlessChatSession()` 当前是**进程级单并发**能力：同一个 Node/Electron 进程里如果需要真正并发跑多个 headless 会话，应改用独立进程或 `RuntimeBridgeServer` 做隔离，而不是在同一进程里直接并发复用多个 headless session。
+
+可以用下面的命令跑最小 smoke：
+
+```bash
+bun run smoke:sdk
+```
+
+### 生成 SDK Release 包
 
 ```bash
 npm run release:pack
-node scripts/build-release.mjs --target windows-x64
 ```
 
-执行后会分别生成：
+执行后会生成当前目录下的 `hare-code-<version>.tgz`。
 
-- 当前目录下的 `hare-code-<version>.tgz`
-- `dist/release/` 下的平台二进制
+### Python SDK Runner 产物
 
-GitHub Actions 发布工作流会按平台矩阵自动生成并上传这些产物。
+`hare-code` release 还会提供给 Python SDK 使用的 headless SDK runner 二进制：
 
-### 版本检查
+- `hare-sdk-python-windows-x64.exe`
+- `hare-sdk-python-linux-x64`
+- `hare-sdk-python-linux-x64-baseline`
+- `hare-sdk-python-linux-arm64`
+- `hare-sdk-python-darwin-x64`
+- `hare-sdk-python-darwin-arm64`
+
+本地可用下面的命令构建：
 
 ```bash
-bun run dev -- --version
+node scripts/build-sdk-python-runner.mjs --target windows-x64
 ```
+
+### CLI
+
+CLI 已移到工作区顶层的 [`hare-cli`](/D:/work/py/reachy_code/hare-cli/README.md)。
 
 ## 仓库结构
 
 ```text
 hare-code/
-  src/        # CLI 本体与核心逻辑
-  packages/   # 本地 workspace 包
-  scripts/    # 辅助脚本
+  src/        # SDK / runtime / bridge / types
+  scripts/    # 构建、版本联动与辅助脚本
 ```
 
 ## 本地 workspace 包
@@ -120,11 +139,14 @@ hare-code/
 ## 常用命令
 
 ```bash
-# 开发模式
-bun run dev
-
-# 构建 CLI
+# 构建 SDK
 bun run build
+
+# SDK smoke
+bun run smoke:sdk
+
+# 统一版本联动
+node scripts/check-sibling-version.mjs
 
 # 微信桥接
 bun run wechat
@@ -139,12 +161,13 @@ bun run wechat:login
 
 ## 当前定位
 
-- `hare-code`：本体仓库，负责 CLI / core
-- `desktop`：单独拆分的桌面端仓库或目录，后续只作为外部调用方
+- `hare-code`：SDK 本体仓库，作为版本真源
+- `hare-cli`：CLI 宿主 sibling 包，版本跟随 SDK
+- `hare-code-desktop`：桌面端宿主 sibling 包，版本跟随 SDK，并直接消费 `hare-code/sdk`
 
 当前仓库目标是先保证：
 
 1. 可以独立 clone
 2. 可以独立 `bun install`
-3. 可以独立 `bun run dev`
-4. 可以独立 `bun run build`
+3. 可以独立 `bun run build`
+4. 可以独立 `bun run smoke:sdk`

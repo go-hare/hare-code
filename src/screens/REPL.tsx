@@ -24,6 +24,7 @@ import { IdleReturnDialog } from '../components/IdleReturnDialog.js';
 import * as React from 'react';
 import { useEffect, useMemo, useRef, useState, useCallback, useDeferredValue, useLayoutEffect, type RefObject } from 'react';
 import { useNotifications } from '../context/notifications.js';
+import { getCliRuntimeTaskPanelTasks, useCliRuntimeHostAdapterMaybe, useCliRuntimeHostStateMaybe } from '../cli/runtime-host/index.js';
 import { sendNotification } from '../services/notifier.js';
 import { startPreventSleep, stopPreventSleep } from '../services/preventSleep.js';
 import { useTerminalNotification } from '../ink/useTerminalNotification.js';
@@ -148,7 +149,7 @@ import { query } from '../query.js';
 import { mergeClients, useMergedClients } from '../hooks/useMergedClients.js';
 import { getQuerySourceForREPL } from '../utils/promptCategory.js';
 import { useMergedTools } from '../hooks/useMergedTools.js';
-import { mergeAndFilterTools } from '../utils/toolPool.js';
+import { buildBuiltinCodingTools, buildMergedCodingTools } from '../runtime/tools-default/index.js';
 import { useMergedCommands } from '../hooks/useMergedCommands.js';
 import { useSkillsChange } from '../hooks/useSkillsChange.js';
 import { useManagePlugins } from '../hooks/useManagePlugins.js';
@@ -163,7 +164,6 @@ import { randomUUID, type UUID } from 'crypto';
 import { processSessionStartHooks } from '../utils/sessionStart.js';
 import { executeSessionEndHooks, getSessionEndHookTimeoutMs } from '../utils/hooks.js';
 import { type IDESelection, useIdeSelection } from '../hooks/useIdeSelection.js';
-import { getTools, assembleToolPool } from '../tools.js';
 import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js';
 import { resolveAgentTools } from '../tools/AgentTool/agentToolUtils.js';
 import { resumeAgentBackground } from '../tools/AgentTool/resumeAgent.js';
@@ -689,12 +689,12 @@ export function REPL({
 
   // BriefTool.isEnabled() reads getUserMsgOptIn() from bootstrap state, which
   // /brief flips mid-session alongside isBriefOnly. The memo below needs a
-  // React-visible dep to re-run getTools() when that happens; isBriefOnly is
+  // React-visible dep to re-run buildBuiltinCodingTools() when that happens; isBriefOnly is
   // the AppState mirror that triggers the re-render. Without this, toggling
   // /brief mid-session leaves the stale tool list (no SendUserMessage) and
   // the model emits plain text the brief filter hides.
   const isBriefOnly = useAppState(s => s.isBriefOnly);
-  const localTools = useMemo(() => getTools(toolPermissionContext), [toolPermissionContext, proactiveActive, isBriefOnly]);
+  const localTools = useMemo(() => buildBuiltinCodingTools(toolPermissionContext), [toolPermissionContext, proactiveActive, isBriefOnly]);
   useKickOffCheckAndDisableBypassPermissionsIfNeeded();
   useKickOffCheckAndDisableAutoModeIfNeeded();
   const [dynamicMcpConfig, setDynamicMcpConfig] = useState<Record<string, ScopedMcpServerConfig> | undefined>(initialDynamicMcpConfig);
@@ -785,7 +785,9 @@ export function REPL({
   useManagePlugins({
     enabled: !isRemoteSession
   });
-  const tasksV2 = useTasksV2WithCollapseEffect();
+  const runtimeHostState = useCliRuntimeHostStateMaybe();
+  const runtimeTaskPanelTasks = getCliRuntimeTaskPanelTasks(runtimeHostState);
+  const tasksV2 = useTasksV2WithCollapseEffect(runtimeTaskPanelTasks.length > 0);
 
   // Start background plugin installations
 
@@ -837,6 +839,9 @@ export function REPL({
   useIdeLogging(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients);
   useIdeSelection(isRemoteSession ? EMPTY_MCP_CLIENTS : mcp.clients, setIDESelection);
   const [streamMode, setStreamMode] = useState<SpinnerMode>('responding');
+  const runtimeHostAdapter = useCliRuntimeHostAdapterMaybe();
+  const runtimeActiveRunIdRef = useRef<string | undefined>(undefined);
+  const runtimeAssistantTextRef = useRef('');
   // Ref mirror so onSubmit can read the latest value without adding
   // streamMode to its deps. streamMode flips between
   // requesting/responding/tool-use ~10x per turn during streaming; having it
@@ -1463,9 +1468,23 @@ export function REPL({
   const reducedMotion = useAppState(s => s.settings.prefersReducedMotion) ?? false;
   const showStreamingText = !reducedMotion && !hasCursorUpViewportYankBug();
   const onStreamingText = useCallback((f: (current: string | null) => string | null) => {
+    const current = runtimeAssistantTextRef.current.length > 0 ? runtimeAssistantTextRef.current : null;
+    const next = f(current);
+    const previousText = current ?? '';
+    const nextText = next ?? '';
+    if (runtimeHostAdapter && runtimeActiveRunIdRef.current && nextText.startsWith(previousText)) {
+      const delta = nextText.slice(previousText.length);
+      if (delta) {
+        runtimeHostAdapter.appendAssistantDelta(runtimeActiveRunIdRef.current, delta);
+        runtimeAssistantTextRef.current = nextText;
+      }
+    }
+    if (next === null) {
+      runtimeAssistantTextRef.current = previousText;
+    }
     if (!showStreamingText) return;
-    setStreamingText(f);
-  }, [showStreamingText]);
+    setStreamingText(() => next);
+  }, [showStreamingText, runtimeHostAdapter]);
 
   // Hide the in-progress source line so text streams line-by-line, not
   // char-by-char. lastIndexOf returns -1 when no newline, giving '' → null.
@@ -2407,8 +2426,11 @@ export function REPL({
     // for mid-query tool list updates.
     const computeTools = () => {
       const state = store.getState();
-      const assembled = assembleToolPool(state.toolPermissionContext, state.mcp.tools);
-      const merged = mergeAndFilterTools(combinedInitialTools, assembled, state.toolPermissionContext.mode);
+      const merged = buildMergedCodingTools({
+        initialTools: combinedInitialTools,
+        permissionContext: state.toolPermissionContext,
+        mcpTools: state.mcp.tools
+      });
       if (!mainThreadAgentDefinition) return merged;
       return resolveAgentTools(mainThreadAgentDefinition, merged, false, true).resolvedTools;
     };
@@ -2857,6 +2879,9 @@ export function REPL({
     await onTurnComplete?.(messagesRef.current);
   }, [initialMcpClients, resetLoadingState, getToolUseContext, toolPermissionContext, setAppState, customSystemPrompt, onTurnComplete, appendSystemPrompt, canUseTool, mainThreadAgentDefinition, onQueryEvent, sessionTitle, titleDisabled]);
   const onQuery = useCallback(async (newMessages: MessageType[], abortController: AbortController, shouldQuery: boolean, additionalAllowedTools: string[], mainLoopModelParam: string, onBeforeQueryCallback?: (input: string, newMessages: MessageType[]) => Promise<boolean>, input?: string, effort?: EffortValue): Promise<void> => {
+    let runtimeRunId: string | undefined;
+    runtimeAssistantTextRef.current = '';
+    runtimeActiveRunIdRef.current = undefined;
     // If this is a teammate, mark them as active when starting a turn
     if (isAgentSwarmsEnabled()) {
       const teamName = getTeamName();
@@ -2919,7 +2944,42 @@ export function REPL({
           return;
         }
       }
+      if (runtimeHostAdapter && input) {
+        try {
+          runtimeHostAdapter.submitInput({
+            conversationId: getSessionId(),
+            text: input,
+            metadata: {
+              source: 'cli_repl'
+            }
+          });
+          runtimeRunId = runtimeHostAdapter.getRuntimeState().activeRunId;
+          runtimeActiveRunIdRef.current = runtimeRunId;
+        } catch (error) {
+          logForDebugging(`runtime host submitInput failed: ${errorMessage(error)}`);
+        }
+      }
       await onQueryImpl(latestMessages, newMessages, abortController, shouldQuery, additionalAllowedTools, mainLoopModelParam, effort);
+      if (runtimeHostAdapter && runtimeRunId) {
+        if (abortController.signal.aborted) {
+          runtimeHostAdapter.failTurn(runtimeRunId, 'aborted');
+        } else {
+          runtimeHostAdapter.completeTurn(runtimeRunId, runtimeAssistantTextRef.current);
+        }
+        runtimeActiveRunIdRef.current = undefined;
+        runtimeAssistantTextRef.current = '';
+      }
+    } catch (error) {
+      if (runtimeHostAdapter && runtimeRunId) {
+        try {
+          runtimeHostAdapter.failTurn(runtimeRunId, errorMessage(error) || 'query failed');
+        } catch (runtimeError) {
+          logForDebugging(`runtime host failTurn failed: ${errorMessage(runtimeError)}`);
+        }
+      }
+      runtimeActiveRunIdRef.current = undefined;
+      runtimeAssistantTextRef.current = '';
+      throw error;
     } finally {
       // queryGuard.end() atomically checks generation and transitions
       // running→idle. Returns false if a newer query owns the guard
@@ -3025,7 +3085,7 @@ export function REPL({
         }
       }
     }
-  }, [onQueryImpl, setAppState, resetLoadingState, queryGuard, mrOnBeforeQuery, mrOnTurnComplete]);
+  }, [onQueryImpl, setAppState, resetLoadingState, queryGuard, mrOnBeforeQuery, mrOnTurnComplete, runtimeHostAdapter]);
 
   // Handle initial message (from CLI args or plan mode exit with context clear)
   // This effect runs when isLoading becomes false and there's a pending message
@@ -4607,8 +4667,8 @@ export function REPL({
                 {toolJSX?.isLocalJSXCommand && toolJSX.isImmediate && !toolJsxCentered && <Box flexDirection="column" width="100%">
                       {toolJSX.jsx}
                     </Box>}
-                {!showSpinner && !toolJSX?.isLocalJSXCommand && showExpandedTodos && tasksV2 && tasksV2.length > 0 && <Box width="100%" flexDirection="column">
-                      <TaskListV2 tasks={tasksV2} isStandalone={true} />
+                {!showSpinner && !toolJSX?.isLocalJSXCommand && showExpandedTodos && ((tasksV2?.length ?? 0) > 0 || runtimeTaskPanelTasks.length > 0) && <Box width="100%" flexDirection="column">
+                      <TaskListV2 tasks={tasksV2 ?? []} runtimeTasks={runtimeTaskPanelTasks} isStandalone={true} />
                     </Box>}
                 {focusedInputDialog === 'sandbox-permission' && <SandboxPermissionRequest key={sandboxPermissionRequestQueue[0]!.hostPattern.host} hostPattern={sandboxPermissionRequestQueue[0]!.hostPattern} onUserResponse={(response: {
             allow: boolean;

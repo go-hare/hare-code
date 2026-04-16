@@ -17,6 +17,7 @@ import { getSpinnerVerbs } from '../constants/spinnerVerbs.js';
 import { MessageResponse } from './MessageResponse.js';
 import { TaskListV2 } from './TaskListV2.js';
 import { useTasksV2 } from '../hooks/useTasksV2.js';
+import { getCliRuntimeTaskPanelTasks, useCliRuntimeHostStateMaybe } from '../cli/runtime-host/index.js';
 import type { Task } from '../utils/tasks.js';
 import { useAppState } from '../state/AppState.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
@@ -120,6 +121,8 @@ function SpinnerWithVerbInner({
     columns
   } = useTerminalSize();
   const tasksV2 = useTasksV2();
+  const runtimeHostState = useCliRuntimeHostStateMaybe();
+  const runtimeTaskPanelTasks = getCliRuntimeTaskPanelTasks(runtimeHostState);
 
   // Track thinking status: 'thinking' | number (duration in ms) | null
   // Shows each state for minimum 2s to avoid UI jank
@@ -280,9 +283,9 @@ function SpinnerWithVerbInner({
   }
   return <Box flexDirection="column" width="100%" alignItems="flex-start">
       <SpinnerAnimationRow mode={mode} reducedMotion={reducedMotion} hasActiveTools={hasActiveTools} responseLengthRef={responseLengthRef} message={message} messageColor={messageColor} shimmerColor={shimmerColor} overrideColor={overrideColor} loadingStartTimeRef={loadingStartTimeRef} totalPausedMsRef={totalPausedMsRef} pauseStartTimeRef={pauseStartTimeRef} spinnerSuffix={spinnerSuffix} verbose={verbose} columns={columns} hasRunningTeammates={hasRunningTeammates} teammateTokens={teammateTokens} foregroundedTeammate={foregroundedTeammate} leaderIsIdle={leaderIsIdle} thinkingStatus={thinkingStatus} effortSuffix={effortSuffix} />
-      {showSpinnerTree && hasRunningTeammates ? <TeammateSpinnerTree selectedIndex={selectedIPAgentIndex} isInSelectionMode={viewSelectionMode === 'selecting-agent'} allIdle={allIdle} leaderVerb={leaderIsIdle ? undefined : leaderVerb} leaderIdleText={leaderIsIdle ? 'Idle' : undefined} leaderTokenCount={leaderTokenCount} /> : showExpandedTodos && tasksV2 && tasksV2.length > 0 ? <Box width="100%" flexDirection="column">
+      {showSpinnerTree && hasRunningTeammates ? <TeammateSpinnerTree selectedIndex={selectedIPAgentIndex} isInSelectionMode={viewSelectionMode === 'selecting-agent'} allIdle={allIdle} leaderVerb={leaderIsIdle ? undefined : leaderVerb} leaderIdleText={leaderIsIdle ? 'Idle' : undefined} leaderTokenCount={leaderTokenCount} /> : showExpandedTodos && ((tasksV2?.length ?? 0) > 0 || runtimeTaskPanelTasks.length > 0) ? <Box width="100%" flexDirection="column">
           <MessageResponse>
-            <TaskListV2 tasks={tasksV2} />
+            <TaskListV2 tasks={tasksV2 ?? []} runtimeTasks={runtimeTaskPanelTasks} />
           </MessageResponse>
         </Box> : nextTask || effectiveTip || budgetText ?
     // IMPORTANT: we need this width="100%" to avoid an Ink bug where the

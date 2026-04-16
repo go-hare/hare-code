@@ -16,12 +16,14 @@ import {
 } from 'src/commands.js'
 import { createStreamlinedTransformer } from 'src/utils/streamlinedTransform.js'
 import { installStreamJsonStdoutGuard } from 'src/utils/streamJsonStdoutGuard.js'
+import {
+  buildMergedCodingTools,
+} from 'src/runtime/tools-default/index.js'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import type { ThinkingConfig } from 'src/utils/thinking.js'
-import { assembleToolPool, filterToolsByDenyRules } from 'src/tools.js'
+import { filterToolsByDenyRules } from 'src/runtime/tools-default/index.js'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { uniq } from 'src/utils/array.js'
-import { mergeAndFilterTools } from 'src/utils/toolPool.js'
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -117,7 +119,7 @@ import type {
   McpServerConfigForProcessTransport,
   McpServerStatus,
   RewindFilesResult,
-} from 'src/entrypoints/agentSdkTypes.js'
+} from 'src/sdk/types.js'
 import type {
   StdoutMessage,
   SDKControlInitializeRequest,
@@ -193,7 +195,7 @@ import { installOAuthTokens } from 'src/cli/handlers/auth.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import type { HookCallbackMatcher } from 'src/types/hooks.js'
 import { AwsAuthStatusManager } from 'src/utils/awsAuthStatusManager.js'
-import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js'
+import type { HookEvent } from 'src/sdk/types.js'
 import {
   registerHookCallbacks,
   setInitJsonSchema,
@@ -1474,18 +1476,11 @@ function runHeadlessStreaming(
   // Closes over the mutable sdkTools/dynamicMcpState bindings so both call
   // sites see late-connecting servers.
   const buildAllTools = (appState: AppState): Tools => {
-    const assembledTools = assembleToolPool(
-      appState.toolPermissionContext,
-      appState.mcp.tools,
-    )
-    let allTools = uniqBy(
-      mergeAndFilterTools(
-        [...tools, ...sdkTools, ...dynamicMcpState.tools],
-        assembledTools,
-        appState.toolPermissionContext.mode,
-      ),
-      'name',
-    )
+    let allTools = buildMergedCodingTools({
+      initialTools: [...tools, ...sdkTools, ...dynamicMcpState.tools],
+      permissionContext: appState.toolPermissionContext,
+      mcpTools: appState.mcp.tools,
+    })
     if (options.permissionPromptToolName) {
       allTools = allTools.filter(
         tool => !toolMatchesName(tool, options.permissionPromptToolName!),

@@ -233,18 +233,20 @@ export function useTasksV2(): Task[] | undefined {
  * becomes hidden. Call this from exactly one always-mounted component (REPL)
  * so the collapse effect runs once instead of N× per consumer.
  */
-export function useTasksV2WithCollapseEffect(): Task[] | undefined {
+export function useTasksV2WithCollapseEffect(
+  keepExpandedWhenVisible: boolean = false,
+): Task[] | undefined {
   const tasks = useTasksV2()
   const setAppState = useSetAppState()
 
   const hidden = tasks === undefined
   useEffect(() => {
-    if (!hidden) return
+    if (!hidden || keepExpandedWhenVisible) return
     setAppState(prev => {
       if (prev.expandedView !== 'tasks') return prev
       return { ...prev, expandedView: 'none' as const }
     })
-  }, [hidden, setAppState])
+  }, [hidden, keepExpandedWhenVisible, setAppState])
 
   return tasks
 }

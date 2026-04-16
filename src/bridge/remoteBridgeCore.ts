@@ -64,7 +64,7 @@ import {
 } from '../services/analytics/index.js'
 import type { ReplBridgeHandle, BridgeState } from './replBridge.js'
 import type { Message } from '../types/message.js'
-import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
+import type { SDKMessage } from 'src/sdk/types.js'
 import type {
   SDKControlRequest,
   SDKControlResponse,

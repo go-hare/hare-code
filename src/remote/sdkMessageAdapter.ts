@@ -8,7 +8,7 @@ import type {
   SDKSystemMessage,
   SDKToolProgressMessage,
   SDKUserMessage,
-} from '../entrypoints/agentSdkTypes.js'
+} from 'src/sdk/types.js'
 import type {
   AssistantMessage,
   Message,
