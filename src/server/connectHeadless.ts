@@ -1,3 +1,1 @@
-// Auto-generated stub — replace with real implementation
-export {};
-export const runConnectHeadless: (...args: unknown[]) => Promise<void> = () => Promise.resolve();
+export { runConnectHeadlessHost as runConnectHeadless } from '../hosts/server/index.js'

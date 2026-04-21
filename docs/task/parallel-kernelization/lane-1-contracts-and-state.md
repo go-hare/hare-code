@@ -66,3 +66,23 @@ Only edit:
 
 - any contract that cannot represent current execution semantics
 - any state field whose owner is ambiguous
+
+## Lane 1 Notes
+
+### Ownership Notes
+
+- `src/runtime/core/state/ownership.ts` now carries the field-by-field
+  `bootstrap/state.ts` ownership map plus module-scope state ownership.
+- First-pass runtime AppState for execution is intentionally narrow:
+  `toolPermissionContext`, `fileHistory`, `attribution`, `fastMode`.
+  Everything else stays host-owned or deferred to later capability lanes.
+
+### Blockers
+
+- `bootstrap/state.ts` still keeps turn-budget state in module scope
+  (`outputTokensAtTurnStart`, `currentTurnTokenBudget`,
+  `budgetContinuationCount`). Lane 1 exposed adapters for it, but lane 2
+  still needs to consume providers instead of raw globals.
+- `replBridgeActive` is conditionally injected during bootstrap while
+  `isReplBridgeActive()` is still a stub. Clean ownership of live bridge
+  state needs lane 5 wiring and should not be normalized from lane 1.

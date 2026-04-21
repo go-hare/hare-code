@@ -44,18 +44,29 @@ import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import { getOauthConfig } from '../../constants/oauth.js'
 import { PRODUCT_URL } from '../../constants/product.js'
+import {
+  areMcpConfigsEqual as areRuntimeMcpConfigsEqual,
+  clearMcpLifecycleCaches,
+  describeMcpServerPlan,
+  getMcpServerConnectionBatchSize as getRuntimeMcpServerConnectionBatchSize,
+  getRemoteMcpServerConnectionBatchSize,
+  getServerCacheKey as getRuntimeMcpServerCacheKey,
+  partitionMcpConfigEntries,
+} from '../../runtime/capabilities/mcp/McpRegistry.js'
+import {
+  createMcpConnectionBinding,
+  createMcpTransportBinding,
+} from '../../runtime/capabilities/mcp/McpSessionBinding.js'
 import type { AppState } from '../../state/AppState.js'
 import {
   type Tool,
   type ToolCallProgress,
-  toolMatchesName,
 } from '../../Tool.js'
 import { ListMcpResourcesTool } from '@claude-code-best/builtin-tools/tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
 import { type MCPProgress, MCPTool } from '@claude-code-best/builtin-tools/tools/MCPTool/MCPTool.js'
 import { createMcpAuthTool } from '@claude-code-best/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
 import { ReadMcpResourceTool } from '@claude-code-best/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { createAbortController } from '../../utils/abortController.js'
-import { count } from '../../utils/array.js'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
@@ -257,6 +268,11 @@ import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 const MCP_AUTH_CACHE_TTL_MS = 15 * 60 * 1000 // 15 min
 
 type McpAuthCacheData = Record<string, { timestamp: number }>
+
+const mcpTransportBinding = createMcpTransportBinding({
+  getSessionId,
+  getOriginalCwd,
+})
 
 function getMcpAuthCachePath(): string {
   return join(getClaudeConfigHomeDir(), 'mcp-needs-auth-cache.json')
@@ -549,20 +565,8 @@ export function wrapFetchWithTimeout(baseFetch: FetchLike): FetchLike {
   }
 }
 
-export function getMcpServerConnectionBatchSize(): number {
-  return parseInt(process.env.MCP_SERVER_CONNECTION_BATCH_SIZE || '', 10) || 3
-}
-
-function getRemoteMcpServerConnectionBatchSize(): number {
-  return (
-    parseInt(process.env.MCP_REMOTE_SERVER_CONNECTION_BATCH_SIZE || '', 10) ||
-    20
-  )
-}
-
-function isLocalMcpServer(config: ScopedMcpServerConfig): boolean {
-  return !config.type || config.type === 'stdio' || config.type === 'sdk'
-}
+export const getMcpServerConnectionBatchSize =
+  getRuntimeMcpServerConnectionBatchSize
 
 // For the IDE MCP servers, we only include specific tools
 const ALLOWED_IDE_TOOLS = ['mcp__ide__executeCode', 'mcp__ide__getDiagnostics']
@@ -572,18 +576,7 @@ function isIncludedMcpTool(tool: Tool): boolean {
   )
 }
 
-/**
- * Generates the cache key for a server connection
- * @param name Server name
- * @param serverRef Server configuration
- * @returns Cache key string
- */
-export function getServerCacheKey(
-  name: string,
-  serverRef: ScopedMcpServerConfig,
-): string {
-  return `${name}-${jsonStringify(serverRef)}`
-}
+export const getServerCacheKey = getRuntimeMcpServerCacheKey
 
 /**
  * TODO (ollie): The memoization here increases complexity by a lot, and im not sure it really improves performance
@@ -892,7 +885,7 @@ export const connectToServer = memoize(
             ...proxyOptions,
             headers: {
               'User-Agent': getMCPUserAgent(),
-              'X-Mcp-Client-Session-Id': getSessionId(),
+              ...mcpTransportBinding.getRequestHeaders(),
             },
           },
         }
@@ -1009,13 +1002,7 @@ export const connectToServer = memoize(
 
       client.setRequestHandler(ListRootsRequestSchema, async () => {
         logMCPDebug(name, `Received ListRoots request from server`)
-        return {
-          roots: [
-            {
-              uri: `file://${getOriginalCwd()}`,
-            },
-          ],
-        }
+        return mcpTransportBinding.getRoots()
       })
 
       // Add a timeout to connection attempts to prevent tests from hanging indefinitely
@@ -1381,20 +1368,15 @@ export const connectToServer = memoize(
           `${transportType.toUpperCase()} connection closed after ${Math.floor(uptime / 1000)}s (${hasErrorOccurred ? 'with errors' : 'cleanly'})`,
         )
 
-        // Clear the memoization cache so next operation reconnects
-        const key = getServerCacheKey(name, serverRef)
-
-        // Also clear fetch caches (keyed by server name). Reconnection
-        // creates a new connection object; without clearing, the next
-        // fetch would return stale tools/resources from the old connection.
-        fetchToolsForClient.cache.delete(name)
-        fetchResourcesForClient.cache.delete(name)
-        fetchCommandsForClient.cache.delete(name)
-        if (feature('MCP_SKILLS')) {
-          fetchMcpSkillsForClient!.cache.delete(name)
-        }
-
-        connectToServer.cache.delete(key)
+        clearMcpLifecycleCaches(name, serverRef, {
+          connectionCache: connectToServer.cache,
+          toolsCache: fetchToolsForClient.cache,
+          resourcesCache: fetchResourcesForClient.cache,
+          commandsCache: fetchCommandsForClient.cache,
+          ...(feature('MCP_SKILLS')
+            ? { skillsCache: fetchMcpSkillsForClient!.cache }
+            : {}),
+        })
         logMCPDebug(name, `Cleared connection cache for reconnection`)
 
         if (originalOnclose) {
@@ -1650,8 +1632,6 @@ export async function clearServerCache(
   name: string,
   serverRef: ScopedMcpServerConfig,
 ): Promise<void> {
-  const key = getServerCacheKey(name, serverRef)
-
   try {
     const wrappedClient = await connectToServer(name, serverRef)
 
@@ -1662,15 +1642,15 @@ export async function clearServerCache(
     // Ignore errors - server might have failed to connect
   }
 
-  // Clear from cache (both connection and fetch caches so reconnect
-  // fetches fresh tools/resources/commands instead of stale ones)
-  connectToServer.cache.delete(key)
-  fetchToolsForClient.cache.delete(name)
-  fetchResourcesForClient.cache.delete(name)
-  fetchCommandsForClient.cache.delete(name)
-  if (feature('MCP_SKILLS')) {
-    fetchMcpSkillsForClient!.cache.delete(name)
-  }
+  clearMcpLifecycleCaches(name, serverRef, {
+    connectionCache: connectToServer.cache,
+    toolsCache: fetchToolsForClient.cache,
+    resourcesCache: fetchResourcesForClient.cache,
+    commandsCache: fetchCommandsForClient.cache,
+    ...(feature('MCP_SKILLS')
+      ? { skillsCache: fetchMcpSkillsForClient!.cache }
+      : {}),
+  })
 }
 
 /**
@@ -1708,19 +1688,7 @@ export async function ensureConnectedClient(
  * Compares two MCP server configurations to determine if they are equivalent.
  * Used to detect when a server needs to be reconnected due to config changes.
  */
-export function areMcpConfigsEqual(
-  a: ScopedMcpServerConfig,
-  b: ScopedMcpServerConfig,
-): boolean {
-  // Quick type check first
-  if (a.type !== b.type) return false
-
-  // Compare by serializing - this handles all config variations
-  // We exclude 'scope' from comparison since it's metadata, not connection config
-  const { scope: _scopeA, ...configA } = a
-  const { scope: _scopeB, ...configB } = b
-  return jsonStringify(configA) === jsonStringify(configB)
-}
+export const areMcpConfigsEqual = areRuntimeMcpConfigsEqual
 
 // Max cache size for fetch* caches. Keyed by server name (stable across
 // reconnects), bounded to prevent unbounded growth with many MCP servers.
@@ -2168,6 +2136,10 @@ export async function reconnectMcpServerImpl(
     }
 
     const supportsResources = !!client.capabilities?.resources
+    const connectionBinding = createMcpConnectionBinding([
+      ListMcpResourcesTool,
+      ReadMcpResourceTool,
+    ])
 
     const [tools, mcpCommands, mcpSkills, resources] = await Promise.all([
       fetchToolsForClient(client),
@@ -2179,24 +2151,13 @@ export async function reconnectMcpServerImpl(
     ])
     const commands = [...mcpCommands, ...mcpSkills]
 
-    // Check if we need to add resource tools
-    const resourceTools: Tool[] = []
-    if (supportsResources) {
-      // Only add resource tools if no other server has them
-      const hasResourceTools = [ListMcpResourcesTool, ReadMcpResourceTool].some(
-        tool => tools.some(t => toolMatchesName(t, tool.name)),
-      )
-      if (!hasResourceTools) {
-        resourceTools.push(ListMcpResourcesTool, ReadMcpResourceTool)
-      }
-    }
-
-    return {
+    return connectionBinding.bindConnectedServer({
       client,
-      tools: [...tools, ...resourceTools],
+      tools,
       commands,
-      resources: resources.length > 0 ? resources : undefined,
-    }
+      resources,
+      mode: 'per-resource-server',
+    })
   } catch (error) {
     // Handle errors gracefully - connection might have closed during fetch
     logMCPError(name, `Error during reconnection: ${errorMessage(error)}`)
@@ -2233,52 +2194,28 @@ export async function getMcpToolsCommandsAndResources(
   }) => void,
   mcpConfigs?: Record<string, ScopedMcpServerConfig>,
 ): Promise<void> {
-  let resourceToolsAdded = false
+  const connectionBinding = createMcpConnectionBinding([
+    ListMcpResourcesTool,
+    ReadMcpResourceTool,
+  ])
 
   const allConfigEntries = Object.entries(
     mcpConfigs ?? (await getAllMcpConfigs()).servers,
   )
 
-  // Partition into disabled and active entries — disabled servers should
-  // never generate HTTP connections or flow through batch processing
-  const configEntries: typeof allConfigEntries = []
-  for (const entry of allConfigEntries) {
-    if (isMcpServerDisabled(entry[0])) {
-      onConnectionAttempt({
-        client: { name: entry[0], type: 'disabled', config: entry[1] },
-        tools: [],
-        commands: [],
-      })
-    } else {
-      configEntries.push(entry)
-    }
+  const { activeEntries: configEntries, disabledEntries } =
+    partitionMcpConfigEntries(allConfigEntries, isMcpServerDisabled)
+
+  for (const [name, config] of disabledEntries) {
+    onConnectionAttempt({
+      client: { name, type: 'disabled', config },
+      tools: [],
+      commands: [],
+    })
   }
 
-  // Calculate transport counts for logging
-  const totalServers = configEntries.length
-  const stdioCount = count(configEntries, ([_, c]) => c.type === 'stdio')
-  const sseCount = count(configEntries, ([_, c]) => c.type === 'sse')
-  const httpCount = count(configEntries, ([_, c]) => c.type === 'http')
-  const sseIdeCount = count(configEntries, ([_, c]) => c.type === 'sse-ide')
-  const wsIdeCount = count(configEntries, ([_, c]) => c.type === 'ws-ide')
-
-  // Split servers by type: local (stdio/sdk) need lower concurrency due to
-  // process spawning, remote servers can connect with higher concurrency
-  const localServers = configEntries.filter(([_, config]) =>
-    isLocalMcpServer(config),
-  )
-  const remoteServers = configEntries.filter(
-    ([_, config]) => !isLocalMcpServer(config),
-  )
-
-  const serverStats = {
-    totalServers,
-    stdioCount,
-    sseCount,
-    httpCount,
-    sseIdeCount,
-    wsIdeCount,
-  }
+  const { localServers, remoteServers, serverStats } =
+    describeMcpServerPlan(configEntries)
 
   const processServer = async ([name, config]: [
     string,
@@ -2314,11 +2251,13 @@ export async function getMcpToolsCommandsAndResources(
             hasMcpDiscoveryButNoToken(name, config)))
       ) {
         logMCPDebug(name, `Skipping connection (cached needs-auth)`)
-        onConnectionAttempt({
-          client: { name, type: 'needs-auth' as const, config },
-          tools: [createMcpAuthTool(name, config)],
-          commands: [],
-        })
+        onConnectionAttempt(
+          connectionBinding.bindNeedsAuth(
+            name,
+            config,
+            createMcpAuthTool(name, config),
+          ),
+        )
         return
       }
 
@@ -2329,7 +2268,11 @@ export async function getMcpToolsCommandsAndResources(
           client,
           tools:
             client.type === 'needs-auth'
-              ? [createMcpAuthTool(name, config)]
+              ? connectionBinding.bindNeedsAuth(
+                  name,
+                  config,
+                  createMcpAuthTool(name, config),
+                ).tools
               : [],
           commands: [],
         })
@@ -2356,20 +2299,15 @@ export async function getMcpToolsCommandsAndResources(
       ])
       const commands = [...mcpCommands, ...mcpSkills]
 
-      // If this server resources and we haven't added resource tools yet,
-      // include our resource tools with this client's tools
-      const resourceTools: Tool[] = []
-      if (supportsResources && !resourceToolsAdded) {
-        resourceToolsAdded = true
-        resourceTools.push(ListMcpResourcesTool, ReadMcpResourceTool)
-      }
-
-      onConnectionAttempt({
-        client,
-        tools: [...tools, ...resourceTools],
-        commands,
-        resources: resources.length > 0 ? resources : undefined,
-      })
+      onConnectionAttempt(
+        connectionBinding.bindConnectedServer({
+          client,
+          tools,
+          commands,
+          resources,
+          mode: 'once-per-session',
+        }),
+      )
     } catch (error) {
       // Handle errors gracefully - connection might have closed during fetch
       logMCPError(

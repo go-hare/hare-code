@@ -244,6 +244,10 @@ const usageReport: Command = {
 }
 import oauthRefresh from './commands/oauth-refresh/index.js'
 import debugToolCall from './commands/debug-tool-call/index.js'
+import {
+  createRuntimeCommandGraph,
+  type RuntimeCommandGraphEntry,
+} from './runtime/capabilities/commands/runtimeCommandGraph.js'
 import { getSettingSourceName } from './utils/settings/constants.js'
 import {
   type Command,
@@ -261,6 +265,7 @@ export type {
   PromptCommand,
   ResumeEntrypoint,
 } from './types/command.js'
+export type { RuntimeCommandGraphEntry }
 export { getCommandName, isCommandEnabled } from './types/command.js'
 
 // Commands that get eliminated from the external build
@@ -818,4 +823,10 @@ export function formatDescriptionWithSource(cmd: Command): string {
   }
 
   return `${cmd.description} (${getSettingSourceName(cmd.source)})`
+}
+
+export async function getRuntimeCommandGraph(
+  cwd: string,
+): Promise<RuntimeCommandGraphEntry[]> {
+  return createRuntimeCommandGraph(await getCommands(cwd))
 }

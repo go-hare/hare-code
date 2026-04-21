@@ -15,6 +15,7 @@ export type DirectConnectConfig = {
   sessionId: string
   wsUrl: string
   authToken?: string
+  unixSocket?: string
 }
 
 export type DirectConnectCallbacks = {
@@ -55,6 +56,7 @@ export class DirectConnectSessionManager {
     // Bun's WebSocket supports headers option but the DOM typings don't
     this.ws = new WebSocket(this.config.wsUrl, {
       headers,
+      ...(this.config.unixSocket ? { unix: this.config.unixSocket } : {}),
     } as unknown as string[])
 
     this.ws.addEventListener('open', () => {

@@ -102,17 +102,15 @@ import { handleStopHooks } from './query/stopHooks.js'
 import { buildQueryConfig } from './query/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
 import type { Terminal, Continue } from './query/transitions.js'
+import { createTurnEngine } from './runtime/capabilities/execution/TurnEngine.js'
 import { feature } from 'bun:bundle'
 import {
   getCurrentTurnTokenBudget,
   getTurnOutputTokens,
   incrementBudgetContinuationCount,
-  getSessionId,
 } from './bootstrap/state.js'
 import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
 import { count } from './utils/array.js'
-import { createTrace, endTrace, isLangfuseEnabled } from './services/langfuse/index.js'
-import { getAPIProvider } from './utils/model/providers.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const snipModule = feature('HISTORY_SNIP')
@@ -229,56 +227,11 @@ export async function* query(
   | ToolUseSummaryMessage,
   Terminal
 > {
-  const consumedCommandUuids: string[] = []
-
-  // Create Langfuse trace for this query turn (no-op if not configured).
-  // When called as a sub-agent, langfuseTrace is already set by runAgent()
-  // — reuse it instead of creating an independent trace.
-  const ownsTrace = !params.toolUseContext.langfuseTrace
-  logForDebugging(
-    `[query] ownsTrace=${ownsTrace} incoming langfuseTrace=${params.toolUseContext.langfuseTrace ? 'present' : 'null/undefined'} isLangfuseEnabled=${isLangfuseEnabled()}`,
-  )
-  const langfuseTrace = params.toolUseContext.langfuseTrace
-    ?? (isLangfuseEnabled()
-      ? createTrace({
-          sessionId: getSessionId(),
-          model: params.toolUseContext.options.mainLoopModel,
-          provider: getAPIProvider(),
-          input: params.messages,
-          querySource: params.querySource,
-        })
-      : null)
-
-  // Attach trace to toolUseContext so tool execution can record observations
-  const paramsWithTrace: QueryParams = langfuseTrace
-    ? {
-        ...params,
-        toolUseContext: { ...params.toolUseContext, langfuseTrace },
-      }
-    : params
-
-  let terminal: Terminal | undefined
-  try {
-    terminal = yield* queryLoop(paramsWithTrace, consumedCommandUuids)
-  } finally {
-    // Only end the trace if we created it — sub-agents own their traces
-    if (ownsTrace) {
-      const isAborted =
-        terminal?.reason === 'aborted_streaming' ||
-        terminal?.reason === 'aborted_tools'
-      endTrace(langfuseTrace, undefined, isAborted ? 'interrupted' : undefined)
-    }
-  }
-
-  // Only reached if queryLoop returned normally. Skipped on throw (error
-  // propagates through yield*) and on .return() (Return completion closes
-  // both generators). This gives the same asymmetric started-without-completed
-  // signal as print.ts's drainCommandQueue when the turn fails.
-  for (const uuid of consumedCommandUuids) {
-    notifyCommandLifecycle(uuid, 'completed')
-  }
-  // biome-ignore lint/style/noNonNullAssertion: terminal is always assigned when queryLoop returns normally
-  return terminal!
+  const turnEngine = createTurnEngine({
+    runLoop: queryLoop,
+    onCommandCompleted: uuid => notifyCommandLifecycle(uuid, 'completed'),
+  })
+  return yield* turnEngine.execute(params)
 }
 
 async function* queryLoop(

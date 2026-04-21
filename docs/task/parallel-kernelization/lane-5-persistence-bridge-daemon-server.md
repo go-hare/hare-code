@@ -75,3 +75,17 @@ Only edit:
 
 - any missing runtime session contract needed by bridge/server
 - any cross-lane dependency on command or REPL code
+
+## Current Blockers
+
+1. `src/runtime/contracts/**` / `src/runtime/core/**` are appearing in parallel
+   in this worktree, but the shared runtime session contract is still in
+   flight. Lane 5 therefore only binds through capability-local wrappers for
+   now; final bridge/server wiring still needs the contract shape to stabilize.
+2. Direct-connect `cc+unix://` is only partially covered here: URL parsing and
+   client/server transport metadata are wired, but end-to-end websocket over
+   unix socket still lacks verification in this workspace.
+3. Full repository `bun run typecheck` is not a reliable gate in this checkout:
+   it currently fails on unrelated workspace issues (`Bun` ambient types,
+   missing `bun:test`, missing transitive packages like `is-safe-filename` /
+   `is-plain-obj`).

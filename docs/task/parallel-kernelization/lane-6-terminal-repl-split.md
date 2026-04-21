@@ -67,3 +67,11 @@ Only edit:
 
 - any runtime interaction contract missing from other lanes
 - any need to change bridge/daemon/server code
+
+## Current Blocker Notes
+
+- Full extraction of `onSubmit` / queued-input / `onQuery` orchestration out of
+  `src/screens/REPL.tsx` is still blocked on a runtime-owned interaction/session
+  contract from lanes 2 and 4. Lane 6 can move command parsing and terminal
+  shell state now, but cannot finish the runtime handoff without crossing the
+  execution-core boundary.

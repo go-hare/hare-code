@@ -30,6 +30,14 @@ export type SessionState =
   | 'stopping'
   | 'stopped'
 
+export type DirectConnectConfig = {
+  serverUrl: string
+  sessionId: string
+  wsUrl: string
+  authToken?: string
+  unixSocket?: string
+}
+
 export type SessionInfo = {
   id: string
   status: SessionState

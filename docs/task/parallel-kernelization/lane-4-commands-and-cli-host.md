@@ -68,3 +68,14 @@ Only edit:
 
 - any command that still requires direct UI ownership
 - any command flow that depends on REPL monolith internals
+
+## Blockers Encountered
+
+- `server` and `assistant` are now modeled in the runtime-owned CLI graph, but
+  their actual execution paths still depend on pre-existing server/bridge
+  stacks outside lane 4 write scope. Final runtime-backed dispatch is blocked on
+  lane 2 / lane 5 / lane 6 convergence.
+- Slash commands now have a runtime graph export, but the executable
+  `RuntimeCommandResolver` layer still depends on the REPL/execution split that
+  lane 4 is not allowed to implement in `src/screens/REPL.tsx` or
+  `src/query.ts`.

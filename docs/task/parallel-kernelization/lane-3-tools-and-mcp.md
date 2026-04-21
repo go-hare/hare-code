@@ -68,3 +68,6 @@ Only edit:
 
 - any need to change execution/session ownership
 - any MCP session behavior that depends on files outside write scope
+- Current MCP transport binding still has to read session id / cwd from
+  `src/bootstrap/state.ts` via an adapter because runtime session identity and
+  root ownership have not yet moved behind a lane-1/lane-2 runtime contract.
