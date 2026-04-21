@@ -68,7 +68,10 @@ export function getAgentModel(
 
   // Prioritize tool-specified model if provided
   if (toolSpecifiedModel) {
-    if (aliasMatchesParentTier(toolSpecifiedModel, parentModel)) {
+    if (
+      aliasMatchesParentTier(toolSpecifiedModel, parentModel) ||
+      shouldInheritParentForOpenAIAlias(toolSpecifiedModel)
+    ) {
       return parentModel
     }
     const model = parseUserSpecifiedModel(toolSpecifiedModel)
@@ -87,7 +90,10 @@ export function getAgentModel(
     })
   }
 
-  if (aliasMatchesParentTier(agentModelWithExp, parentModel)) {
+  if (
+    aliasMatchesParentTier(agentModelWithExp, parentModel) ||
+    shouldInheritParentForOpenAIAlias(agentModelWithExp)
+  ) {
     return parentModel
   }
   const model = parseUserSpecifiedModel(agentModelWithExp)
@@ -118,6 +124,39 @@ function aliasMatchesParentTier(alias: string, parentModel: string): boolean {
       return canonical.includes('haiku')
     default:
       return false
+  }
+}
+
+function shouldInheritParentForOpenAIAlias(alias: string): boolean {
+  if (getAPIProvider() !== 'openai') {
+    return false
+  }
+
+  const family = getBareFamilyAlias(alias)
+  if (!family) {
+    return false
+  }
+
+  if (process.env.OPENAI_MODEL) {
+    return false
+  }
+
+  return (
+    !process.env[`OPENAI_DEFAULT_${family}_MODEL`] &&
+    !process.env[`ANTHROPIC_DEFAULT_${family}_MODEL`]
+  )
+}
+
+function getBareFamilyAlias(alias: string): 'HAIKU' | 'SONNET' | 'OPUS' | null {
+  switch (alias.toLowerCase()) {
+    case 'haiku':
+      return 'HAIKU'
+    case 'sonnet':
+      return 'SONNET'
+    case 'opus':
+      return 'OPUS'
+    default:
+      return null
   }
 }
 
