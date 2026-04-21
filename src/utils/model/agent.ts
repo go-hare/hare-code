@@ -137,10 +137,6 @@ function shouldInheritParentForOpenAIAlias(alias: string): boolean {
     return false
   }
 
-  if (process.env.OPENAI_MODEL) {
-    return false
-  }
-
   return (
     !process.env[`OPENAI_DEFAULT_${family}_MODEL`] &&
     !process.env[`ANTHROPIC_DEFAULT_${family}_MODEL`]
