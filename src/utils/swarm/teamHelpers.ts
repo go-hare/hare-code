@@ -11,7 +11,7 @@ import { gitExe } from '../git.js'
 import { lazySchema } from '../lazySchema.js'
 import type { PermissionMode } from '../permissions/PermissionMode.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
-import { getTasksDir, notifyTasksUpdated } from '../tasks.js'
+import { clearLeaderTeamName, getTasksDir, notifyTasksUpdated } from '../tasks.js'
 import { getAgentName, getTeamName, isTeammate } from '../teammate.js'
 import { type BackendType, isPaneBackend } from './backends/types.js'
 import { TEAM_LEAD_NAME } from './constants.js'
@@ -587,6 +587,10 @@ export async function cleanupSessionTeams(): Promise<void> {
   await Promise.allSettled(teams.map(name => killOrphanedTeammatePanes(name)))
   await Promise.allSettled(teams.map(name => cleanupTeamDirectories(name)))
   sessionCreatedTeams.clear()
+  // Assistant mode and team sessions route leader tasks through the team name.
+  // Once all session-created teams are gone, clear the process-local override
+  // so follow-up standalone work falls back to the real session ID.
+  clearLeaderTeamName()
 }
 
 /**

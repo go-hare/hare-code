@@ -48,3 +48,5 @@ export {
   type SessionInfo,
   type SessionState,
 } from '../server/types.js'
+export * from './bridge.js'
+export * from './daemon.js'
