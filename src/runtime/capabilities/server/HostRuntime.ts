@@ -282,15 +282,21 @@ export async function runConnectHeadlessRuntime(
     return
   }
 
-  if (finalResult.subtype !== 'success') {
-    throw new Error(finalResult.errors.join('\n'))
+  const resultMessage = finalResult as {
+    subtype?: string
+    errors?: string[]
+    result?: string
   }
 
-  if (finalResult.result) {
+  if (resultMessage.subtype !== 'success') {
+    throw new Error(resultMessage.errors?.join('\n') ?? 'Direct-connect failed')
+  }
+
+  if (resultMessage.result) {
     writeToStdout(
-      finalResult.result.endsWith('\n')
-        ? finalResult.result
-        : `${finalResult.result}\n`,
+      resultMessage.result.endsWith('\n')
+        ? resultMessage.result
+        : `${resultMessage.result}\n`,
     )
   }
 }

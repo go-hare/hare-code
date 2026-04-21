@@ -1,3 +1,4 @@
+import type { UUID } from 'crypto'
 import type { LogOption } from '../../../types/logs.js'
 import type { Message } from '../../../types/message.js'
 
@@ -14,7 +15,7 @@ export function createTranscriptStore(): RuntimeTranscriptStore {
       const { recordTranscript } = await import(
         '../../../utils/sessionStorage.js'
       )
-      return recordTranscript(messages)
+      await recordTranscript(messages)
     },
     async flushCurrentSession() {
       const { flushSessionStorage } = await import(
@@ -26,13 +27,13 @@ export function createTranscriptStore(): RuntimeTranscriptStore {
       const { getLastSessionLog } = await import(
         '../../../utils/sessionStorage.js'
       )
-      return getLastSessionLog(sessionId)
+      return getLastSessionLog(sessionId as UUID)
     },
     async getTranscriptPath(sessionId) {
       const { getTranscriptPathForSession } = await import(
         '../../../utils/sessionStorage.js'
       )
-      return getTranscriptPathForSession(sessionId)
+      return getTranscriptPathForSession(sessionId as UUID)
     },
   }
 }

@@ -516,7 +516,9 @@ export async function initReplBridge(
         // so archive can't have the full budget. 1.5s matches v2's
         // teardown_archive_timeout_ms default.
         timeoutMs: 1500,
-      }).catch((err: unknown) => {
+      })
+        .then(() => undefined)
+        .catch((err: unknown) => {
         // archiveBridgeSession has no try/catch — 5xx/timeout/network throw
         // straight through. Previously swallowed silently, making archive
         // failures BQ-invisible and undiagnosable from debug logs.

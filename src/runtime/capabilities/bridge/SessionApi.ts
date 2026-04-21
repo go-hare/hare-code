@@ -220,7 +220,11 @@ export async function getBridgeSessionRuntime(
 
 export async function archiveBridgeSessionRuntime(
   sessionId: string,
-  opts?: { baseUrl?: string; getAccessToken?: () => string | undefined },
+  opts?: {
+    baseUrl?: string
+    getAccessToken?: () => string | undefined
+    timeoutMs?: number
+  },
 ): Promise<boolean> {
   const { getClaudeAIOAuthTokens } = await import('../../../utils/auth.js')
   const { getOrganizationUUID } = await import('../../../services/oauth/client.js')
@@ -255,12 +259,73 @@ export async function archiveBridgeSessionRuntime(
     const response = await axios.post(
       url,
       {},
-      { headers, timeout: 10_000, validateStatus: s => s < 500 },
+      {
+        headers,
+        timeout: opts?.timeoutMs ?? 10_000,
+        validateStatus: s => s < 500,
+      },
     )
     return response.status === 200 || response.status === 204
   } catch (err: unknown) {
     logForDebugging(
       `[bridge] Session archive request failed: ${errorMessage(err)}`,
+    )
+    return false
+  }
+}
+
+export async function updateBridgeSessionTitleRuntime(
+  sessionId: string,
+  title: string,
+  opts?: {
+    baseUrl?: string
+    getAccessToken?: () => string | undefined
+    timeoutMs?: number
+  },
+): Promise<boolean> {
+  const { getClaudeAIOAuthTokens } = await import('../../../utils/auth.js')
+  const { getOrganizationUUID } = await import('../../../services/oauth/client.js')
+  const { getOauthConfig } = await import('../../../constants/oauth.js')
+  const { getOAuthHeaders } = await import('../../../utils/teleport/api.js')
+  const { default: axios } = await import('axios')
+  const { isSelfHostedBridge } = await import('../../../bridge/bridgeConfig.js')
+
+  const accessToken =
+    opts?.getAccessToken?.() ?? getClaudeAIOAuthTokens()?.accessToken
+  if (!accessToken) {
+    logForDebugging('[bridge] No access token for session title update')
+    return false
+  }
+
+  const orgUUID = isSelfHostedBridge()
+    ? 'self-hosted'
+    : await getOrganizationUUID()
+  if (!orgUUID) {
+    logForDebugging('[bridge] No org UUID for session title update')
+    return false
+  }
+
+  const headers = {
+    ...getOAuthHeaders(accessToken),
+    'anthropic-beta': 'ccr-byoc-2025-07-29',
+    'x-organization-uuid': orgUUID,
+  }
+
+  const url = `${opts?.baseUrl ?? getOauthConfig().BASE_API_URL}/v1/sessions/${toCompatSessionId(sessionId)}`
+  try {
+    const response = await axios.patch(
+      url,
+      { title },
+      {
+        headers,
+        timeout: opts?.timeoutMs ?? 10_000,
+        validateStatus: s => s < 500,
+      },
+    )
+    return response.status === 200
+  } catch (err: unknown) {
+    logForDebugging(
+      `[bridge] Session title update failed: ${errorMessage(err)}`,
     )
     return false
   }

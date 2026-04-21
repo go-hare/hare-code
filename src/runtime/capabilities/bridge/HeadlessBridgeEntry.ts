@@ -2,8 +2,8 @@ import { hostname } from 'os'
 import { randomUUID } from 'crypto'
 import { errorMessage } from '../../../utils/errors.js'
 import type { BridgeConfig, BridgeLogger } from '../../../bridge/types.js'
-import type { BridgeApiClient } from '../../../bridge/bridgeApi.js'
-import type { SessionSpawner } from '../../../bridge/types.js'
+import type { BridgeApiClient, SessionSpawner } from '../../../bridge/types.js'
+import type { BackoffConfig } from '../../../bridge/bridgeMain.js'
 import {
   BridgeHeadlessPermanentError,
   createHeadlessBridgeLogger,
@@ -42,7 +42,7 @@ export async function runHeadlessBridgeRuntime(
       spawner: SessionSpawner,
       logger: BridgeLogger,
       signal: AbortSignal,
-      backoffConfig?: unknown,
+      backoffConfig?: BackoffConfig,
       initialSessionId?: string,
       getAccessToken?: () => string | undefined | Promise<string | undefined>,
     ) => Promise<void>

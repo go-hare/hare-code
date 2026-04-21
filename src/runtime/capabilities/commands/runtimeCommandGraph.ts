@@ -7,7 +7,7 @@ import {
 
 export interface RuntimeCommandGraphEntry {
   descriptor: RuntimeCommandDescriptor
-  source: Command['source']
+  source?: string
   loadedFrom?: Command['loadedFrom']
   supportsNonInteractive: boolean
   modelInvocable: boolean
@@ -64,7 +64,7 @@ export function createRuntimeCommandGraph(
 ): RuntimeCommandGraphEntry[] {
   return commands.map(command => ({
     descriptor: toRuntimeCommandDescriptor(command),
-    source: command.source,
+    source: 'source' in command ? command.source : undefined,
     loadedFrom: command.loadedFrom,
     supportsNonInteractive: supportsNonInteractive(command),
     modelInvocable: !command.disableModelInvocation,

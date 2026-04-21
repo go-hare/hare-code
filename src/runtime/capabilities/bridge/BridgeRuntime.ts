@@ -1,8 +1,8 @@
-import type { HeadlessBridgeOpts } from '../../../bridge/bridgeMain.js'
 import {
   createSessionPersistenceOwner,
   type RuntimeSessionPersistenceOwner,
 } from '../persistence/SessionPersistenceOwner.js'
+import type { HeadlessBridgeOpts } from './HeadlessBridgeRuntime.js'
 
 export type BridgeCliEntry = (args: string[]) => Promise<void>
 export type BridgeHeadlessEntry = (
