@@ -1,5 +1,9 @@
 # Full-Feature Kernelization Architecture
 
+See also:
+
+- `docs/internals/project-positioning.md`
+
 ## 1. Background
 
 This project already has a rich capability surface, but the capability graph is
