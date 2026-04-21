@@ -1,16 +1,22 @@
 /**
- * Companion reaction system — aligns with official ZUK + Dc8 pattern.
+ * Companion reaction system.
  *
  * Called from REPL.tsx after each query turn. Checks mute state, frequency
- * limits, and @-mention detection, then calls the buddy_react API to
- * generate a reaction shown in the CompanionSprite speech bubble.
+ * limits, and @-mention detection, then uses the current configured provider
+ * to generate a short companion reaction shown in the CompanionSprite bubble.
  */
 import { getCompanion } from './companion.js'
 import { getGlobalConfig } from '../utils/config.js'
-import { getClaudeAIOAuthTokens } from '../utils/auth.js'
-import { getOauthConfig } from '../constants/oauth.js'
-import { getUserAgent } from '../utils/http.js'
 import type { Message } from '../types/message.js'
+import { queryWithModel } from '../services/api/claude.js'
+import { extractTextContent } from '../utils/messages.js'
+import { safeParseJSON } from '../utils/json.js'
+import { asSystemPrompt } from '../utils/systemPromptType.js'
+import {
+  getMainLoopModel,
+  getSmallFastModel,
+} from '../utils/model/model.js'
+import { getAPIProvider } from '../utils/model/providers.js'
 
 // ─── Rate limiting ──────────────────────────────────
 
@@ -24,15 +30,56 @@ const MAX_RECENT = 8
 
 // ─── Public API ─────────────────────────────────────
 
+type CompanionObserver = (
+  messages: Message[],
+  setReaction: (text: string | undefined) => void,
+) => void
+
+type GlobalWithCompanionObserver = typeof globalThis & {
+  fireCompanionObserver?: CompanionObserver
+}
+
+const REACTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    reaction: { type: 'string' },
+  },
+  required: ['reaction'],
+  additionalProperties: false,
+} as const
+
+export function getBuddyReactionModel(): string {
+  if (getAPIProvider() !== 'openai') {
+    return getSmallFastModel()
+  }
+
+  if (process.env.OPENAI_SMALL_FAST_MODEL) {
+    return process.env.OPENAI_SMALL_FAST_MODEL
+  }
+
+  if (
+    process.env.OPENAI_DEFAULT_HAIKU_MODEL ||
+    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+  ) {
+    return getSmallFastModel()
+  }
+
+  if (process.env.OPENAI_MODEL) {
+    return process.env.OPENAI_MODEL
+  }
+
+  return getMainLoopModel()
+}
+
 /**
  * Trigger a companion reaction after a query turn.
  *
- * Mirrors official `ZUK()`:
+ * Flow:
  *  1. Check companion exists and is not muted
  *  2. Detect if user @-mentioned companion by name
  *  3. Apply rate limiting (skip if not addressed and too soon)
  *  4. Build conversation transcript
- *  5. Call buddy_react API
+ *  5. Call the currently configured model provider
  *  6. Pass reaction text to setReaction callback
  */
 export function triggerCompanionReaction(
@@ -52,7 +99,7 @@ export function triggerCompanionReaction(
 
   lastReactTime = now
 
-  void callBuddyReactAPI(companion, transcript, addressed)
+  void generateBuddyReaction(companion, transcript, addressed)
     .then(reaction => {
       if (!reaction) return
       recentReactions.push(reaction)
@@ -106,9 +153,14 @@ function buildTranscript(messages: Message[]): string {
     .slice(0, 5000)
 }
 
-// ─── API call ───────────────────────────────────────
+export function installCompanionObserver(): void {
+  const globalWithObserver = globalThis as GlobalWithCompanionObserver
+  globalWithObserver.fireCompanionObserver = triggerCompanionReaction
+}
 
-async function callBuddyReactAPI(
+// ─── Model call ─────────────────────────────────────
+
+async function generateBuddyReaction(
   companion: {
     name: string
     personality: string
@@ -119,41 +171,55 @@ async function callBuddyReactAPI(
   transcript: string,
   addressed: boolean,
 ): Promise<string | null> {
-  const tokens = getClaudeAIOAuthTokens()
-  if (!tokens?.accessToken) return null
-
-  const orgId = getGlobalConfig().oauthAccount?.organizationUuid
-  if (!orgId) return null
-
-  const baseUrl = getOauthConfig().BASE_API_URL
-  const url = `${baseUrl}/api/organizations/${orgId}/claude_code/buddy_react`
-
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${tokens.accessToken}`,
-      'Content-Type': 'application/json',
-      'User-Agent': getUserAgent(),
-    },
-    body: JSON.stringify({
-      name: companion.name.slice(0, 32),
-      personality: companion.personality.slice(0, 200),
-      species: companion.species,
-      rarity: companion.rarity,
-      stats: companion.stats,
-      transcript,
-      reason: addressed ? 'addressed' : 'turn',
-      recent: recentReactions.map(r => r.slice(0, 200)),
-      addressed,
-    }),
-    signal: AbortSignal.timeout(10_000),
-  })
-
-  if (!resp.ok) return null
-
   try {
-    const data = (await resp.json()) as { reaction?: string }
-    return data.reaction?.trim() || null
+    const result = await queryWithModel({
+      systemPrompt: asSystemPrompt([
+        [
+          'You are a tiny terminal buddy reacting to a coding conversation.',
+          `Your name is ${companion.name}.`,
+          `Your personality is: ${companion.personality}`,
+          'Return strict JSON with one field: "reaction".',
+          'The reaction must be one short sentence, playful, warm, and concise.',
+          'Do not narrate actions outside the buddy voice.',
+          'Avoid repeating recent reactions.',
+        ].join(' '),
+      ]),
+      userPrompt: [
+        `species: ${companion.species}`,
+        `rarity: ${companion.rarity}`,
+        `addressed: ${addressed ? 'yes' : 'no'}`,
+        `recent_reactions: ${recentReactions.join(' | ') || 'none'}`,
+        '',
+        'conversation:',
+        transcript,
+      ].join('\n'),
+      outputFormat: {
+        type: 'json_schema',
+        schema: REACTION_SCHEMA,
+      },
+      signal: AbortSignal.timeout(10_000),
+      options: {
+        model: getBuddyReactionModel(),
+        querySource: 'buddy_reaction',
+        agents: [],
+        isNonInteractiveSession: false,
+        hasAppendSystemPrompt: false,
+        mcpTools: [],
+        maxOutputTokensOverride: 120,
+      },
+    })
+
+    const parsed = safeParseJSON(
+      extractTextContent(
+        result.message.content as readonly { readonly type: string }[],
+      ),
+    )
+    if (!parsed || typeof parsed !== 'object') {
+      return null
+    }
+
+    const reaction = (parsed as { reaction?: unknown }).reaction
+    return typeof reaction === 'string' ? reaction.trim() || null : null
   } catch {
     return null
   }

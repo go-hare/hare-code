@@ -8,9 +8,12 @@ import { getGlobalConfig } from '../utils/config.js';
 import { isFullscreenActive } from '../utils/fullscreen.js';
 import type { Theme } from '../utils/theme.js';
 import { getCompanion } from './companion.js';
+import { installCompanionObserver } from './companionReact.js';
 import { isBuddyEnabled } from './enabled.js';
 import { renderFace, renderSprite, spriteFrameCount } from './sprites.js';
 import { getBuddyDisplayColor } from './types.js';
+
+installCompanionObserver();
 
 const TICK_MS = 500;
 const BUBBLE_SHOW = 20; // ticks → ~10s at 500ms
