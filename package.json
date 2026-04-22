@@ -54,7 +54,7 @@
     "lint": "biome lint src/",
     "lint:fix": "biome lint --fix src/",
     "format": "biome format --write src/",
-    "prepare": "git config core.hooksPath .githooks",
+    "prepare": "node scripts/prepare.cjs",
     "test": "bun test",
     "check:unused": "knip-bun",
     "health": "bun run scripts/health-check.ts",

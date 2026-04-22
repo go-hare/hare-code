@@ -1,9 +1,18 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import { chmodSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { basename, join, relative } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { zipSync, strToU8 } from 'fflate'
+import { unzipSync, zipSync } from 'fflate'
 import packageJson from '../package.json' with { type: 'json' }
 import { getMacroDefines, DEFAULT_BUILD_FEATURES } from './defines.ts'
 import { createRequire } from 'node:module'
@@ -19,7 +28,9 @@ const {
 
 const ROOT = process.cwd()
 const RELEASE_DIR = join(ROOT, 'release-assets')
+const BUN_CACHE_DIR = join(ROOT, '.cache', 'bun-targets')
 const BINARY_BASE_NAME = getBinaryBaseName(packageJson)
+const BUN_RELEASE_VERSION = Bun.version
 
 function parseArgs() {
   const args = process.argv.slice(2)
@@ -97,6 +108,64 @@ async function createTarArchive(stageDir: string, archivePath: string) {
   }
 }
 
+function getTargetExecutableName(targetInfo: (typeof TARGETS)[number]) {
+  return targetInfo.platform === 'win32' ? 'bun.exe' : 'bun'
+}
+
+function getBunAssetUrl(targetInfo: (typeof TARGETS)[number]) {
+  const assetTarget = targetInfo.compileTarget.replace(/arm64/g, 'aarch64')
+  return `https://github.com/oven-sh/bun/releases/download/bun-v${BUN_RELEASE_VERSION}/${assetTarget}.zip`
+}
+
+async function downloadTargetBunArchive(
+  targetInfo: (typeof TARGETS)[number],
+  archivePath: string,
+) {
+  const url = getBunAssetUrl(targetInfo)
+  console.log(`[release] Downloading ${targetInfo.compileTarget} runtime from ${url}`)
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download Bun runtime for ${targetInfo.compileTarget}: ${response.status} ${response.statusText}`,
+    )
+  }
+
+  const archiveBytes = new Uint8Array(await response.arrayBuffer())
+  await writeFile(archivePath, archiveBytes)
+}
+
+async function ensureTargetBunExecutable(targetInfo: (typeof TARGETS)[number]) {
+  const cacheDir = join(BUN_CACHE_DIR, `bun-v${BUN_RELEASE_VERSION}`, targetInfo.id)
+  const executablePath = join(cacheDir, getTargetExecutableName(targetInfo))
+  if (existsSync(executablePath)) {
+    return executablePath
+  }
+
+  await mkdir(cacheDir, { recursive: true })
+  const archivePath = join(cacheDir, `${targetInfo.compileTarget}.zip`)
+  if (!(existsSync(archivePath) && (await stat(archivePath)).size > 0)) {
+    await downloadTargetBunArchive(targetInfo, archivePath)
+  }
+
+  const archiveEntries = unzipSync(new Uint8Array(await readFile(archivePath)))
+  const executableEntry = Object.entries(archiveEntries).find(([entryName]) => {
+    const normalizedName = entryName.replace(/\\/g, '/')
+    return basename(normalizedName) === getTargetExecutableName(targetInfo)
+  })
+
+  if (!executableEntry) {
+    throw new Error(
+      `Unable to locate ${getTargetExecutableName(targetInfo)} in ${archivePath}`,
+    )
+  }
+
+  await writeFile(executablePath, executableEntry[1])
+  if (targetInfo.platform !== 'win32') {
+    chmodSync(executablePath, 0o755)
+  }
+  return executablePath
+}
+
 async function buildTarget(targetInfo: (typeof TARGETS)[number], features: string[]) {
   const stageDir = await mkdtemp(join(tmpdir(), `${BINARY_BASE_NAME}-${targetInfo.id}-`))
   const executableName = getExecutableFileName(BINARY_BASE_NAME, targetInfo)
@@ -117,11 +186,13 @@ async function buildTarget(targetInfo: (typeof TARGETS)[number], features: strin
   }
 
   console.log(`[release] Building ${targetInfo.compileTarget} -> ${archiveName}`)
+  const executablePath = await ensureTargetBunExecutable(targetInfo)
 
   const result = await Bun.build({
     entrypoints: ['src/entrypoints/cli.tsx'],
     compile: {
       target: targetInfo.compileTarget,
+      executablePath,
       outfile: executableOutfile,
     },
     define: getMacroDefines(),
