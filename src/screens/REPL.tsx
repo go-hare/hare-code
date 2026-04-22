@@ -392,6 +392,7 @@ import { useSessionBackgrounding } from '../hooks/useSessionBackgrounding.js';
 import { diagnosticTracker } from '../services/diagnosticTracking.js';
 import { useReplNavigationController } from './repl/controllers/useReplNavigationController.js';
 import { REPLDialogs } from './repl/views/REPLDialogs.js';
+import { REPLLayout } from './repl/views/REPLLayout.js';
 import { REPLStatusBar } from './repl/views/REPLStatusBar.js';
 import { handleSpeculationAccept, type ActiveSpeculationState } from '../services/PromptSuggestion/speculation.js';
 import { IdeOnboardingDialog } from '../components/IdeOnboardingDialog.js';
@@ -483,7 +484,6 @@ import { REMOTE_SAFE_COMMANDS } from '../commands.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
 import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, isMouseTrackingEnabled } from '../utils/fullscreen.js';
-import { AlternateScreen } from '@anthropic/ink';
 import { ScrollKeybindingHandler } from '../components/ScrollKeybindingHandler.js';
 import {
   useMessageActions,
@@ -5226,12 +5226,15 @@ export function REPL({
       </Box>
     );
     const transcriptReturn = (
-      <KeybindingSetup>
-        <AnimatedTerminalTitle
-          isAnimating={titleIsAnimating}
-          title={terminalTitle}
-          disabled={titleDisabled}
-          noPrefix={showStatusInTerminalTab}
+      <REPLLayout
+        useAlternateScreen={!!transcriptScrollRef}
+        mouseTrackingEnabled={isMouseTrackingEnabled()}
+      >
+          <AnimatedTerminalTitle
+            isAnimating={titleIsAnimating}
+            title={terminalTitle}
+            disabled={titleDisabled}
+            noPrefix={showStatusInTerminalTab}
         />
         <GlobalKeybindingHandlers {...globalKeybindingProps} />
         {feature('VOICE_MODE') ? (
@@ -5342,19 +5345,8 @@ export function REPL({
             />
           </>
         )}
-      </KeybindingSetup>
+      </REPLLayout>
     );
-    // The virtual-scroll branch (FullscreenLayout above) needs
-    // <AlternateScreen>'s <Box height={rows}> constraint — without it,
-    // ScrollBox's flexGrow has no ceiling, viewport = content height,
-    // scrollTop pins at 0, and Ink's screen buffer sizes to the full
-    // spacer (200×5k+ rows on long sessions). Same root type + props as
-    // normal mode's wrap below so React reconciles and the alt buffer
-    // stays entered across toggle. The 30-cap dump branch stays
-    // unwrapped — it wants native terminal scrollback.
-    if (transcriptScrollRef) {
-      return <AlternateScreen mouseTracking={isMouseTrackingEnabled()}>{transcriptReturn}</AlternateScreen>;
-    }
     return transcriptReturn;
   }
 
@@ -5972,7 +5964,10 @@ export function REPL({
   // the 30-cap dump branch stays unwrapped for native terminal scrollback.
 
   const mainReturn = (
-    <KeybindingSetup>
+    <REPLLayout
+      useAlternateScreen={isFullscreenEnvEnabled()}
+      mouseTrackingEnabled={isMouseTrackingEnabled()}
+    >
       <AnimatedTerminalTitle
         isAnimating={titleIsAnimating}
         title={terminalTitle}
@@ -6139,10 +6134,7 @@ export function REPL({
           }
         />
       </MCPConnectionManager>
-    </KeybindingSetup>
+    </REPLLayout>
   );
-  if (isFullscreenEnvEnabled()) {
-    return <AlternateScreen mouseTracking={isMouseTrackingEnabled()}>{mainReturn}</AlternateScreen>;
-  }
   return mainReturn;
 }
