@@ -42,6 +42,11 @@ import { getSystemContext, getUserContext } from './context.js'
 import { init, initializeTelemetryAfterTrust } from './entrypoints/init.js'
 import { addToHistory } from './history.js'
 import type { Root } from '@anthropic/ink'
+import {
+	preloadCommandAssembly,
+	primeBundledCommandSources,
+	resolveCommandAssembly,
+} from './main/commandAssembly.js'
 import { launchRepl } from './replLauncher.js'
 import {
 	hasGrowthBookEnvOverride,
@@ -161,7 +166,7 @@ import {
 	setMainThreadAgentType,
 	setTeleportedSessionInfo,
 } from "./bootstrap/state.js";
-import { filterCommandsForRemoteMode, getCommands } from "./commands.js";
+import { filterCommandsForRemoteMode } from "./commands.js";
 import type { StatsStore } from "./context/stats.js";
 import {
   launchAssistantInstallWizard,
@@ -180,15 +185,12 @@ import {
 	renderAndRun,
 	showSetupScreens,
 } from "./interactiveHelpers.js";
-import { initBuiltinPlugins } from "./plugins/bundled/index.js";
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { checkQuotaStatus } from "./services/claudeAiLimits.js";
 import { prefetchAllMcpResources } from "./services/mcp/client.js";
-import { initBundledSkills } from "./skills/bundled/index.js";
 import type { AgentColorName } from "@claude-code-best/builtin-tools/tools/AgentTool/agentColorManager.js";
 import {
 	getActiveAgentsFromList,
-	getAgentDefinitionsWithOverrides,
 	isBuiltInAgent,
 	isCustomAgent,
 	parseAgentsFromJson,
@@ -2925,14 +2927,7 @@ async function run(): Promise<CommanderCommand> {
 			// since --worktree makes setup() process.chdir() (setup.ts:203), and
 			// commands/agents need the post-chdir cwd.
 			const preSetupCwd = getCwd();
-			// Register bundled skills/plugins before kicking getCommands() — they're
-			// pure in-memory array pushes (<1ms, zero I/O) that getBundledSkills()
-			// reads synchronously. Previously ran inside setup() after ~20ms of
-			// await points, so the parallel getCommands() memoized an empty list.
-			if (process.env.CLAUDE_CODE_ENTRYPOINT !== "local-agent") {
-				initBuiltinPlugins();
-				initBundledSkills();
-			}
+			primeBundledCommandSources(process.env.CLAUDE_CODE_ENTRYPOINT);
 			const setupPromise = setup(
 				preSetupCwd,
 				permissionMode,
@@ -2944,16 +2939,10 @@ async function run(): Promise<CommanderCommand> {
 				worktreePRNumber,
 				messagingSocketPath,
 			);
-			const commandsPromise = worktreeEnabled
-				? null
-				: getCommands(preSetupCwd);
-			const agentDefsPromise = worktreeEnabled
-				? null
-				: getAgentDefinitionsWithOverrides(preSetupCwd);
-			// Suppress transient unhandledRejection if these reject during the
-			// ~28ms setupPromise await before Promise.all joins them below.
-			commandsPromise?.catch(() => {});
-			agentDefsPromise?.catch(() => {});
+			const preloadedCommandAssembly = preloadCommandAssembly(
+				preSetupCwd,
+				worktreeEnabled,
+			);
 			await setupPromise;
 			logForDebugging(
 				`[STARTUP] setup() completed in ${Date.now() - setupStart}ms`,
@@ -3067,13 +3056,11 @@ async function run(): Promise<CommanderCommand> {
 			const currentCwd = worktreeEnabled ? getCwd() : preSetupCwd;
 			logForDebugging("[STARTUP] Loading commands and agents...");
 			const commandsStart = Date.now();
-			// Join the promises kicked before setup() (or start fresh if
-			// worktreeEnabled gated the early kick). Both memoized by cwd.
-			const [commands, agentDefinitionsResult] = await Promise.all([
-				commandsPromise ?? getCommands(currentCwd),
-				agentDefsPromise ??
-					getAgentDefinitionsWithOverrides(currentCwd),
-			]);
+			const { commands, agentDefinitionsResult } =
+				await resolveCommandAssembly({
+				currentCwd,
+				preloaded: preloadedCommandAssembly,
+			});
 			logForDebugging(
 				`[STARTUP] Commands and agents loaded in ${Date.now() - commandsStart}ms`,
 			);
