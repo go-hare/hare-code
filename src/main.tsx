@@ -47,6 +47,7 @@ import {
 	primeBundledCommandSources,
 	resolveCommandAssembly,
 } from './main/commandAssembly.js'
+import { determineMainLaunchMode } from './main/modeDispatch.js'
 import { launchRepl } from './replLauncher.js'
 import {
 	hasGrowthBookEnvOverride,
@@ -3790,8 +3791,35 @@ async function run(): Promise<CommanderCommand> {
 				return;
 			}
 
+			const hasPendingDirectConnect = feature("DIRECT_CONNECT")
+				? !!_pendingConnect?.url
+				: false;
+			const hasPendingSsh = feature("SSH_REMOTE")
+				? !!_pendingSSH?.host
+				: false;
+			const hasPendingAssistantChat = feature("KAIROS")
+				? !!(
+						_pendingAssistantChat &&
+						(_pendingAssistantChat.sessionId ||
+							_pendingAssistantChat.discover)
+					)
+				: false;
+			const launchMode = determineMainLaunchMode({
+				isNonInteractiveSession,
+				continueRequested: !!options.continue,
+				hasPendingDirectConnect,
+				hasPendingSsh,
+				hasPendingAssistantChat,
+				hasResumeLikeRequest: !!(
+					options.resume ||
+					options.fromPr ||
+					teleport ||
+					remote !== null
+				),
+			});
+
 			// --print mode
-			if (isNonInteractiveSession) {
+			if (launchMode === "headless") {
 				if (outputFormat === "stream-json" || outputFormat === "json") {
 					setHasFormattedOutput(true);
 				}
@@ -4206,7 +4234,7 @@ async function run(): Promise<CommanderCommand> {
 				initialState,
 			};
 
-			if (options.continue) {
+			if (launchMode === "continue") {
 				// Continue the most recent conversation directly
 				let resumeSucceeded = false;
 				try {
@@ -4287,22 +4315,24 @@ async function run(): Promise<CommanderCommand> {
 					logError(error);
 					process.exit(1);
 				}
-			} else if (feature("DIRECT_CONNECT") && _pendingConnect?.url) {
+			} else if (launchMode === "direct-connect") {
 				// `claude connect <url>` — full interactive TUI connected to a remote server
+				const pendingConnect = _pendingConnect!;
+				const directConnectServerUrl = pendingConnect.url!;
 				let directConnectConfig;
 				try {
 					const session = await createDirectConnectSession({
-						serverUrl: _pendingConnect.url,
-						authToken: _pendingConnect.authToken,
+						serverUrl: directConnectServerUrl,
+						authToken: pendingConnect.authToken,
 						cwd: getOriginalCwd(),
 						dangerouslySkipPermissions:
-							_pendingConnect.dangerouslySkipPermissions,
+							pendingConnect.dangerouslySkipPermissions,
 					});
 					if (session.workDir) {
 						setOriginalCwd(session.workDir);
 						setCwdState(session.workDir);
 					}
-					setDirectConnectServerUrl(_pendingConnect.url);
+					setDirectConnectServerUrl(directConnectServerUrl);
 					directConnectConfig = session.config;
 				} catch (err) {
 					return await exitWithError(
@@ -4315,7 +4345,7 @@ async function run(): Promise<CommanderCommand> {
 				}
 
 				const connectInfoMessage = createSystemMessage(
-					`Connected to server at ${_pendingConnect.url}\nSession: ${directConnectConfig.sessionId}`,
+					`Connected to server at ${directConnectServerUrl}\nSession: ${directConnectConfig.sessionId}`,
 					"info",
 				);
 
@@ -4337,12 +4367,16 @@ async function run(): Promise<CommanderCommand> {
 					renderAndRun,
 				);
 				return;
-			} else if (feature("SSH_REMOTE") && _pendingSSH?.host) {
+			} else if (launchMode === "ssh-remote") {
 				// `claude ssh <host> [dir]` — probe remote, deploy binary if needed,
 				// spawn ssh with unix-socket -R forward to a local auth proxy, hand
 				// the REPL an SSHSession. Tools run remotely, UI renders locally.
 				// `--local` skips probe/deploy/ssh and spawns the current binary
 				// directly with the same env — e2e test of the proxy/auth plumbing.
+				const pendingSSH = _pendingSSH!;
+				const sshServerUrl = pendingSSH.local
+					? "local"
+					: pendingSSH.host!;
 				const {
 					createSSHSession,
 					createLocalSSHSession,
@@ -4350,19 +4384,19 @@ async function run(): Promise<CommanderCommand> {
 				} = await import("./ssh/createSSHSession.js");
 				let sshSession: import('./ssh/createSSHSession.js').SSHSession | undefined;
 				try {
-					if (_pendingSSH.local) {
+					if (pendingSSH.local) {
 						process.stderr.write(
 							"Starting local ssh-proxy test session...\n",
 						);
 						sshSession = await createLocalSSHSession({
-							cwd: _pendingSSH.cwd,
-							permissionMode: _pendingSSH.permissionMode,
+							cwd: pendingSSH.cwd,
+							permissionMode: pendingSSH.permissionMode,
 							dangerouslySkipPermissions:
-								_pendingSSH.dangerouslySkipPermissions,
+								pendingSSH.dangerouslySkipPermissions,
 						});
 					} else {
 						process.stderr.write(
-							`Connecting to ${_pendingSSH.host}…\n`,
+							`Connecting to ${pendingSSH.host}…\n`,
 						);
 						// In-place progress: \r + EL0 (erase to end of line). Final \n on
 						// success so the next message lands on a fresh line. No-op when
@@ -4371,13 +4405,13 @@ async function run(): Promise<CommanderCommand> {
 						let hadProgress = false;
 						sshSession = await createSSHSession(
 							{
-								host: _pendingSSH.host,
-								cwd: _pendingSSH.cwd,
+								host: pendingSSH.host,
+								cwd: pendingSSH.cwd,
 								localVersion: MACRO.VERSION,
-								permissionMode: _pendingSSH.permissionMode,
+								permissionMode: pendingSSH.permissionMode,
 								dangerouslySkipPermissions:
-									_pendingSSH.dangerouslySkipPermissions,
-								extraCliArgs: _pendingSSH.extraCliArgs,
+									pendingSSH.dangerouslySkipPermissions,
+								extraCliArgs: pendingSSH.extraCliArgs,
 							},
 							isTTY
 								? {
@@ -4394,9 +4428,7 @@ async function run(): Promise<CommanderCommand> {
 					}
 					setOriginalCwd(sshSession.remoteCwd);
 					setCwdState(sshSession.remoteCwd);
-					setDirectConnectServerUrl(
-						_pendingSSH.local ? "local" : _pendingSSH.host,
-					);
+					setDirectConnectServerUrl(sshServerUrl);
 				} catch (err) {
 					return await exitWithError(
 						root,
@@ -4408,9 +4440,9 @@ async function run(): Promise<CommanderCommand> {
 				}
 
 				const sshInfoMessage = createSystemMessage(
-					_pendingSSH.local
+					pendingSSH.local
 						? `Local ssh-proxy test session\ncwd: ${sshSession.remoteCwd}\nAuth: unix socket → local proxy`
-						: `SSH session to ${_pendingSSH.host}\nRemote cwd: ${sshSession.remoteCwd}\nAuth: unix socket -R → local proxy`,
+						: `SSH session to ${sshServerUrl}\nRemote cwd: ${sshSession.remoteCwd}\nAuth: unix socket -R → local proxy`,
 					"info",
 				);
 
@@ -4432,20 +4464,16 @@ async function run(): Promise<CommanderCommand> {
 					renderAndRun,
 				);
 				return;
-			} else if (
-				feature("KAIROS") &&
-				_pendingAssistantChat &&
-				(_pendingAssistantChat.sessionId ||
-					_pendingAssistantChat.discover)
-			) {
+			} else if (launchMode === "assistant-chat") {
 				// `claude assistant [sessionId]` — REPL as a pure viewer client
 				// of a remote assistant session. The agentic loop runs remotely; this
 				// process streams live events and POSTs messages. History is lazy-
 				// loaded by useAssistantHistory on scroll-up (no blocking fetch here).
+				const pendingAssistantChat = _pendingAssistantChat!;
 				const { discoverAssistantSessions } =
 					await import("./assistant/sessionDiscovery.js");
 
-				let targetSessionId = _pendingAssistantChat.sessionId;
+				let targetSessionId = pendingAssistantChat.sessionId;
 
 				// Discovery flow — list bridge environments, filter sessions
 				if (!targetSessionId) {
@@ -4573,12 +4601,7 @@ async function run(): Promise<CommanderCommand> {
 					renderAndRun,
 				);
 				return;
-			} else if (
-				options.resume ||
-				options.fromPr ||
-				teleport ||
-				remote !== null
-			) {
+			} else if (launchMode === "resume-like") {
 				// Handle resume flow - from file (ant-only), session ID, or interactive selector
 
 				// Clear stale caches before resuming to ensure fresh file/skill discovery
