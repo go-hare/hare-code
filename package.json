@@ -1,6 +1,6 @@
 {
   "name": "@go-hare/hare-code",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal",
   "type": "module",
   "author": "go-hare",

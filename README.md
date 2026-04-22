@@ -16,6 +16,10 @@ Hare Code 是一个面向终端交互、headless 嵌入、direct-connect、serve
 - 让外部宿主优先通过 kernel façade 接入
 - 在不破坏主链的前提下持续收口运行时能力
 
+当前内核化现状与后续收口计划见：
+
+- [docs/internals/kernelization-status.md](/D:/work/py/reachy_code/claude-code/docs/internals/kernelization-status.md)
+
 ## 项目定位
 
 当前代码基线可以分成三层：
