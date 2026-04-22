@@ -60,16 +60,18 @@ npm install -g @go-hare/hare-code
 hare
 ```
 
-### GitHub tag install
-
-When the matching version has published GitHub Release binary assets, you can install directly from a git tag:
+### Install from source
 
 ```bash
-npm install -g git+https://github.com/go-hare/hare-code.git#v1.7.1
+git clone https://github.com/go-hare/hare-code.git
+cd hare-code
+bun install
+bun run build
+npm install -g .
 hare
 ```
 
-During installation, the package downloads the platform-specific `hare` binary from the release assets.
+Releases are packaged as standard npm tarballs. The CLI entry points to `dist/cli-node.js`, without an extra release-binary download layer.
 
 ## Running from Source
 
@@ -101,10 +103,10 @@ Common build outputs:
 - `dist/cli-node.js`
 - `dist/cli-bun.js`
 
-Binary release build:
+npm package check:
 
 ```bash
-bun run build:release
+npm pack --dry-run
 ```
 
 ## Using the Kernel

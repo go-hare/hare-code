@@ -24,9 +24,9 @@
   "engines": {
     "bun": ">=1.2.0"
   },
-  "binaryName": "hare",
   "bin": {
-    "hare": "bin/hare.cjs"
+    "hare": "dist/cli-node.js",
+    "hare-bun": "dist/cli-bun.js"
   },
   "workspaces": [
     "packages/*",
@@ -34,22 +34,19 @@
     "packages/@anthropic-ai/*"
   ],
   "files": [
-    "bin",
     "dist",
     "scripts/postinstall.cjs",
-    "scripts/postinstall-binary.cjs",
-    "scripts/release-assets.cjs",
     "scripts/run-parallel.mjs",
     "scripts/setup-chrome-mcp.mjs"
   ],
   "scripts": {
     "build": "bun run build.ts",
-    "build:release": "bun run scripts/build-release.ts",
     "build:vite": "vite build && bun run scripts/post-build.ts",
     "build:vite:only": "vite build",
     "build:bun": "bun run build.ts",
     "dev": "bun run scripts/dev.ts",
     "dev:inspect": "bun run scripts/dev-debug.ts",
+    "prepack": "bun run build",
     "prepublishOnly": "bun run build",
     "lint": "biome lint src/",
     "lint:fix": "biome lint --fix src/",
@@ -58,7 +55,7 @@
     "test": "bun test",
     "check:unused": "knip-bun",
     "health": "bun run scripts/health-check.ts",
-    "postinstall": "node scripts/run-parallel.mjs scripts/postinstall.cjs scripts/setup-chrome-mcp.mjs scripts/postinstall-binary.cjs",
+    "postinstall": "node scripts/run-parallel.mjs scripts/postinstall.cjs scripts/setup-chrome-mcp.mjs",
     "typecheck": "tsc --noEmit",
     "test:all": "bun run typecheck && bun test",
     "rcs": "bun run scripts/rcs.ts"

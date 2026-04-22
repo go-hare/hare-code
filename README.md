@@ -64,16 +64,18 @@ npm install -g @go-hare/hare-code
 hare
 ```
 
-### GitHub tag 安装
-
-当对应版本已经发布 GitHub Release 二进制资产时，可以直接通过 git tag 安装：
+### 源码仓库安装
 
 ```bash
-npm install -g git+https://github.com/go-hare/hare-code.git#v1.7.1
+git clone https://github.com/go-hare/hare-code.git
+cd hare-code
+bun install
+bun run build
+npm install -g .
 hare
 ```
 
-安装阶段会通过 release 资产下载当前平台对应的 `hare` 二进制。
+当前发布按 npm 包分发，CLI 入口直接使用 `dist/cli-node.js`，不走额外的 release 二进制下载链。
 
 ## 源码启动
 
@@ -105,10 +107,10 @@ bun run build
 - `dist/cli-node.js`
 - `dist/cli-bun.js`
 
-二进制分发构建：
+npm 打包检查：
 
 ```bash
-bun run build:release
+npm pack --dry-run
 ```
 
 ## Kernel 使用
