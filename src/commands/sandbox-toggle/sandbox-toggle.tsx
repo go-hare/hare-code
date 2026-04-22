@@ -8,6 +8,7 @@ import {
   addToExcludedCommands,
   SandboxManager,
 } from '../../utils/sandbox/sandbox-adapter.js'
+import { getProjectConfigDirDisplayPath } from '../../utils/configPaths.js'
 import {
   getSettings_DEPRECATED,
   getSettingsFilePathForSource,
@@ -100,7 +101,7 @@ export async function call(
       const localSettingsPath = getSettingsFilePathForSource('localSettings')
       const relativePath = localSettingsPath
         ? relative(getCwdState(), localSettingsPath)
-        : '.claude/settings.local.json'
+        : getProjectConfigDirDisplayPath('settings.local.json')
 
       const message = color(
         'success',

@@ -6,6 +6,10 @@ import {
   appendJobReply,
   getJobDir,
 } from '../../jobs/state.js'
+import {
+  getProjectConfigDirDisplayPath,
+  joinUserConfigDisplayPath,
+} from '../../utils/configPaths.js'
 
 /**
  * Entry point for template job commands: `new`, `list`, `reply`.
@@ -73,7 +77,9 @@ function handleList(): void {
 
   if (templates.length === 0) {
     console.log('No templates found.')
-    console.log('Place .md files in .claude/templates/ or ~/.claude/templates/')
+    console.log(
+      `Place .md files in ${getProjectConfigDirDisplayPath('templates')}/ or ${joinUserConfigDisplayPath('templates')}/`,
+    )
     return
   }
 

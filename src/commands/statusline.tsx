@@ -1,6 +1,7 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { Command } from '../commands.js'
 import { AGENT_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/AgentTool/constants.js'
+import { joinUserConfigDisplayPath } from '../utils/configPaths.js'
 
 const statusline = {
   type: 'prompt',
@@ -12,7 +13,7 @@ const statusline = {
   allowedTools: [
     AGENT_TOOL_NAME,
     'Read(~/**)',
-    'Edit(~/.claude/settings.json)',
+    `Edit(${joinUserConfigDisplayPath('settings.json')})`,
   ],
   source: 'builtin',
   disableNonInteractive: true,

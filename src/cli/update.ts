@@ -11,6 +11,7 @@ import {
   type InstallMethod,
   saveGlobalConfig,
 } from 'src/utils/config.js'
+import { joinUserConfigDisplayPath } from 'src/utils/configPaths.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { getDoctorDiagnostic } from 'src/utils/doctorDiagnostic.js'
 import { gracefulShutdown } from 'src/utils/gracefulShutdown.js'
@@ -386,7 +387,7 @@ export async function update() {
       if (useLocalUpdate) {
         process.stderr.write('Try manually updating with:\n')
         process.stderr.write(
-          `  cd ~/.claude/local && npm update ${MACRO.PACKAGE_URL}\n`,
+          `  cd ${joinUserConfigDisplayPath('local')} && npm update ${MACRO.PACKAGE_URL}\n`,
         )
       } else {
         process.stderr.write('Try running with sudo or fix npm permissions\n')
@@ -401,7 +402,7 @@ export async function update() {
       if (useLocalUpdate) {
         process.stderr.write('Try manually updating with:\n')
         process.stderr.write(
-          `  cd ~/.claude/local && npm update ${MACRO.PACKAGE_URL}\n`,
+          `  cd ${joinUserConfigDisplayPath('local')} && npm update ${MACRO.PACKAGE_URL}\n`,
         )
       } else {
         process.stderr.write(

@@ -1,5 +1,6 @@
 import type { Command, LocalCommandCall } from '../../types/command.js'
 import { getWorkflowCommands } from '@claude-code-best/builtin-tools/tools/WorkflowTool/createWorkflowCommand.js'
+import { getProjectConfigDirDisplayPath } from '../../utils/configPaths.js'
 import { getCwd } from '../../utils/cwd.js'
 
 const call: LocalCommandCall = async (_args, _context) => {
@@ -7,7 +8,7 @@ const call: LocalCommandCall = async (_args, _context) => {
   if (commands.length === 0) {
     return {
       type: 'text',
-      value: 'No workflows found. Add workflow files to .claude/workflows/ (YAML or Markdown).',
+      value: `No workflows found. Add workflow files to ${getProjectConfigDirDisplayPath('workflows')}/ (YAML or Markdown).`,
     }
   }
   const list = commands.map((cmd) => `  /${cmd.name} - ${cmd.description}`).join('\n')

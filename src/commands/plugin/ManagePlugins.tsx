@@ -49,6 +49,7 @@ import type { Tool } from '../../Tool.js'
 import type { LoadedPlugin, PluginError } from '../../types/plugin.js'
 import { count } from '../../utils/array.js'
 import { openBrowser } from '../../utils/browser.js'
+import { getProjectConfigDirDisplayPath } from '../../utils/configPaths.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage, toError } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
@@ -1827,7 +1828,7 @@ export function ManagePlugins({
         }
         clearAllCaches()
         setResult(
-          `✓ Disabled ${selectedPlugin.plugin.name} in .claude/settings.local.json. Run /reload-plugins to apply.`,
+          `✓ Disabled ${selectedPlugin.plugin.name} in ${getProjectConfigDirDisplayPath('settings.local.json')}. Run /reload-plugins to apply.`,
         )
         if (onManageComplete) void onManageComplete()
         setParentViewState({ type: 'menu' })
@@ -2163,11 +2164,15 @@ export function ManagePlugins({
     return (
       <Box flexDirection="column">
         <Text bold color="warning">
-          {selectedPlugin.plugin.name} is enabled in .claude/settings.json
+          {selectedPlugin.plugin.name} is enabled in{' '}
+          {getProjectConfigDirDisplayPath('settings.json')}
           (shared with your team)
         </Text>
         <Box marginTop={1} flexDirection="column">
-          <Text>Disable it just for you in .claude/settings.local.json?</Text>
+          <Text>
+            Disable it just for you in{' '}
+            {getProjectConfigDirDisplayPath('settings.local.json')}?
+          </Text>
           <Text dimColor>
             This has the same effect as uninstalling, without affecting other
             contributors.

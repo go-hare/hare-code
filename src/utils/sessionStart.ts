@@ -1,6 +1,10 @@
 import { getMainThreadAgentType } from '../bootstrap/state.js'
 import type { HookResultMessage } from '../types/message.js'
 import { createAttachmentMessage } from './attachments.js'
+import {
+  getProjectConfigDirDisplayPath,
+  joinUserConfigDisplayPath,
+} from './configPaths.js'
 import { logForDebugging } from './debug.js'
 import { withDiagnosticsTiming } from './diagLogs.js'
 import { isBareMode } from './envUtils.js'
@@ -101,7 +105,7 @@ export async function processSessionStartHooks(
         errorMessage.includes('EPERM')
       ) {
         userGuidance =
-          'This appears to be a permissions issue. Check file permissions on ~/.claude/plugins/'
+          `This appears to be a permissions issue. Check file permissions on ${joinUserConfigDisplayPath('plugins')}/`
       } else if (
         errorMessage.includes('Invalid') ||
         errorMessage.includes('parse') ||
@@ -109,7 +113,7 @@ export async function processSessionStartHooks(
         errorMessage.includes('schema')
       ) {
         userGuidance =
-          'This appears to be a configuration issue. Check your plugin settings in .claude/settings.json'
+          `This appears to be a configuration issue. Check your plugin settings in ${getProjectConfigDirDisplayPath('settings.json')} or ${joinUserConfigDisplayPath('settings.json')}`
       } else {
         userGuidance =
           'Please fix the plugin configuration or remove problematic plugins from your settings.'

@@ -11,6 +11,7 @@ import { FILE_EDIT_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/FileE
 import { FILE_READ_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '@claude-code-best/builtin-tools/tools/FileWriteTool/prompt.js'
 import { getPluginErrorMessage } from '../../types/plugin.js'
+import { getProjectConfigDirDisplayPath } from '../configPaths.js'
 import { logForDebugging } from '../debug.js'
 import { EFFORT_LEVELS, parseEffortValue } from '../effort.js'
 import {
@@ -161,7 +162,7 @@ async function loadAgentFromFile(
     for (const field of ['permissionMode', 'hooks', 'mcpServers'] as const) {
       if (frontmatter[field] !== undefined) {
         logForDebugging(
-          `Plugin agent file ${filePath} sets ${field}, which is ignored for plugin agents. Use .claude/agents/ for this level of control.`,
+          `Plugin agent file ${filePath} sets ${field}, which is ignored for plugin agents. Use ${getProjectConfigDirDisplayPath('agents')}/ for this level of control.`,
           { level: 'warn' },
         )
       }

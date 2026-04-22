@@ -16,6 +16,7 @@ import {
   shouldSkipVersion,
 } from '../utils/autoUpdater.js'
 import { getGlobalConfig, isAutoUpdaterDisabled } from '../utils/config.js'
+import { joinUserConfigDisplayPath } from '../utils/configPaths.js'
 import { logForDebugging } from '../utils/debug.js'
 import { getCurrentInstallationType } from '../utils/doctorDiagnostic.js'
 import {
@@ -254,7 +255,7 @@ export function AutoUpdater({
           ✗ Auto-update failed &middot; Try <Text bold>claude doctor</Text> or{' '}
           <Text bold>
             {hasLocalInstall
-              ? `cd ~/.claude/local && npm update ${MACRO.PACKAGE_URL}`
+              ? `cd ${joinUserConfigDisplayPath('local')} && npm update ${MACRO.PACKAGE_URL}`
               : `npm i -g ${MACRO.PACKAGE_URL}`}
           </Text>
         </Text>
