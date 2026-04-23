@@ -164,6 +164,8 @@
 - `src/kernel/__tests__/importDiscipline.test.ts`
 - `src/kernel/__tests__/packageEntry.test.ts`
 - `tests/integration/kernel-package-smoke.test.ts`
+- `tests/integration/kernel-headless-smoke.test.ts`
+- `tests/integration/kernel-server-smoke.test.ts`
 - `src/runtime/capabilities/server/__tests__/contracts.test.ts`
 - `src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
 - `src/runtime/capabilities/server/__tests__/DirectConnectSessionApi.test.ts`
@@ -209,9 +211,8 @@
 
 尤其还缺更强的：
 
-- end-to-end kernel headless smoke tests
-- direct-connect / server 的 kernel-only 使用链路回归
 - 更大范围的 consumer/import 组合回归
+- 更接近真实运行参数的 kernel headless / server e2e 覆盖
 
 #### 3. kernel 已有发布入口，但“长期发布级稳定面”仍在沉淀
 
@@ -282,6 +283,7 @@
 - 已通过：`bun test src/kernel/__tests__/headless.test.ts src/kernel/__tests__/serverHost.test.ts src/kernel/__tests__/surface.test.ts`
 - 已通过：`bun test src/kernel/__tests__/bridge.test.ts src/kernel/__tests__/daemon.test.ts src/kernel/__tests__/importDiscipline.test.ts src/kernel/__tests__/packageEntry.test.ts`
 - 已通过：`bun test tests/integration/kernel-package-smoke.test.ts`
+- 已通过：`bun test tests/integration/kernel-headless-smoke.test.ts tests/integration/kernel-server-smoke.test.ts`
 - 已通过：`bun test src/runtime/capabilities/server/__tests__/contracts.test.ts src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
 - 已通过：`bun test src/runtime/capabilities/execution/internal/__tests__/headlessBridgeForwarding.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessMcpRuntime.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessSessionControl.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessStreaming.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessStreamEmission.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessPostTurn.test.ts`
 - 已通过：`src/cli/print.ts` wrapper 导入 smoke
