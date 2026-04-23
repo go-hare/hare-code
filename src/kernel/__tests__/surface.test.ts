@@ -48,6 +48,21 @@ describe('kernel index surface', () => {
         serverHost.createDirectConnectSession,
       ),
     ).toBe(true)
+    expect(
+      Object.is(
+        kernel.connectDirectHostSession,
+        serverHost.connectDirectHostSession,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.applyDirectConnectSessionState,
+        serverHost.applyDirectConnectSessionState,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(kernel.assembleServerHost, serverHost.assembleServerHost),
+    ).toBe(true)
     expect(Object.is(kernel.DirectConnectError, serverHost.DirectConnectError)).toBe(
       true,
     )
@@ -66,6 +81,7 @@ describe('kernel index surface', () => {
     expect(
       Object.is(kernel.runHeadlessBridgeRuntime, bridge.runHeadlessBridgeRuntime),
     ).toBe(true)
+    expect(Object.is(kernel.runBridgeHeadless, bridge.runBridgeHeadless)).toBe(true)
     expect(
       Object.is(
         kernel.createBridgeSessionRuntime,
@@ -81,5 +97,6 @@ describe('kernel index surface', () => {
     expect(
       Object.is(kernel.runDaemonWorkerRuntime, daemon.runDaemonWorkerRuntime),
     ).toBe(true)
+    expect(Object.is(kernel.runDaemonWorker, daemon.runDaemonWorker)).toBe(true)
   })
 })

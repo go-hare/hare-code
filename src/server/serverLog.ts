@@ -1,3 +1,5 @@
+import type { SessionLogger } from '../runtime/capabilities/server/contracts.js'
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 function formatMeta(meta: unknown): string {
@@ -26,12 +28,7 @@ function writeLog(level: LogLevel, message: string, meta?: unknown): void {
   }
 }
 
-export interface ServerLogger {
-  debug(message: string, meta?: unknown): void
-  info(message: string, meta?: unknown): void
-  warn(message: string, meta?: unknown): void
-  error(message: string, meta?: unknown): void
-}
+export type ServerLogger = SessionLogger
 
 export function createServerLogger(): ServerLogger {
   return {

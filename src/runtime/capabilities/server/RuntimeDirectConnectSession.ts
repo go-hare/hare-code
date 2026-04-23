@@ -3,8 +3,7 @@ import {
   createSessionPersistenceOwner,
   type RuntimeSessionPersistenceOwner,
 } from '../persistence/SessionPersistenceOwner.js'
-import type { DangerousBackendSession } from '../../../server/backends/dangerousBackend.js'
-import type { ServerLogger } from '../../../server/serverLog.js'
+import type { SessionLogger, SessionRuntimeHandle } from './contracts.js'
 import type { SessionInfo, SessionState } from '../../../server/types.js'
 import type { RuntimeSessionIndexEntry } from '../persistence/ServerSessionIndexStore.js'
 
@@ -33,8 +32,8 @@ export class RuntimeDirectConnectSession {
   private closeResolver!: () => void
 
   constructor(
-    private readonly runtime: DangerousBackendSession,
-    private readonly logger: ServerLogger,
+    private readonly runtime: SessionRuntimeHandle,
+    private readonly logger: SessionLogger,
     private readonly idleTimeoutMs: number,
     private readonly onStopped: (session: RuntimeDirectConnectSession) => void,
   ) {

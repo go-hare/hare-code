@@ -5,13 +5,16 @@ import {
   RuntimeDirectConnectSession,
 } from './RuntimeDirectConnectSession.js'
 import { createServerSessionIndexStore } from '../persistence/ServerSessionIndexStore.js'
-import type { DangerousBackend } from '../../../server/backends/dangerousBackend.js'
-import type { ServerLogger } from '../../../server/serverLog.js'
+import {
+  noopSessionLogger,
+  type SessionLogger,
+  type SessionRuntimeBackend,
+} from './contracts.js'
 
 type SessionManagerOptions = {
   idleTimeoutMs?: number
   maxSessions?: number
-  logger?: ServerLogger
+  logger?: SessionLogger
 }
 
 type CreateSessionOptions = {
@@ -24,10 +27,10 @@ export class SessionManager {
   private readonly indexStore = createServerSessionIndexStore()
   private readonly idleTimeoutMs: number
   private readonly maxSessions: number
-  private readonly logger?: ServerLogger
+  private readonly logger?: SessionLogger
 
   constructor(
-    private readonly backend: DangerousBackend,
+    private readonly backend: SessionRuntimeBackend,
     options: SessionManagerOptions = {},
   ) {
     this.idleTimeoutMs = options.idleTimeoutMs ?? 0
@@ -65,12 +68,7 @@ export class SessionManager {
     })
     const session = new RuntimeDirectConnectSession(
       runtime,
-      this.logger ?? {
-        debug() {},
-        info() {},
-        warn() {},
-        error() {},
-      },
+      this.logger ?? noopSessionLogger,
       this.idleTimeoutMs,
       endedSession => {
         this.sessions.delete(endedSession.id)

@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { errorMessage } from '../../../utils/errors.js'
 import type { BridgeConfig, BridgeLogger } from '../../../bridge/types.js'
 import type { BridgeApiClient, SessionSpawner } from '../../../bridge/types.js'
-import type { BackoffConfig } from '../../../bridge/bridgeMain.js'
+import type { BackoffConfig } from '../../../bridge/types.js'
 import {
   BridgeHeadlessPermanentError,
   createHeadlessBridgeLogger,

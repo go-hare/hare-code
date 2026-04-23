@@ -393,8 +393,8 @@ import {
 	prepareKernelHeadlessStartup,
 } from "./kernel/index.js";
 import {
-	createDirectConnectSession,
-	DirectConnectError,
+	connectDirectHostSession,
+	getDirectConnectErrorMessage,
 } from "./kernel/serverHost.js";
 import { createRemoteSessionConfig } from "./remote/RemoteSessionManager.js";
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -4299,25 +4299,21 @@ async function run(): Promise<CommanderCommand> {
 				const directConnectServerUrl = pendingConnect.url!;
 				let directConnectConfig;
 				try {
-					const session = await createDirectConnectSession({
+					directConnectConfig = await connectDirectHostSession({
 						serverUrl: directConnectServerUrl,
 						authToken: pendingConnect.authToken,
 						cwd: getOriginalCwd(),
 						dangerouslySkipPermissions:
 							pendingConnect.dangerouslySkipPermissions,
+					}, {
+						setOriginalCwd,
+						setCwdState,
+						setDirectConnectServerUrl,
 					});
-					if (session.workDir) {
-						setOriginalCwd(session.workDir);
-						setCwdState(session.workDir);
-					}
-					setDirectConnectServerUrl(directConnectServerUrl);
-					directConnectConfig = session.config;
 				} catch (err) {
 					return await exitWithError(
 						root,
-						err instanceof DirectConnectError
-							? err.message
-							: String(err),
+						getDirectConnectErrorMessage(err),
 						() => gracefulShutdown(1),
 					);
 				}

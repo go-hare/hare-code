@@ -13,6 +13,17 @@ export const BRIDGE_LOGIN_ERROR =
 /** Shown when the user disconnects Remote Control (via /remote-control or ultraplan launch). */
 export const REMOTE_CONTROL_DISCONNECTED_MSG = 'Remote Control disconnected.'
 
+export type BackoffConfig = {
+  connInitialMs: number
+  connCapMs: number
+  connGiveUpMs: number
+  generalInitialMs: number
+  generalCapMs: number
+  generalGiveUpMs: number
+  shutdownGraceMs?: number
+  stopWorkBaseDelayMs?: number
+}
+
 // --- Protocol types for the environments API ---
 
 export type WorkData = {

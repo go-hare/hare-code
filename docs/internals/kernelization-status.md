@@ -89,21 +89,65 @@
 - 但 runtime 已经开始真正拥有 headless 实现，而不是继续直接依赖 CLI 私有模块
 - headless runtime internal 子树已不再直接 import `src/cli/*`
 
-#### 4. server / direct-connect 顶层宿主已基本 kernel-first
+#### 4. server / direct-connect 顶层宿主已进入 host-facing kernel 装配
 
 `src/kernel/serverHost.ts` 已统一暴露：
 
 - `createDirectConnectSession`
+- `connectDirectHostSession`
+- `applyDirectConnectSessionState`
+- `getDirectConnectErrorMessage`
+- `assembleServerHost`
 - `runConnectHeadless`
 - `startServer`
 
-同时 `main.tsx` 与 CLI host command 已优先经过 kernel façade，而不是直接拼接 `server/*` 细节。
+同时 `main.tsx` 与 CLI host command 已优先经过 kernel host-facing helper，而不是直接拼接 `server/*` 细节。
 
-#### 5. bridge / daemon 顶层入口第一轮收口已完成
+当前已经成立的收口包括：
+
+- `main.tsx` 的 direct-connect 进入 `connectDirectHostSession(...)`
+- CLI `open <cc-url>` 进入同一个 `connectDirectHostSession(...)`
+- CLI `server` 命令通过 `assembleServerHost(...)` 完成默认 backend / session manager / logger 装配
+
+这意味着 Phase 2 的第一段已经不再只是“把符号从 kernel 转发出去”，而是开始把宿主通用的归一化与装配职责吸收到 kernel。
+
+#### 5. server runtime contracts 已完成第一轮下沉
+
+当前已经完成：
+
+- `src/runtime/capabilities/server/contracts.ts`
+- `SessionManager.ts` 改为依赖：
+  - `SessionRuntimeBackend`
+  - `SessionLogger`
+- `RuntimeDirectConnectSession.ts` 改为依赖：
+  - `SessionRuntimeHandle`
+  - `SessionLogger`
+- `DangerousBackend` 现在是 `SessionRuntimeBackend` 的默认实现
+- `createServerLogger()` 现在是 `SessionLogger` 的默认实现
+- `kernel/serverHost.ts` 继续作为默认 backend / logger / session manager 的唯一默认装配点
+
+这意味着 server 这一侧已经从：
+
+- `runtime -> 具体默认实现`
+
+收敛为：
+
+- `runtime -> contracts`
+- `kernel -> 默认实现装配`
+
+#### 6. bridge / daemon 顶层入口已进入 host-facing kernel 装配
 
 `bridgeMain.ts`、`createSession.ts`、`workerRegistry.ts` 现在都已经优先依赖 `src/kernel/bridge.ts` / `src/kernel/daemon.ts`，顶层宿主不再明显依赖 runtime 深路径。
 
-也就是说，bridge / daemon 第一轮“宿主只认 kernel”收口已经成立。
+当前已经成立的收口包括：
+
+- `kernel/bridge.ts` 已新增 headless bridge 默认 deps 装配与 `runBridgeHeadless(...)`
+- `bridgeMain.ts` 的 headless 入口改经由 kernel helper，而不是在宿主层手工拼接默认 deps
+- `bridgeMain.ts` 的 session title / session fetch / initial session 创建已改用 kernel bridge session API export
+- `kernel/daemon.ts` 已新增 daemon 默认 deps 装配与 `runDaemonWorker(...)`
+- `workerRegistry.ts` 已退为 kernel daemon 入口的兼容导出
+
+也就是说，bridge / daemon 已不再只是“宿主只认 kernel”，而是开始把宿主通用 wiring 上提到 kernel。
 
 #### 6. 最小 kernel contract / surface 护栏已落地
 
@@ -111,12 +155,27 @@
 
 - `src/kernel/__tests__/headless.test.ts`
 - `src/kernel/__tests__/serverHost.test.ts`
+- `src/kernel/__tests__/bridge.test.ts`
+- `src/kernel/__tests__/daemon.test.ts`
 - `src/kernel/__tests__/surface.test.ts`
+- `src/kernel/__tests__/importDiscipline.test.ts`
+- `src/kernel/__tests__/packageEntry.test.ts`
+- `tests/integration/kernel-package-smoke.test.ts`
+- `src/runtime/capabilities/server/__tests__/contracts.test.ts`
+- `src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
 - `src/runtime/capabilities/server/__tests__/DirectConnectSessionApi.test.ts`
 - `src/daemon/__tests__/workerRegistry.test.ts`
 - `src/main/__tests__/modeDispatch.test.ts`
 
-它们已经覆盖了最小的 surface / delegation / façade / direct-connect contract 断言，说明 kernel 已不再是“无护栏状态”。
+它们已经覆盖了最小的：
+
+- surface / delegation / façade 断言
+- bridge / daemon host-facing helper 断言
+- 宿主 import discipline 结构护栏
+- package-level kernel entry smoke
+- runtime contracts focused guard
+
+说明 kernel 已不再是“无护栏状态”。
 
 #### 7. package-level kernel 发布入口第一轮已建立
 
@@ -157,25 +216,25 @@
 
 也就是说，当前已经完成“先改依赖方向”和“把 CLI 共享实现迁出 CLI 私有路径”；剩余更多是后续是否继续压平 `headlessRuntimeLoop.ts` 的实现粒度问题，而不是 runtime 继续落回 CLI 私有层。
 
-#### 2. serverHost / bridge / daemon 的 kernel 层仍偏薄 façade
+#### 2. runtime contracts 仍未完全覆盖全部能力域
 
-`kernel/serverHost`、`kernel/bridge`、`kernel/daemon` 已经把宿主边界收住，但内部更多还是稳定转发层，而不是已经彻底压平后的主编排层。
+`server` 这块已经完成第一轮 contracts 下沉，但 `bridge / daemon / 其他 capability` 还没有全部完成同等级的 contracts 收敛。
 
 这意味着：
 
-- “顶层只认 kernel” 已基本成立
-- “kernel 已完全成为内部链路真正汇聚点” 还没有成立
+- `server/direct-connect` 这块已经开始从 façade 升级为轻编排层
+- `bridge/daemon` 这块也已经开始从 façade 升级为轻编排层
+- 更深一层的 runtime contract 化还没有完全覆盖所有域
 
-#### 3. 测试护栏已起步，但还不是完整 contract / integration 体系
+#### 3. 测试护栏已建立，但还不是完整 contract / integration 体系
 
 当前已经有最小 contract / surface 护栏，但还不等于已经具备完整的长期稳定矩阵。
 
 尤其还缺更强的：
 
-- package-level consumer 真实导入链路回归
 - end-to-end kernel headless smoke tests
 - direct-connect / server 的 kernel-only 使用链路回归
-- 防止宿主回退到深路径引用的结构性测试
+- 更大范围的 consumer/import 组合回归
 
 #### 4. kernel 已有发布入口，但“长期发布级稳定面”仍在沉淀
 
@@ -210,9 +269,13 @@
 
 - 已通过：`bun run typecheck`
 - 已通过：`bun test src/kernel/__tests__/headless.test.ts src/kernel/__tests__/serverHost.test.ts src/kernel/__tests__/surface.test.ts`
+- 已通过：`bun test src/kernel/__tests__/bridge.test.ts src/kernel/__tests__/daemon.test.ts src/kernel/__tests__/importDiscipline.test.ts src/kernel/__tests__/packageEntry.test.ts`
+- 已通过：`bun test tests/integration/kernel-package-smoke.test.ts`
+- 已通过：`bun test src/runtime/capabilities/server/__tests__/contracts.test.ts src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
 - 已通过：`src/cli/print.ts` wrapper 导入 smoke
 - 已通过：`bun run build`
 - 已通过：包级导入 smoke（`@go-hare/hare-code/kernel`）
+- 已通过：`node -e "import('./dist/kernel.js')"` 的 package-level built entry smoke
 - 已通过：kernel 相关定向测试（headless / serverHost / surface / DirectConnectSessionApi / workerRegistry / modeDispatch）
 - 未全绿：`bun test` 仍存在仓库存量失败，主要集中在若干无关模块的模块解析与 WebSearch adapter 测试
 - 未全绿：`bun run lint` 仍存在仓库存量问题，主要是一批 `unused suppression` 与少量风格项
@@ -257,7 +320,7 @@
 
 ### Phase 2
 
-状态：未开始
+状态：已完成
 
 `refactor(kernel): 将 server/direct-connect 升级为 host-facing 轻编排层`
 
@@ -267,9 +330,23 @@
 - 吸收 direct-connect / server 启动中的通用归一化和默认装配
 - 让 `main.tsx` 与 CLI host commands 更少了解 `server/*` 深路径细节
 
+当前已完成：
+
+- `src/kernel/serverHost.ts` 已新增：
+  - `connectDirectHostSession(...)`
+  - `applyDirectConnectSessionState(...)`
+  - `getDirectConnectErrorMessage(...)`
+  - `assembleServerHost(...)`
+- `main.tsx` 与 CLI `open` 命令已共用 direct-connect host helper
+- CLI `server` 命令已改由 kernel 组装默认 backend / session manager / logger
+- 定向验证已覆盖：
+  - `src/kernel/__tests__/serverHost.test.ts`
+  - `src/runtime/capabilities/server/__tests__/DirectConnectSessionApi.test.ts`
+  - `src/main/__tests__/modeDispatch.test.ts`
+
 ### Phase 3
 
-状态：未开始
+状态：已完成
 
 `refactor(kernel): 将 bridge / daemon 宿主装配上提到 kernel`
 
@@ -278,9 +355,26 @@
 - bridge 利用现有 injected-deps seam，把 host assembly 从 `bridgeMain.ts` 上提到 `src/kernel/bridge.ts`
 - daemon 只做 thin upgrade，把 `workerRegistry.ts` 当前的 wiring 继续收薄到 kernel
 
+当前已完成：
+
+- `src/kernel/bridge.ts` 已新增：
+  - `createBridgeHeadlessDeps(...)`
+  - `runBridgeHeadless(...)`
+- `bridgeMain.ts` 的 headless bridge 默认 deps 装配已改由 kernel 提供
+- `bridgeMain.ts` 中原先直连 `./createSession.js` 的 session API call site 已改用 kernel bridge export
+- `src/kernel/daemon.ts` 已新增：
+  - `createDaemonWorkerDeps()`
+  - `runDaemonWorker(...)`
+- `workerRegistry.ts` 已收薄为 kernel daemon 兼容导出
+- 定向验证已覆盖：
+  - `src/kernel/__tests__/bridge.test.ts`
+  - `src/kernel/__tests__/daemon.test.ts`
+  - `src/kernel/__tests__/surface.test.ts`
+  - `src/daemon/__tests__/workerRegistry.test.ts`
+
 ### Phase 4
 
-状态：未开始
+状态：已完成
 
 `test(kernel): 补 contract / seam / smoke 护栏`
 
@@ -289,6 +383,42 @@
 - 扩展 `src/kernel/__tests__/*` 的 seam tests
 - 补 `execution internal` 的 focused tests
 - 增加少量 kernel headless / direct-connect smoke
+
+当前已完成：
+
+- 新增 `importDiscipline.test.ts`，锁定：
+  - `main.tsx`
+  - `bridgeMain.ts`
+  - `workerRegistry.ts`
+  - `registerCliHostCommands.ts`
+  不回退到已收口的深路径
+- 新增 `packageEntry.test.ts`，验证：
+  - `package.json` 的 `./kernel` export 存在
+  - `src/entrypoints/kernel.ts` 真实 re-export kernel stable surface
+- 新增 `tests/integration/kernel-package-smoke.test.ts`，验证：
+  - `./kernel` export 指向 `dist/kernel.js`
+  - `@go-hare/hare-code/kernel` 可被真实导入
+  - 核心 kernel 导出在 built package entry 上可用
+- 新增 bridge / daemon seam tests：
+  - `src/kernel/__tests__/bridge.test.ts`
+  - `src/kernel/__tests__/daemon.test.ts`
+- 已完成 package-level built entry smoke：
+  - `bun run build`
+  - `node -e "import('./dist/kernel.js')"`
+
+### Runtime Contracts
+
+状态：server 已完成第一轮，bridge 已完成最小类型清理
+
+`refactor(runtime): 收口 runtime contracts`
+
+当前已完成：
+
+- `src/runtime/capabilities/server/contracts.ts`
+- `SessionManager.ts` / `RuntimeDirectConnectSession.ts` 改为依赖 runtime-owned contracts
+- `DangerousBackend` / `createServerLogger()` 作为默认实现保留在 server 层
+- `BackoffConfig` 已从 `bridgeMain.ts` 下沉到 `bridge/types.ts`
+- `HeadlessBridgeEntry.ts` 不再反向依赖 `bridgeMain.ts`
 
 ## 建议的 5 个 commit（历史拆分视角）
 

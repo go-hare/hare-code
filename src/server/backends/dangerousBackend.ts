@@ -1,6 +1,9 @@
-import type { ChildProcess } from 'child_process'
 import { spawn } from 'child_process'
 import { fileURLToPath } from 'url'
+import type {
+  SessionRuntimeBackend,
+  SessionRuntimeHandle,
+} from '../../runtime/capabilities/server/contracts.js'
 
 const CLI_ENTRYPOINT_PATH = fileURLToPath(
   new URL('../../entrypoints/cli.tsx', import.meta.url),
@@ -12,18 +15,9 @@ export type DangerousBackendCreateSessionOptions = {
   dangerouslySkipPermissions?: boolean
 }
 
-export type DangerousBackendSession = {
-  sessionId: string
-  workDir: string
-  process: ChildProcess
-  stdout: NonNullable<ChildProcess['stdout']>
-  stderr: NonNullable<ChildProcess['stderr']>
-  writeLine(data: string): boolean
-  terminate(): void
-  forceKill(): void
-}
+export type DangerousBackendSession = SessionRuntimeHandle
 
-export class DangerousBackend {
+export class DangerousBackend implements SessionRuntimeBackend {
   createSessionRuntime(
     options: DangerousBackendCreateSessionOptions,
   ): DangerousBackendSession {

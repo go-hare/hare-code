@@ -10,7 +10,7 @@ import type {
   ServerConfig,
 } from '../../../server/types.js'
 import type { SessionManager } from './SessionManager.js'
-import type { ServerLogger } from '../../../server/serverLog.js'
+import type { SessionLogger } from './contracts.js'
 import {
   DirectConnectSessionManager,
 } from '../../../server/directConnectManager.js'
@@ -67,7 +67,7 @@ function normalizeWebSocketMessage(
 export function startServerRuntimeHost(
   config: ServerConfig,
   sessionManager: SessionManager,
-  logger: ServerLogger,
+  logger: SessionLogger,
 ): { port?: number; stop: (closeActiveConnections: boolean) => void } {
   const server = Bun.serve<ServerSocketData>({
     ...(config.unix

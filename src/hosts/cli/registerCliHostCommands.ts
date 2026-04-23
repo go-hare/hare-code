@@ -12,8 +12,9 @@ import {
 import { registerMcpAddCommand } from '../../commands/mcp/addCommand.js'
 import { registerMcpXaaIdpCommand } from '../../commands/mcp/xaaIdpCommand.js'
 import {
-  createDirectConnectSession,
-  DirectConnectError,
+  assembleServerHost,
+  connectDirectHostSession,
+  getDirectConnectErrorMessage,
 } from '../../kernel/serverHost.js'
 import {
   VALID_INSTALLABLE_SCOPES,
@@ -179,13 +180,7 @@ export function registerCliHostCommands(
           maxSessions: string
         }) => {
           const { randomBytes } = await import('crypto')
-          const { startServer } = await import('../../kernel/serverHost.js')
-          const { SessionManager } = await import('../../server/sessionManager.js')
-          const { DangerousBackend } = await import(
-            '../../server/backends/dangerousBackend.js'
-          )
           const { printBanner } = await import('../../server/serverBanner.js')
-          const { createServerLogger } = await import('../../server/serverLog.js')
           const {
             writeServerLock,
             removeServerLock,
@@ -200,28 +195,17 @@ export function registerCliHostCommands(
             process.exit(1)
           }
 
-          const authToken =
-            opts.authToken ??
-            `sk-ant-cc-${randomBytes(16).toString('base64url')}`
-
-          const config = {
-            port: parseInt(opts.port, 10),
+          const { authToken, config, server, sessionManager } = assembleServerHost({
+            port: opts.port,
             host: opts.host,
-            authToken,
+            authToken: opts.authToken,
             unix: opts.unix,
             workspace: opts.workspace,
-            idleTimeoutMs: parseInt(opts.idleTimeout, 10),
-            maxSessions: parseInt(opts.maxSessions, 10),
-          }
-
-          const backend = new DangerousBackend()
-          const sessionManager = new SessionManager(backend, {
-            idleTimeoutMs: config.idleTimeoutMs,
-            maxSessions: config.maxSessions,
+            idleTimeoutMs: opts.idleTimeout,
+            maxSessions: opts.maxSessions,
+            createAuthToken: () =>
+              `sk-ant-cc-${randomBytes(16).toString('base64url')}`,
           })
-          const logger = createServerLogger()
-
-          const server = startServer(config, sessionManager, logger)
           const actualPort = server.port ?? config.port
           printBanner(config, authToken, actualPort)
 
@@ -293,24 +277,20 @@ export function registerCliHostCommands(
 
           let connectConfig
           try {
-            const session = await createDirectConnectSession({
+            connectConfig = await connectDirectHostSession({
               serverUrl,
               authToken,
               cwd: getOriginalCwd(),
               dangerouslySkipPermissions:
                 options.getPendingConnectDangerouslySkipPermissions(),
+            }, {
+              setOriginalCwd,
+              setCwdState,
+              setDirectConnectServerUrl,
             })
-            if (session.workDir) {
-              setOriginalCwd(session.workDir)
-              setCwdState(session.workDir)
-            }
-            setDirectConnectServerUrl(serverUrl)
-            connectConfig = session.config
           } catch (error) {
             // biome-ignore lint/suspicious/noConsole: intentional error output
-            console.error(
-              error instanceof DirectConnectError ? error.message : String(error),
-            )
+            console.error(getDirectConnectErrorMessage(error))
             process.exit(1)
           }
 

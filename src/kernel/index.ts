@@ -28,6 +28,10 @@ export type {
 } from './headless.js'
 export {
   createDirectConnectSession as createKernelSession,
+  connectDirectHostSession,
+  applyDirectConnectSessionState,
+  assembleServerHost,
+  getDirectConnectErrorMessage,
   createDirectConnectSession,
   DirectConnectError,
   runConnectHeadless as runKernelHeadlessClient,

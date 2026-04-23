@@ -43,12 +43,15 @@ import { toCompatSessionId, toInfraSessionId } from './sessionIdCompat.js'
 import { createSessionSpawner, safeFilenameId } from './sessionRunner.js'
 import { getTrustedDeviceToken } from './trustedDevice.js'
 import {
-  BridgeHeadlessPermanentError,
+  createBridgeSessionRuntime,
+  getBridgeSessionRuntime,
   type HeadlessBridgeOpts,
-  runHeadlessBridgeRuntime,
+  runBridgeHeadless as runKernelBridgeHeadless,
+  updateBridgeSessionTitleRuntime,
 } from '../kernel/bridge.js'
 import {
   BRIDGE_LOGIN_ERROR,
+  type BackoffConfig,
   type BridgeApiClient,
   type BridgeConfig,
   type BridgeLogger,
@@ -66,19 +69,6 @@ import {
   registerWorker,
   sameSessionId,
 } from './workSecret.js'
-
-export type BackoffConfig = {
-  connInitialMs: number
-  connCapMs: number
-  connGiveUpMs: number
-  generalInitialMs: number
-  generalCapMs: number
-  generalGiveUpMs: number
-  /** SIGTERM→SIGKILL grace period on shutdown. Default 30s. */
-  shutdownGraceMs?: number
-  /** stopWorkWithRetry base delay (1s/2s/4s backoff). Default 1000ms. */
-  stopWorkBaseDelayMs?: number
-}
 
 const DEFAULT_BACKOFF: BackoffConfig = {
   connInitialMs: 2_000,
@@ -1064,12 +1054,9 @@ export async function runBridgeLoop(
                 logForDebugging(
                   `[bridge:title] derived title for ${compatSessionId}: ${title}`,
                 )
-                void import('./createSession.js')
-                  .then(({ updateBridgeSessionTitle }) =>
-                    updateBridgeSessionTitle(compatSessionId, title, {
-                      baseUrl: config.apiBaseUrl,
-                    }),
-                  )
+                void updateBridgeSessionTitleRuntime(compatSessionId, title, {
+                  baseUrl: config.apiBaseUrl,
+                })
                   .catch(err =>
                     logForDebugging(
                       `[bridge:title] failed to update title for ${compatSessionId}: ${err}`,
@@ -1998,8 +1985,7 @@ async function fetchSessionTitle(
   compatSessionId: string,
   baseUrl: string,
 ): Promise<string | undefined> {
-  const { getBridgeSession } = await import('./createSession.js')
-  const session = await getBridgeSession(compatSessionId, { baseUrl })
+  const session = await getBridgeSessionRuntime(compatSessionId, { baseUrl })
   return session?.title || undefined
 }
 
@@ -2399,8 +2385,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     // token would otherwise produce a misleading "not found" error.
     await checkAndRefreshOAuthTokenIfNeeded()
     clearOAuthTokenCache()
-    const { getBridgeSession } = await import('./createSession.js')
-    const session = await getBridgeSession(resumeSessionId, {
+    const session = await getBridgeSessionRuntime(resumeSessionId, {
       baseUrl,
       getAccessToken: getBridgeAccessToken,
     })
@@ -2695,9 +2680,8 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
       ? effectiveResumeSessionId
       : null
   if (preCreateSession && !(feature('KAIROS') && effectiveResumeSessionId)) {
-    const { createBridgeSession } = await import('./createSession.js')
     try {
-      initialSessionId = await createBridgeSession({
+      initialSessionId = await createBridgeSessionRuntime({
         environmentId,
         title: name,
         events: [],
@@ -2807,80 +2791,7 @@ async function runBridgeHeadlessImpl(
   opts: HeadlessBridgeOpts,
   signal: AbortSignal,
 ): Promise<void> {
-  return runHeadlessBridgeRuntime(opts, signal, {
-    bridgeLoginError: BRIDGE_LOGIN_ERROR,
-    async getBaseUrl() {
-      const { getBridgeBaseUrl } = await import('./bridgeConfig.js')
-      return getBridgeBaseUrl()
-    },
-    async setWorkingDirectory(dir) {
-      process.chdir(dir)
-      const { setOriginalCwd, setCwdState } = await import('../bootstrap/state.js')
-      setOriginalCwd(dir)
-      setCwdState(dir)
-    },
-    async ensureTrustedWorkspace() {
-      const { enableConfigs, checkHasTrustDialogAccepted } = await import(
-        '../utils/config.js'
-      )
-      enableConfigs()
-      return checkHasTrustDialogAccepted()
-    },
-    async initRuntimeSinks() {
-      const { initSinks } = await import('../utils/sinks.js')
-      initSinks()
-    },
-    async getGitMetadata(dir, spawnMode) {
-      const { getBranch, getRemoteUrl, findGitRoot } = await import(
-        '../utils/git.js'
-      )
-      const { hasWorktreeCreateHook } = await import('../utils/hooks.js')
-      return {
-        branch: await getBranch(),
-        gitRepoUrl: await getRemoteUrl(),
-        worktreeAvailable:
-          spawnMode !== 'worktree'
-            ? true
-            : hasWorktreeCreateHook() || findGitRoot(dir) !== null,
-      }
-    },
-    createApi({ baseUrl, getAccessToken, onAuth401, log }) {
-      return createBridgeApiClient({
-        baseUrl,
-        getAccessToken,
-        runnerVersion: MACRO.VERSION,
-        onDebug: log,
-        onAuth401,
-        getTrustedDeviceToken,
-      })
-    },
-    async createSpawner(runtimeOpts) {
-      return createSessionSpawner({
-        execPath: process.execPath,
-        scriptArgs: spawnScriptArgs(),
-        env: process.env,
-        verbose: false,
-        sandbox: runtimeOpts.sandbox,
-        permissionMode: runtimeOpts.permissionMode,
-        onDebug: runtimeOpts.log,
-      })
-    },
-    runBridgeLoop,
-    async createInitialSession(params) {
-      const { createBridgeSession } = await import('./createSession.js')
-      return createBridgeSession({
-        environmentId: params.environmentId,
-        title: params.title,
-        events: [],
-        gitRepoUrl: params.gitRepoUrl,
-        branch: params.branch,
-        signal: params.signal,
-        baseUrl: params.baseUrl,
-        getAccessToken: params.getAccessToken,
-        permissionMode: params.permissionMode,
-      })
-    },
-  })
+  return runKernelBridgeHeadless(opts, signal, runBridgeLoop)
 }
 
 export async function bridgeMain(args: string[]): Promise<void> {
