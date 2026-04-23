@@ -20,6 +20,9 @@ mock.module('../../runtime/capabilities/daemon/DaemonWorkerRuntime.js', () => ({
 
 mock.module('../bridge.js', () => ({
   runBridgeHeadless: mockRunBridgeHeadless,
+}))
+
+mock.module('../../runtime/capabilities/bridge/HeadlessBridgeRuntime.js', () => ({
   BridgeHeadlessPermanentError: MockBridgeHeadlessPermanentError,
 }))
 

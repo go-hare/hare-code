@@ -15,7 +15,7 @@ import { initSinks } from '../utils/sinks.js'
 import { checkHasTrustDialogAccepted, enableConfigs } from '../utils/config.js'
 import { setCwdState, setOriginalCwd } from '../bootstrap/state.js'
 import { getBootstrapArgs, getScriptPath } from '../utils/cliLaunch.js'
-import { BridgeHeadlessPermanentError, createHeadlessBridgeLogger, type HeadlessBridgeOpts } from '../runtime/capabilities/bridge/HeadlessBridgeRuntime.js'
+import { BridgeHeadlessPermanentError, type HeadlessBridgeOpts } from '../runtime/capabilities/bridge/HeadlessBridgeRuntime.js'
 import type {
   BridgeLoopRunner,
   HeadlessBridgeApiFactoryParams,
@@ -30,12 +30,10 @@ import {
 } from '../runtime/capabilities/bridge/SessionApi.js'
 import {
   createBridgePersistenceOwner,
-  createBridgeRuntimeCapability,
   runBridgeCliRuntime,
   runBridgeHeadlessRuntime,
   type BridgeCliEntry,
   type BridgeHeadlessEntry,
-  type BridgeRuntimeCapability,
 } from '../runtime/capabilities/bridge/BridgeRuntime.js'
 import { runHeadlessBridgeRuntime } from '../runtime/capabilities/bridge/HeadlessBridgeEntry.js'
 
@@ -140,14 +138,9 @@ export {
   runBridgeCliRuntime,
   runBridgeHeadlessRuntime,
   createBridgePersistenceOwner,
-  createBridgeRuntimeCapability,
   type BridgeCliEntry,
   type BridgeHeadlessEntry,
-  type BridgeRuntimeCapability,
-  runHeadlessBridgeRuntime,
   type BridgeLoopRunner,
-  BridgeHeadlessPermanentError,
-  createHeadlessBridgeLogger,
   type HeadlessBridgeOpts,
   archiveBridgeSessionRuntime,
   createBridgeSessionRuntime,
