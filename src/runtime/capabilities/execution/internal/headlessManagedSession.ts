@@ -1,4 +1,5 @@
-import type { Message } from 'src/types/message.js'
+import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
+import type { Message, NormalizedUserMessage } from 'src/types/message.js'
 import { createAbortController } from 'src/utils/abortController.js'
 import {
   createFileStateCacheWithSizeLimit,
@@ -11,6 +12,9 @@ import { extractReadFilesFromMessages } from 'src/utils/queryHelpers.js'
 
 export type HeadlessManagedSession = {
   readonly messages: Message[]
+  resumeInterruptedTurn(
+    interruptedUserMessage: NormalizedUserMessage,
+  ): string | ContentBlockParam[]
   startTurn(): AbortController
   getAbortController(): AbortController | undefined
   abortActiveTurn(reason?: unknown): void
@@ -36,6 +40,17 @@ export function createHeadlessManagedSession(
 
   return {
     messages: initialMessages,
+    resumeInterruptedTurn(interruptedUserMessage) {
+      const interruptedIndex = initialMessages.findIndex(
+        message => message.uuid === interruptedUserMessage.uuid,
+      )
+      if (interruptedIndex !== -1) {
+        initialMessages.splice(interruptedIndex, 2)
+      }
+      return interruptedUserMessage.message!.content as
+        | string
+        | ContentBlockParam[]
+    },
     startTurn() {
       abortController = createAbortController()
       return abortController

@@ -163,4 +163,43 @@ describe('createHeadlessSessionBootstrap', () => {
     )
     expect(restoreSessionMetadata).toHaveBeenCalledTimes(1)
   })
+
+  test('applies loaded conversation mode through coordinator warning and persistence seams', async () => {
+    const refreshAgentDefinitions = mock(async () => ({
+      allAgents: [{ agentType: 'coordinator' }],
+      activeAgents: [{ agentType: 'coordinator' }],
+    })) as unknown as () => Promise<any>
+    const saveMode = mock(() => {})
+    const writeStderr = mock((_message: string) => {})
+    const setAppState = mock((updater: (prev: any) => any) =>
+      updater({ agentDefinitions: { allAgents: [], activeAgents: [] } }),
+    )
+
+    const bootstrap = createHeadlessSessionBootstrap(
+      {
+        getSessionIdentity: () => ({ sessionId: 'session-1', cwd: null }),
+        patchPromptState: () => {},
+        switchSession: () => {},
+        isSessionPersistenceDisabled: () => false,
+      } as any,
+      {
+        resetSessionFilePointer: async () => {},
+        resetSessionMetadataForResume: () => {},
+        restoreSessionMetadata: () => {},
+        restoreSessionStateFromLog: () => {},
+        matchSessionMode: () => 'mode warning',
+        isCoordinatorMode: () => true,
+        refreshAgentDefinitions,
+        saveMode,
+        writeStderr,
+      },
+    )
+
+    await bootstrap.applyLoadedConversationMode('normal', setAppState as any)
+
+    expect(writeStderr).toHaveBeenCalledWith('mode warning\n')
+    expect(refreshAgentDefinitions).toHaveBeenCalledTimes(1)
+    expect(setAppState).toHaveBeenCalledTimes(1)
+    expect(saveMode).toHaveBeenCalledWith('coordinator')
+  })
 })

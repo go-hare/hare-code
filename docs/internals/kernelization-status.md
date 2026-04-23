@@ -366,8 +366,11 @@
 - execution 侧的 `ask()` 现在也开始依赖 `ExecutionSessionFactory`，不再直接 `new SessionRuntime(...)`
 - `SessionRuntime.ts` 已暴露最小 `RuntimeExecutionSession` contract，headless/CLI 共用的 execution session owner 开始有稳定 seam
 - `headlessManagedSession.ts` 已开始接管 `headlessRuntimeLoop.ts` 里的 `mutableMessages` / `readFileState` / `abortController` 这类 session-local 状态，loop 正在退回编排层
+- interrupted-turn replay 也开始走 `headlessManagedSession.ts`，不再由 `headlessRuntimeLoop.ts` 直接操作消息缓冲
 - `headlessSessionBootstrap.ts` 已开始接管 `continue/resume/fork` 路径里的 session identity / metadata / file-pointer side effects，`headlessBootstrap.ts` 不再直接摸这些 session storage 细节
 - `loadInitialMessages()` 现在开始退回 source selection / validation / load-result shaping；loaded conversation 的 AppState/session 采纳重新回到 session bootstrap seam
+- resumed conversation 的 coordinator-mode warning / agentDefinitions refresh / `saveMode()` 也开始走 session bootstrap seam，`headlessBootstrap.ts` 进一步退回 load/shaping 层
+- startup hooks 产出的 `initialUserMessage` 也开始作为 load-result 返回，`headlessRuntimeLoop.ts` 不再直接读取 `sessionStart.ts` 的 side channel
 
 这一步的意义不是“shared session core 已完成”，而是：
 
@@ -379,6 +382,9 @@
 - headless 侧当前仍保留 cleanup stack / continue-resume bootstrap / command queue 在 loop 外层，shared session core 还只是沿 execution seam 前进，没有进入 REPL split 阶段
 - headless bootstrap ownership 虽然开始走 session seam，但 hydration / resume 数据装载本身仍在 `loadInitialMessages()`，还没和 REPL 侧统一
 - headless 的 loaded-conversation adoption 现在已经从 `loadInitialMessages()` 挪回 loop + session bootstrap seam，但 teleport / coordinator-mode refresh / startup hooks 这些 host-adjacent 行为还没继续下沉
+- headless 的 interrupted-turn replay 已经不是 loop 私有逻辑，但 command queue / startup hooks / coordinator refresh 仍在 loop 或 bootstrap 路径外层
+- coordinator-mode refresh 已不再留在 `loadInitialMessages()`，但 startup hooks 与 teleport 仍然是当前这条线剩下的主要 host-adjacent 尾巴
+- startup hooks 里的 `initialUserMessage` 已不再由 loop 直接读取侧信道，但 hook promise 的调度与 startup hook 执行本身仍在 bootstrap/load 路径外层
 
 验收标准：
 

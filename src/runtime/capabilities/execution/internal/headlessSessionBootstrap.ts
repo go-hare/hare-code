@@ -1,6 +1,9 @@
+import { feature } from 'bun:bundle'
 import { dirname } from 'path'
+import type { AgentDefinitionsResult } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { externalMetadataToAppState } from 'src/state/onChangeAppState.js'
 import type { AppState } from 'src/state/AppStateStore.js'
+import { getCwd } from 'src/utils/cwd.js'
 import type { SessionExternalMetadata } from 'src/utils/sessionState.js'
 import { restoreSessionStateFromLog } from 'src/utils/sessionRestore.js'
 import { asSessionId } from 'src/types/ids.js'
@@ -8,10 +11,18 @@ import {
   resetSessionFilePointer,
   resetSessionMetadataForResume,
   restoreSessionMetadata,
+  saveMode,
 } from 'src/utils/sessionStorage.js'
 import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
 
+/* eslint-disable @typescript-eslint/no-require-imports */
+const coordinatorModeModule = feature('COORDINATOR_MODE')
+  ? (require('../../../../coordinator/coordinatorMode.js') as typeof import('../../../../coordinator/coordinatorMode.js'))
+  : null
+/* eslint-enable @typescript-eslint/no-require-imports */
+
 type RestorableSessionMetadata = Parameters<typeof restoreSessionMetadata>[0]
+type HeadlessConversationMode = RestorableSessionMetadata['mode']
 
 export type HeadlessLoadedConversation = RestorableSessionMetadata & {
   sessionId?: string
@@ -28,6 +39,11 @@ type HeadlessSessionBootstrapDeps = {
   resetSessionMetadataForResume: () => void
   restoreSessionMetadata: (meta: RestorableSessionMetadata) => void
   restoreSessionStateFromLog: typeof restoreSessionStateFromLog
+  matchSessionMode?: (mode: HeadlessConversationMode) => string | undefined
+  isCoordinatorMode?: () => boolean
+  refreshAgentDefinitions?: () => Promise<AgentDefinitionsResult>
+  saveMode?: (mode: 'coordinator' | 'normal') => void
+  writeStderr?: (message: string) => void
 }
 
 export type HeadlessSessionBootstrap = {
@@ -43,6 +59,10 @@ export type HeadlessSessionBootstrap = {
       persistSession: boolean
     },
   ): Promise<void>
+  applyLoadedConversationMode(
+    mode: HeadlessConversationMode,
+    setAppState: (f: (prev: AppState) => AppState) => void,
+  ): Promise<void>
   adoptLoadedConversation(
     conversation: HeadlessLoadedConversation,
     options: {
@@ -57,6 +77,30 @@ const defaultDeps: HeadlessSessionBootstrapDeps = {
   resetSessionMetadataForResume,
   restoreSessionMetadata,
   restoreSessionStateFromLog,
+  matchSessionMode: coordinatorModeModule?.matchSessionMode,
+  isCoordinatorMode: coordinatorModeModule
+    ? () => coordinatorModeModule.isCoordinatorMode()
+    : undefined,
+  refreshAgentDefinitions: coordinatorModeModule
+    ? async () => {
+        const {
+          getAgentDefinitionsWithOverrides,
+          getActiveAgentsFromList,
+        } =
+          require('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js')
+        getAgentDefinitionsWithOverrides.cache.clear?.()
+        const freshAgentDefs = await getAgentDefinitionsWithOverrides(getCwd())
+        return {
+          ...freshAgentDefs,
+          allAgents: freshAgentDefs.allAgents,
+          activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
+        }
+      }
+    : undefined,
+  saveMode,
+  writeStderr: message => {
+    process.stderr.write(message)
+  },
 }
 
 export function createHeadlessSessionBootstrap(
@@ -105,6 +149,30 @@ export function createHeadlessSessionBootstrap(
     async applyLoadedConversation(conversation, setAppState, options) {
       deps.restoreSessionStateFromLog(conversation, setAppState)
       await adoptLoadedConversation(conversation, options)
+    },
+
+    async applyLoadedConversationMode(mode, setAppState) {
+      const warning = deps.matchSessionMode?.(mode)
+      if (warning) {
+        deps.writeStderr?.(`${warning}\n`)
+        const freshAgentDefs = await deps.refreshAgentDefinitions?.()
+        if (freshAgentDefs) {
+          setAppState(prev => ({
+            ...prev,
+            agentDefinitions: {
+              ...freshAgentDefs,
+              allAgents: freshAgentDefs.allAgents,
+              activeAgents: freshAgentDefs.activeAgents,
+            },
+          }))
+        }
+      }
+
+      if (deps.isCoordinatorMode && deps.saveMode) {
+        deps.saveMode(
+          deps.isCoordinatorMode() ? 'coordinator' : 'normal',
+        )
+      }
     },
 
     async adoptLoadedConversation(conversation, options) {

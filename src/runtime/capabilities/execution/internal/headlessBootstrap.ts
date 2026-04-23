@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { randomUUID } from 'crypto'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import type { AppState } from 'src/state/AppStateStore.js'
@@ -11,15 +10,16 @@ import {
   loadConversationForResume,
   type TurnInterruptionState,
 } from 'src/utils/conversationRecovery.js'
-import { getCwd } from 'src/utils/cwd.js'
 import { logError } from 'src/utils/log.js'
 import {
   hydrateRemoteSession,
   hydrateFromCCRv2InternalEvents,
-  saveMode,
 } from 'src/utils/sessionStorage.js'
 import { parseSessionIdentifier } from 'src/utils/sessionUrl.js'
-import { processSessionStartHooks } from 'src/utils/sessionStart.js'
+import {
+  processSessionStartHooks,
+  takeInitialUserMessage,
+} from 'src/utils/sessionStart.js'
 import { gracefulShutdownSync } from 'src/utils/gracefulShutdown.js'
 import {
   fileHistoryRewind,
@@ -34,12 +34,6 @@ import type { UUID } from 'crypto'
 import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
 import type { HeadlessSessionContext } from './headlessSessionControl.js'
 import type { HeadlessLoadedConversationResult } from './headlessSessionBootstrap.js'
-
-/* eslint-disable @typescript-eslint/no-require-imports */
-const coordinatorModeModule = feature('COORDINATOR_MODE')
-  ? (require('../../../../coordinator/coordinatorMode.js') as typeof import('../../../../coordinator/coordinatorMode.js'))
-  : null
-/* eslint-enable @typescript-eslint/no-require-imports */
 
 export function removeInterruptedMessage(
   messages: Message[],
@@ -57,6 +51,7 @@ export type LoadInitialMessagesResult = {
   agentSetting?: string
   externalMetadata?: SessionExternalMetadata | null
   loadedConversation?: HeadlessLoadedConversationResult
+  initialUserMessage?: string
 }
 
 export function emitLoadError(
@@ -164,39 +159,6 @@ export async function loadInitialMessages(
 
       const result = await loadConversationForResume(undefined, undefined)
       if (result) {
-        if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
-          const warning = coordinatorModeModule.matchSessionMode(result.mode)
-          if (warning) {
-            process.stderr.write(warning + '\n')
-            const {
-              getAgentDefinitionsWithOverrides,
-              getActiveAgentsFromList,
-            } =
-              require('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js')
-            getAgentDefinitionsWithOverrides.cache.clear?.()
-            const freshAgentDefs = await getAgentDefinitionsWithOverrides(
-              getCwd(),
-            )
-
-            setAppState(prev => ({
-              ...prev,
-              agentDefinitions: {
-                ...freshAgentDefs,
-                allAgents: freshAgentDefs.allAgents,
-                activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
-              },
-            }))
-          }
-        }
-
-        if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
-          saveMode(
-            coordinatorModeModule.isCoordinatorMode()
-              ? 'coordinator'
-              : 'normal',
-          )
-        }
-
         return {
           messages: result.messages,
           turnInterruptionState: result.turnInterruptionState,
@@ -297,9 +259,12 @@ export async function loadInitialMessages(
           parsedSessionId.isUrl ||
           isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)
         ) {
+          const messages =
+            await (options.sessionStartHooksPromise ??
+              processSessionStartHooks('startup'))
           return {
-            messages: await (options.sessionStartHooksPromise ??
-              processSessionStartHooks('startup')),
+            messages,
+            initialUserMessage: takeInitialUserMessage(),
           }
         } else {
           emitLoadError(
@@ -327,34 +292,6 @@ export async function loadInitialMessages(
         result.messages = index >= 0 ? result.messages.slice(0, index + 1) : []
       }
 
-      if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
-        const warning = coordinatorModeModule.matchSessionMode(result.mode)
-        if (warning) {
-          process.stderr.write(warning + '\n')
-          const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
-            require('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js')
-          getAgentDefinitionsWithOverrides.cache.clear?.()
-          const freshAgentDefs = await getAgentDefinitionsWithOverrides(
-            getCwd(),
-          )
-
-          setAppState(prev => ({
-            ...prev,
-            agentDefinitions: {
-              ...freshAgentDefs,
-              allAgents: freshAgentDefs.allAgents,
-              activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
-            },
-          }))
-        }
-      }
-
-      if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
-        saveMode(
-          coordinatorModeModule.isCoordinatorMode() ? 'coordinator' : 'normal',
-        )
-      }
-
       return {
         messages: result.messages,
         turnInterruptionState: result.turnInterruptionState,
@@ -374,8 +311,11 @@ export async function loadInitialMessages(
     }
   }
 
+  const messages =
+    await (options.sessionStartHooksPromise ??
+      processSessionStartHooks('startup'))
   return {
-    messages: await (options.sessionStartHooksPromise ??
-      processSessionStartHooks('startup')),
+    messages,
+    initialUserMessage: takeInitialUserMessage(),
   }
 }

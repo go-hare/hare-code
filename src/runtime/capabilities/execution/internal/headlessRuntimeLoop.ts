@@ -145,7 +145,6 @@ import { runSideQuestion } from 'src/utils/sideQuestion.js'
 import {
   processSessionStartHooks,
   processSetupHooks,
-  takeInitialUserMessage,
 } from 'src/utils/sessionStart.js'
 import {
   DEFAULT_OUTPUT_STYLE_NAME,
@@ -357,7 +356,6 @@ import {
   emitLoadError,
   handleRewindFiles,
   loadInitialMessages,
-  removeInterruptedMessage,
 } from './headlessBootstrap.js'
 import {
   completeHeadlessRewind,
@@ -675,6 +673,7 @@ export async function runHeadlessRuntimeLoop(
     agentSetting: resumedAgentSetting,
     externalMetadata,
     loadedConversation,
+    initialUserMessage,
   } = await loadInitialMessages(
     session,
     setAppState,
@@ -704,16 +703,18 @@ export async function runHeadlessRuntimeLoop(
         persistSession,
       },
     )
+    await session.bootstrap.applyLoadedConversationMode(
+      loadedConversation.mode,
+      setAppState,
+    )
   }
 
   // SessionStart hooks can emit initialUserMessage — the first user turn for
   // headless orchestrator sessions where stdin is empty and additionalContext
   // alone (an attachment, not a turn) would leave the REPL with nothing to
-  // respond to. The hook promise is awaited inside loadInitialMessages, so the
-  // module-level pending value is set by the time we get here.
-  const hookInitialUserMessage = takeInitialUserMessage()
-  if (hookInitialUserMessage) {
-    structuredIO.prependUserMessage(hookInitialUserMessage)
+  // respond to.
+  if (initialUserMessage) {
+    structuredIO.prependUserMessage(initialUserMessage)
   }
 
   // Restore agent setting from the resumed session (if not overridden by current --agent flag
@@ -1086,12 +1087,9 @@ function runHeadlessStreaming(
     // the model sees it exactly once. For mid-turn interruptions, the
     // deserialization layer transforms them into interrupted_prompt by
     // appending a synthetic "Continue from where you left off." message.
-    removeInterruptedMessage(mutableMessages, turnInterruptionState.message)
     enqueue({
       mode: 'prompt',
-      value: turnInterruptionState.message.message!.content as
-        | string
-        | ContentBlockParam[],
+      value: managedSession.resumeInterruptedTurn(turnInterruptionState.message),
       uuid: randomUUID(),
     })
   }

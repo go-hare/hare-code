@@ -3,6 +3,37 @@ import { describe, expect, test } from 'bun:test'
 import { createHeadlessManagedSession } from '../headlessManagedSession.js'
 
 describe('createHeadlessManagedSession', () => {
+  test('replays interrupted turns through the managed session buffer', () => {
+    const interruptedUserMessage = {
+      uuid: 'user-1',
+      type: 'user',
+      message: {
+        content: 'resume me',
+      },
+    } as any
+    const interruptionSentinel = {
+      uuid: 'system-1',
+      type: 'system',
+    } as any
+    const trailingMessage = {
+      uuid: 'tail-1',
+      type: 'user',
+      message: {
+        content: 'keep me',
+      },
+    } as any
+
+    const session = createHeadlessManagedSession(
+      [interruptedUserMessage, interruptionSentinel, trailingMessage],
+      process.cwd(),
+    )
+
+    expect(session.resumeInterruptedTurn(interruptedUserMessage)).toBe(
+      'resume me',
+    )
+    expect(session.messages).toEqual([trailingMessage])
+  })
+
   test('manages the active turn abort controller', () => {
     const session = createHeadlessManagedSession([], process.cwd())
 
