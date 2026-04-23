@@ -2,10 +2,6 @@ import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { randomUUID } from 'crypto'
 import last from 'lodash-es/last.js'
-import {
-  getSessionId,
-  isSessionPersistenceDisabled,
-} from 'src/bootstrap/state.js'
 import type {
   PermissionMode,
   SDKCompactBoundaryMessage,
@@ -90,7 +86,10 @@ import {
   shouldEnableThinkingByDefault,
   type ThinkingConfig,
 } from '../../../utils/thinking.js'
-import { createExecutionStateProviders } from '../../core/state/index.js'
+import {
+  createExecutionStateProviders,
+  type RuntimeBootstrapStateProvider,
+} from '../../core/state/index.js'
 
 // Lazy: MessageSelector.tsx pulls React/ink; only needed for message filtering at query time
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -146,6 +145,7 @@ export type QueryEngineConfig = {
   canUseTool: CanUseToolFn
   getAppState: () => AppState
   setAppState: (f: (prev: AppState) => AppState) => void
+  bootstrapStateProvider?: RuntimeBootstrapStateProvider
   initialMessages?: Message[]
   readFileCache: FileStateCache
   customSystemPrompt?: string
@@ -220,6 +220,7 @@ export class SessionRuntime {
     this.stateProviders = createExecutionStateProviders({
       getAppState: config.getAppState,
       setAppState: config.setAppState,
+      bootstrapStateProvider: config.bootstrapStateProvider,
     })
   }
 
@@ -254,7 +255,8 @@ export class SessionRuntime {
 
     this.discoveredSkillNames.clear()
     setCwd(cwd)
-    const persistSession = !isSessionPersistenceDisabled()
+    const persistSession =
+      !this.stateProviders.bootstrap.isSessionPersistenceDisabled()
     const startTime = Date.now()
 
     // Wrap canUseTool to track permission denials
@@ -347,7 +349,7 @@ export class SessionRuntime {
       toolMatchesName(t, SYNTHETIC_OUTPUT_TOOL_NAME),
     )
     if (jsonSchema && hasStructuredOutputTool) {
-      registerStructuredOutputEnforcement(setAppState, getSessionId())
+      registerStructuredOutputEnforcement(setAppState, this.getSessionId())
     }
 
     let processUserInputContext: ProcessUserInputContext = {
@@ -578,7 +580,7 @@ export class SessionRuntime {
               ...msg.message,
               content: stripAnsi(msg.message!.content),
             },
-            session_id: getSessionId(),
+            session_id: this.getSessionId(),
             parent_tool_use_id: null,
             uuid: msg.uuid,
             timestamp: msg.timestamp,
@@ -606,7 +608,7 @@ export class SessionRuntime {
           yield {
             type: 'system',
             subtype: 'compact_boundary' as const,
-            session_id: getSessionId(),
+            session_id: this.getSessionId(),
             uuid: msg.uuid,
             compact_metadata: toSDKCompactMetadata(compactMsg.compactMetadata),
           } as unknown as SDKCompactBoundaryMessage
@@ -632,7 +634,7 @@ export class SessionRuntime {
         num_turns: messages.length - 1,
         result: resultText ?? '',
         stop_reason: null,
-        session_id: getSessionId(),
+        session_id: this.getSessionId(),
         total_cost_usd: getTotalCost(),
         usage: this.totalUsage,
         modelUsage: getModelUsage(),
@@ -748,7 +750,7 @@ export class SessionRuntime {
               yield {
                 type: 'user',
                 message: msgToAck.message,
-                session_id: getSessionId(),
+                session_id: this.getSessionId(),
                 parent_tool_use_id: null,
                 uuid: msgToAck.uuid,
                 timestamp: msgToAck.timestamp,
@@ -838,7 +840,7 @@ export class SessionRuntime {
             yield {
               type: 'stream_event' as const,
               event,
-              session_id: getSessionId(),
+              session_id: this.getSessionId(),
               parent_tool_use_id: null,
               uuid: randomUUID(),
             }
@@ -879,7 +881,7 @@ export class SessionRuntime {
               is_error: true,
               num_turns: attachment.turnCount as number,
               stop_reason: lastStopReason,
-              session_id: getSessionId(),
+              session_id: this.getSessionId(),
               total_cost_usd: getTotalCost(),
               usage: this.totalUsage,
               modelUsage: getModelUsage(),
@@ -906,7 +908,7 @@ export class SessionRuntime {
                 role: 'user' as const,
                 content: attachment.prompt,
               },
-              session_id: getSessionId(),
+              session_id: this.getSessionId(),
               parent_tool_use_id: null,
               uuid: attachment.source_uuid || msg.uuid,
               timestamp: msg.timestamp,
@@ -961,7 +963,7 @@ export class SessionRuntime {
             yield {
               type: 'system',
               subtype: 'compact_boundary' as const,
-              session_id: getSessionId(),
+              session_id: this.getSessionId(),
               uuid: msg.uuid,
               compact_metadata: toSDKCompactMetadata(compactMsg.compactMetadata),
             }
@@ -976,7 +978,7 @@ export class SessionRuntime {
               retry_delay_ms: apiErrorMsg.retryInMs,
               error_status: apiErrorMsg.error.status ?? null,
               error: categorizeRetryableAPIError(apiErrorMsg.error),
-              session_id: getSessionId(),
+              session_id: this.getSessionId(),
               uuid: msg.uuid,
             }
           }
@@ -990,7 +992,7 @@ export class SessionRuntime {
             type: 'tool_use_summary' as const,
             summary: msg.summary,
             preceding_tool_use_ids: msg.precedingToolUseIds,
-            session_id: getSessionId(),
+            session_id: this.getSessionId(),
             uuid: msg.uuid,
           }
           break
@@ -1015,7 +1017,7 @@ export class SessionRuntime {
           is_error: true,
           num_turns: turnCount,
           stop_reason: lastStopReason,
-          session_id: getSessionId(),
+          session_id: this.getSessionId(),
           total_cost_usd: getTotalCost(),
           usage: this.totalUsage,
           modelUsage: getModelUsage(),
@@ -1058,7 +1060,7 @@ export class SessionRuntime {
             is_error: true,
             num_turns: turnCount,
             stop_reason: lastStopReason,
-            session_id: getSessionId(),
+            session_id: this.getSessionId(),
             total_cost_usd: getTotalCost(),
             usage: this.totalUsage,
             modelUsage: getModelUsage(),
@@ -1117,7 +1119,7 @@ export class SessionRuntime {
         is_error: true,
         num_turns: turnCount,
         stop_reason: lastStopReason,
-        session_id: getSessionId(),
+        session_id: this.getSessionId(),
         total_cost_usd: getTotalCost(),
         usage: this.totalUsage,
         modelUsage: getModelUsage(),
@@ -1170,7 +1172,7 @@ export class SessionRuntime {
       num_turns: turnCount,
       result: textResult,
       stop_reason: lastStopReason,
-      session_id: getSessionId(),
+      session_id: this.getSessionId(),
       total_cost_usd: getTotalCost(),
       usage: this.totalUsage,
       modelUsage: getModelUsage(),
@@ -1212,7 +1214,7 @@ export class SessionRuntime {
   }
 
   getSessionId(): string {
-    return getSessionId()
+    return this.stateProviders.bootstrap.getSessionIdentity().sessionId
   }
 
   setModel(model: string): void {
@@ -1251,6 +1253,7 @@ export async function* ask({
   jsonSchema,
   getAppState,
   setAppState,
+  bootstrapStateProvider,
   abortController,
   replayUserMessages = false,
   includePartialMessages = false,
@@ -1280,6 +1283,7 @@ export async function* ask({
   jsonSchema?: Record<string, unknown>
   getAppState: () => AppState
   setAppState: (f: (prev: AppState) => AppState) => void
+  bootstrapStateProvider?: RuntimeBootstrapStateProvider
   getReadFileCache: () => FileStateCache
   setReadFileCache: (cache: FileStateCache) => void
   abortController?: AbortController
@@ -1299,6 +1303,7 @@ export async function* ask({
     canUseTool,
     getAppState,
     setAppState,
+    bootstrapStateProvider,
     initialMessages: mutableMessages,
     readFileCache: cloneFileStateCache(getReadFileCache()),
     customSystemPrompt,

@@ -17,11 +17,11 @@
 
 ## 当前判断
 
-截至 2026-04-23，当前内核化已经进入 **最后收口阶段**，不是“还没开始”，也不是“需要推翻重来”。
+截至 2026-04-23，当前内核化已经进入 **源码级最后收口阶段**，不是“还没开始”，也不是“需要推翻重来”。
 
 一句话概括：
 
-> 当前项目已经完成统一入口、宿主改道、第一轮包级导出和最小测试护栏；剩余工作主要是实现压平和稳定性强化，而不是架构方向性重做。
+> 当前项目已经完成统一入口、宿主改道和最小测试护栏；剩余工作主要集中在 runtime state ownership、shared session core、REPL 巨石拆分，以及 package-level 发布面的真实收口。
 
 结合 2026-04-23 本轮收口进展，更准确的补充口径是：
 
@@ -189,9 +189,17 @@
 - `src/entrypoints/kernel.ts`
 - `dist/kernel.js`
 - `package.json` 的 `./kernel` export
-- 包级导入 smoke 已验证可用
 
-也就是说，kernel 已不只是源码级入口，而是已经有了第一轮正式发布面。
+但当前还不能据此宣称 package-level kernel 已经完成第一轮稳定收口。
+
+当前真实状态是：
+
+- package-level entrypoint 的文件骨架已经存在
+- build 产物里也已经有 `dist/kernel.js`
+- 但 built entry 仍存在导出名和稳定 kernel surface 不完全对齐的问题
+- 目前不能稳定保证 consumer 从 `@go-hare/hare-code/kernel` 取到预期命名的 bridge / daemon 导出
+
+也就是说，kernel 已不只是源码级入口，但还不能算“已经有了第一轮正式发布面”。
 
 ### 半完成
 
@@ -214,11 +222,17 @@
 - 更大范围的 consumer/import 组合回归
 - 更接近真实运行参数的 kernel headless / server e2e 覆盖
 
-#### 3. kernel 已有发布入口，但“长期发布级稳定面”仍在沉淀
+#### 3. kernel 已有发布入口骨架，但发布级稳定面尚未成立
 
 从工程动作上说，package-level kernel 入口已经有了。
 
-但从长期 API 承诺角度说，它目前更准确的口径仍然是“第一轮包级发布面已建立”，还不是已经被充分回归和长期 consumer 证明过的成熟稳定 API。
+但从当前工程现实看，它还不只是“长期稳定性不足”，而是仍有 package-level built export 未对齐的问题。
+
+更准确的口径应该是：
+
+- 源码级 kernel façade 已成立
+- package-level entrypoint 骨架已建立
+- 发布级 consumer surface 仍未完成，不应视为稳定外部承诺
 
 ### 已完成补充
 
@@ -280,18 +294,20 @@
 截至 2026-04-23，当前工程验证结果如下：
 
 - 已通过：`bun run typecheck`
-- 已通过：`bun test src/kernel/__tests__/headless.test.ts src/kernel/__tests__/serverHost.test.ts src/kernel/__tests__/surface.test.ts`
-- 已通过：`bun test src/kernel/__tests__/bridge.test.ts src/kernel/__tests__/daemon.test.ts src/kernel/__tests__/importDiscipline.test.ts src/kernel/__tests__/packageEntry.test.ts`
-- 已通过：`bun test tests/integration/kernel-package-smoke.test.ts`
-- 已通过：`bun test tests/integration/kernel-headless-smoke.test.ts tests/integration/kernel-server-smoke.test.ts`
-- 已通过：`bun test src/runtime/capabilities/server/__tests__/contracts.test.ts src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
-- 已通过：`bun test src/runtime/capabilities/execution/internal/__tests__/headlessBridgeForwarding.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessMcpRuntime.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessSessionControl.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessStreaming.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessStreamEmission.test.ts src/runtime/capabilities/execution/internal/__tests__/headlessPostTurn.test.ts`
-- 已通过：`src/cli/print.ts` wrapper 导入 smoke
+- 已通过：kernel 相关定向 smoke / seam 测试，包括：
+  - `tests/integration/kernel-headless-smoke.test.ts`
+  - `tests/integration/kernel-server-smoke.test.ts`
+  - `src/kernel/__tests__/importDiscipline.test.ts`
+  - launcher 级编排测试（headless / direct-connect / server）
 - 已通过：`bun run build`
-- 已通过：包级导入 smoke（`@go-hare/hare-code/kernel`）
-- 已通过：`node -e "import('./dist/kernel.js')"` 的 package-level built entry smoke
-- 已通过：kernel 相关定向测试（headless / serverHost / surface / DirectConnectSessionApi / workerRegistry / modeDispatch）
-- 未全绿：`bun test` 仍存在仓库存量失败，主要集中在若干无关模块的模块解析与 WebSearch adapter 测试
+- 已通过：`node -e "import('./dist/kernel.js')"` 可导入 built entry
+- 未通过：`tests/integration/kernel-package-smoke.test.ts`
+  - 当前 `dist/kernel.js` 里 bridge / daemon 相关导出名仍未和稳定 kernel surface 完全对齐
+- 未通过：`src/runtime/capabilities/server/__tests__/DirectConnectSessionApi.test.ts`
+- 未通过：`src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
+- 未通过：`src/runtime/capabilities/server/__tests__/contracts.test.ts`
+- 未通过：`src/runtime/capabilities/daemon/__tests__/contracts.test.ts`
+- 未全绿：`bun run test:all` 仍存在仓库存量失败；除了若干无关模块解析与 WebSearch adapter 测试外，也仍包含 kernel package / runtime contracts / direct-connect runtime 相关失败
 - 未全绿：`bun run lint` 仍存在仓库存量问题，主要是一批 `unused suppression` 与少量风格项
 
 ## 收口原则
@@ -424,7 +440,7 @@
 
 ### Runtime Contracts
 
-状态：server 已完成第一轮，bridge 已完成最小类型清理
+状态：server 已完成第一轮 contracts 结构下沉，但 runtime contracts 相关验证尚未全绿；bridge / daemon 也还不能视为稳定完成
 
 `refactor(runtime): 收口 runtime contracts`
 
@@ -435,6 +451,12 @@
 - `DangerousBackend` / `createServerLogger()` 作为默认实现保留在 server 层
 - `BackoffConfig` 已从 `bridgeMain.ts` 下沉到 `bridge/types.ts`
 - `HeadlessBridgeEntry.ts` 不再反向依赖 `bridgeMain.ts`
+
+但当前仍不能写成“这一层已经稳定完成”，因为：
+
+- `server / bridge / daemon` runtime contracts 相关测试在全量验证中仍未全绿
+- `DirectConnectSessionApi` 相关 runtime 测试当前也仍有失败
+- 这说明 contracts 结构虽然已经落下，但稳定性和实现对齐仍未收完
 
 ## 建议的 5 个 commit（历史拆分视角）
 
@@ -538,7 +560,7 @@
 
 ### Commit 5
 
-状态：已完成第一轮 package-level 收口，已提供 `dist/kernel.js` 的独立 build entry、`package.json` 的 `./kernel` export，并验证包级导入可用；长期稳定性仍需更多回归支撑
+状态：已建立 package-level entry 骨架，但尚未完成发布级收口；当前 built export 仍存在命名与稳定 surface 未完全对齐的问题
 
 `chore(build): 将 kernel 升级为发布级入口`
 
@@ -555,6 +577,12 @@
 - `README.md`
 - `README_EN.md`
 - `examples/README.md`
+
+当前距离验收仍差：
+
+- `@go-hare/hare-code/kernel` 需要稳定暴露预期命名的 kernel 导出
+- `tests/integration/kernel-package-smoke.test.ts` 需要转绿
+- built entry 与源码级 `src/kernel/index.ts` surface 需要重新对齐
 
 验收标准：
 

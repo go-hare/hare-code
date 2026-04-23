@@ -7,7 +7,6 @@ import type {
   TombstoneMessage,
   ToolUseSummaryMessage,
 } from '../../../types/message.js'
-import { getSessionId } from '../../../bootstrap/state.js'
 import { createTrace, endTrace, isLangfuseEnabled } from '../../../services/langfuse/index.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { getAPIProvider } from '../../../utils/model/providers.js'
@@ -25,6 +24,7 @@ export type LegacyTurnLoopRunner = (
 ) => AsyncGenerator<LegacyTurnStreamItem, Terminal>
 
 export type TurnEngineOptions = {
+  getSessionId: () => string
   runLoop: LegacyTurnLoopRunner
   onCommandCompleted?: (uuid: string) => void
 }
@@ -51,7 +51,7 @@ export class TurnEngine {
     const langfuseTrace = params.toolUseContext.langfuseTrace
       ?? (isLangfuseEnabled()
         ? createTrace({
-            sessionId: getSessionId(),
+            sessionId: this.options.getSessionId(),
             model: params.toolUseContext.options.mainLoopModel,
             provider: getAPIProvider(),
             input: params.messages,
@@ -82,7 +82,6 @@ export class TurnEngine {
       this.options.onCommandCompleted?.(uuid)
     }
 
-    // biome-ignore lint/style/noNonNullAssertion: terminal is always assigned when runLoop returns normally
     return terminal!
   }
 }

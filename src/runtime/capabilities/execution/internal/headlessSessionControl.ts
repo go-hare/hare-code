@@ -7,6 +7,7 @@ import type { SDKControlResponse, StdoutMessage } from 'src/entrypoints/sdk/cont
 import type { InternalPermissionMode } from 'src/types/permissions.js'
 import type { MCPServerConnection } from 'src/services/mcp/types.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/index.js'
+import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
 import { feature } from 'bun:bundle'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logMCPDebug } from 'src/utils/log.js'
@@ -43,11 +44,14 @@ export type HeadlessSessionControl = {
 
 export type HeadlessSessionContext = {
   control: HeadlessSessionControl
+  bootstrapStateProvider: RuntimeBootstrapStateProvider
   registerCleanup(cleanup: () => void | Promise<void>): void
   cleanup(): Promise<void>
 }
 
-export function createHeadlessSessionContext(): HeadlessSessionContext {
+export function createHeadlessSessionContext(
+  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+): HeadlessSessionContext {
   const receivedMessageUuids = new Set<UUID>()
   const receivedMessageUuidsOrder: UUID[] = []
   const handledOrphanedToolUseIds = new Set<string>()
@@ -86,6 +90,7 @@ export function createHeadlessSessionContext(): HeadlessSessionContext {
 
   return {
     control,
+    bootstrapStateProvider,
     registerCleanup(cleanup) {
       cleanupStack.push(cleanup)
     },

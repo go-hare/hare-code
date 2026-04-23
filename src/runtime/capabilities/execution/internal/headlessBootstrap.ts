@@ -38,12 +38,7 @@ import { isEnvTruthy } from '../../../../utils/envUtils.js'
 import { jsonStringify } from '../../../../utils/slowOperations.js'
 import { asSessionId } from 'src/types/ids.js'
 import type { UUID } from 'crypto'
-import {
-  getSessionId,
-  isSessionPersistenceDisabled,
-  setMainLoopModelOverride,
-  switchSession,
-} from 'src/bootstrap/state.js'
+import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const coordinatorModeModule = feature('COORDINATOR_MODE')
@@ -68,6 +63,7 @@ export type LoadInitialMessagesResult = {
 }
 
 export function emitLoadError(
+  bootstrapStateProvider: RuntimeBootstrapStateProvider,
   message: string,
   outputFormat: string | undefined,
 ): void {
@@ -80,7 +76,7 @@ export function emitLoadError(
       is_error: true,
       num_turns: 0,
       stop_reason: null,
-      session_id: getSessionId(),
+      session_id: bootstrapStateProvider.getSessionIdentity().sessionId,
       total_cost_usd: 0,
       usage: EMPTY_USAGE,
       modelUsage: {},
@@ -149,6 +145,7 @@ export async function handleRewindFiles(
 }
 
 export async function loadInitialMessages(
+  bootstrapStateProvider: RuntimeBootstrapStateProvider,
   setAppState: (f: (prev: AppState) => AppState) => void,
   options: {
     continue: boolean | undefined
@@ -162,7 +159,7 @@ export async function loadInitialMessages(
   },
   emitLoadError: (message: string, outputFormat: string | undefined) => void,
 ): Promise<LoadInitialMessagesResult> {
-  const persistSession = !isSessionPersistenceDisabled()
+  const persistSession = !bootstrapStateProvider.isSessionPersistenceDisabled()
   if (options.continue) {
     try {
       logEvent('tengu_continue_print', {})
@@ -195,7 +192,7 @@ export async function loadInitialMessages(
         }
 
         if (!options.forkSession && result.sessionId) {
-          switchSession(
+          bootstrapStateProvider.switchSession(
             asSessionId(result.sessionId),
             result.fullPath ? dirname(result.fullPath) : null,
           )
@@ -297,7 +294,9 @@ export async function loadInitialMessages(
         if (metadata) {
           setAppState(externalMetadataToAppState(metadata))
           if (typeof metadata.model === 'string') {
-            setMainLoopModelOverride(metadata.model)
+            bootstrapStateProvider.patchPromptState({
+              mainLoopModelOverride: metadata.model,
+            })
           }
         }
       } else if (
@@ -375,7 +374,7 @@ export async function loadInitialMessages(
       }
 
       if (!options.forkSession && result.sessionId) {
-        switchSession(
+        bootstrapStateProvider.switchSession(
           asSessionId(result.sessionId),
           result.fullPath ? dirname(result.fullPath) : null,
         )

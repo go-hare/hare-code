@@ -3,8 +3,8 @@ import { createHeadlessSessionContext } from '../headlessSessionControl.js'
 
 describe('createHeadlessSessionContext', () => {
   test('tracks received UUIDs per session', () => {
-    const sessionA = createHeadlessSessionContext()
-    const sessionB = createHeadlessSessionContext()
+    const sessionA = createHeadlessSessionContext({} as never)
+    const sessionB = createHeadlessSessionContext({} as never)
     const uuid =
       '11111111-1111-1111-1111-111111111111' as `${string}-${string}-${string}-${string}-${string}`
 
@@ -16,7 +16,7 @@ describe('createHeadlessSessionContext', () => {
   })
 
   test('runs registered cleanups once in reverse order', async () => {
-    const session = createHeadlessSessionContext()
+    const session = createHeadlessSessionContext({} as never)
     const calls: string[] = []
     const first = mock(() => {
       calls.push('first')

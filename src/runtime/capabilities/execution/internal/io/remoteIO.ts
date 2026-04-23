@@ -1,7 +1,6 @@
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
 import { PassThrough } from 'stream'
 import { URL } from 'url'
-import { getSessionId } from 'src/bootstrap/state.js'
 import { getPollIntervalConfig } from 'src/bridge/pollConfig.js'
 import { registerCleanup } from 'src/utils/cleanupRegistry.js'
 import { setCommandLifecycleListener } from 'src/utils/commandLifecycle.js'
@@ -43,6 +42,7 @@ export class RemoteIO extends StructuredIO {
 
   constructor(
     streamUrl: string,
+    sessionId: string,
     initialPrompt?: AsyncIterable<string>,
     replayUserMessages?: boolean,
   ) {
@@ -88,7 +88,7 @@ export class RemoteIO extends StructuredIO {
     this.transport = getTransportForUrl(
       this.url,
       headers,
-      getSessionId(),
+      sessionId,
       refreshHeaders,
     )
 

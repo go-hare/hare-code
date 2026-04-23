@@ -6,6 +6,7 @@ import type { Tools } from '../../../Tool.js'
 import type { ThinkingConfig } from '../../../utils/thinking.js'
 import type { HookResultMessage } from '../../../types/message.js'
 import type { AgentDefinition } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+import { createBootstrapStateProvider } from '../../core/state/bootstrapProvider.js'
 
 export type HeadlessRuntimeInput = string | AsyncIterable<string>
 
@@ -57,6 +58,7 @@ export async function runHeadlessRuntime(
   options: HeadlessRuntimeOptions,
 ): Promise<void> {
   const { runHeadless } = await import('./internal/headlessSession.js')
+  const bootstrapStateProvider = createBootstrapStateProvider()
   return runHeadless(
     inputPrompt,
     getAppState,
@@ -66,5 +68,6 @@ export async function runHeadlessRuntime(
     sdkMcpConfigs,
     agents,
     options,
+    bootstrapStateProvider,
   )
 }

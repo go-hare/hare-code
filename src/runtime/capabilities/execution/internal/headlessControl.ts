@@ -96,6 +96,7 @@ export function canBatchWith(
 
 export function getStructuredIO(
   inputPrompt: string | AsyncIterable<string>,
+  sessionId: string,
   options: {
     sdkUrl: string | undefined
     replayUserMessages?: boolean
@@ -125,7 +126,12 @@ export function getStructuredIO(
   }
 
   return options.sdkUrl
-    ? new RemoteIO(options.sdkUrl, inputStream, options.replayUserMessages)
+    ? new RemoteIO(
+        options.sdkUrl,
+        sessionId,
+        inputStream,
+        options.replayUserMessages,
+      )
     : new StructuredIO(inputStream, options.replayUserMessages)
 }
 

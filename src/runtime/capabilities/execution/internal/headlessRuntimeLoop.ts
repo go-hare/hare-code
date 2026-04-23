@@ -292,6 +292,7 @@ import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { AppState } from 'src/state/AppStateStore.js'
+import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
 import {
   fileHistoryRewind,
   fileHistoryCanRestore,
@@ -478,6 +479,7 @@ export async function runHeadlessRuntimeLoop(
     sessionStartHooksPromise?: ReturnType<typeof processSessionStartHooks>
     setSDKStatus?: (status: SDKStatus) => void
   },
+  bootstrapStateProvider: RuntimeBootstrapStateProvider,
   session: HeadlessSessionContext,
 ): Promise<void> {
   if (
@@ -573,7 +575,11 @@ export async function runHeadlessRuntimeLoop(
     return
   }
 
-  const structuredIO = getStructuredIO(inputPrompt, options)
+  const structuredIO = getStructuredIO(
+    inputPrompt,
+    session.bootstrapStateProvider.getSessionIdentity().sessionId,
+    options,
+  )
 
   // When emitting NDJSON for SDK clients, any stray write to stdout (debug
   // prints, dependency console.log, library banners) breaks the client's
@@ -671,7 +677,10 @@ export async function runHeadlessRuntimeLoop(
     messages: initialMessages,
     turnInterruptionState,
     agentSetting: resumedAgentSetting,
-  } = await loadInitialMessages(setAppState, {
+  } = await loadInitialMessages(
+    session.bootstrapStateProvider,
+    setAppState,
+    {
     continue: options.continue,
     teleport: options.teleport,
     resume: options.resume,
@@ -680,7 +689,10 @@ export async function runHeadlessRuntimeLoop(
     outputFormat: options.outputFormat,
     sessionStartHooksPromise: options.sessionStartHooksPromise,
     restoredWorkerState: structuredIO.restoredWorkerState,
-  }, emitLoadError)
+    },
+    (message, outputFormat) =>
+      emitLoadError(session.bootstrapStateProvider, message, outputFormat),
+  )
 
   // SessionStart hooks can emit initialUserMessage — the first user turn for
   // headless orchestrator sessions where stdin is empty and additionalContext
@@ -1979,6 +1991,7 @@ function runHeadlessStreaming(
                   appendSystemPrompt: options.appendSystemPrompt,
                   getAppState,
                   setAppState,
+                  bootstrapStateProvider: session.bootstrapStateProvider,
                   abortController,
                   replayUserMessages: options.replayUserMessages,
                   includePartialMessages: options.includePartialMessages,
