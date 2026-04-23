@@ -106,6 +106,7 @@
 当前已经成立的收口包括：
 
 - `main.tsx` 的 direct-connect 进入 `connectDirectHostSession(...)`
+- `main.tsx` 的 headless 主链进入 `runKernelHeadless(...)`
 - CLI `open <cc-url>` 进入同一个 `connectDirectHostSession(...)`
 - CLI `server` 命令通过 `assembleServerHost(...)` 完成默认 backend / session manager / logger 装配
 
@@ -143,8 +144,10 @@
 
 - `kernel/bridge.ts` 已新增 headless bridge 默认 deps 装配与 `runBridgeHeadless(...)`
 - `bridgeMain.ts` 的 headless 入口改经由 kernel helper，而不是在宿主层手工拼接默认 deps
+- `hosts/remote-control/index.ts` 已改为通过 `kernel/bridge.ts` 暴露 host-facing surface
 - `bridgeMain.ts` 的 session title / session fetch / initial session 创建已改用 kernel bridge session API export
 - `kernel/daemon.ts` 已新增 daemon 默认 deps 装配与 `runDaemonWorker(...)`
+- `hosts/daemon/index.ts` 已改为通过 `kernel/daemon.ts` 暴露 host-facing surface
 - `workerRegistry.ts` 已退为 kernel daemon 入口的兼容导出
 
 也就是说，bridge / daemon 已不再只是“宿主只认 kernel”，而是开始把宿主通用 wiring 上提到 kernel。
@@ -211,6 +214,8 @@
 - `headlessSessionControl.ts`
 - `headlessHostIO.ts`
 - `headlessMcp.ts`
+- `headlessBridgeForwarding.ts`
+- `headlessMcpRuntime.ts`
 
 同时，`HeadlessCore.ts` 已经退出主链并被删除；原先挂在其中的 MCP diff helper 已独立到 `headlessMcp.ts`。
 

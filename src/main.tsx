@@ -391,6 +391,7 @@ import {
 	connectDefaultKernelHeadlessMcp,
 	createDefaultKernelHeadlessEnvironment,
 	prepareKernelHeadlessStartup,
+	runKernelHeadless,
 } from "./kernel/index.js";
 import {
 	connectDirectHostSession,
@@ -3837,10 +3838,7 @@ async function run(): Promise<CommanderCommand> {
 					process.exit(1);
 				}
 
-				const {
-					store: headlessStore,
-					commands: commandsHeadless,
-				} = createDefaultKernelHeadlessEnvironment({
+				const headlessEnvironment = createDefaultKernelHeadlessEnvironment({
 					commands,
 					disableSlashCommands,
 					tools,
@@ -3855,6 +3853,7 @@ async function run(): Promise<CommanderCommand> {
 					advisorModel,
 					kairosEnabled,
 				});
+				const headlessStore = headlessEnvironment.store;
 
 				// Await all MCP configs — print mode is often single-turn, so
 				// "late-connecting servers visible next turn" doesn't help. SDK init
@@ -3886,51 +3885,37 @@ async function run(): Promise<CommanderCommand> {
 						logSessionTelemetry,
 					},
 				);
-				profileCheckpoint("before_headless_runtime_import");
-				const { runHeadlessRuntime } = await import(
-					"src/runtime/capabilities/execution/HeadlessRuntime.js"
-				);
-				profileCheckpoint("after_headless_runtime_import");
-				void runHeadlessRuntime(
-					inputPrompt,
-					() => headlessStore.getState(),
-					headlessStore.setState,
-					commandsHeadless,
-					tools,
-					sdkMcpConfigs,
-					agentDefinitions.activeAgents,
-					{
-						continue: options.continue,
-						resume: options.resume,
-						verbose: verbose,
-						outputFormat: outputFormat,
-						jsonSchema,
-						permissionPromptToolName: options.permissionPromptTool,
-						allowedTools,
-						thinkingConfig,
-						maxTurns: options.maxTurns,
-						maxBudgetUsd: options.maxBudgetUsd,
-						taskBudget: options.taskBudget
-							? { total: options.taskBudget }
-							: undefined,
-						systemPrompt,
-						appendSystemPrompt,
-						userSpecifiedModel: effectiveModel,
-						fallbackModel: userSpecifiedFallbackModel,
-						teleport,
-						sdkUrl,
-						replayUserMessages: effectiveReplayUserMessages,
-						includePartialMessages: effectiveIncludePartialMessages,
-						forkSession: options.forkSession || false,
-						resumeSessionAt: options.resumeSessionAt || undefined,
-						rewindFiles: options.rewindFiles,
-						enableAuthStatus: options.enableAuthStatus,
-						agent: agentCli,
-						workload: options.workload,
-						setupTrigger: setupTrigger ?? undefined,
-						sessionStartHooksPromise,
-					},
-				);
+				void runKernelHeadless(inputPrompt, headlessEnvironment, {
+					continue: options.continue,
+					resume: options.resume,
+					verbose: verbose,
+					outputFormat: outputFormat,
+					jsonSchema,
+					permissionPromptToolName: options.permissionPromptTool,
+					allowedTools,
+					thinkingConfig,
+					maxTurns: options.maxTurns,
+					maxBudgetUsd: options.maxBudgetUsd,
+					taskBudget: options.taskBudget
+						? { total: options.taskBudget }
+						: undefined,
+					systemPrompt,
+					appendSystemPrompt,
+					userSpecifiedModel: effectiveModel,
+					fallbackModel: userSpecifiedFallbackModel,
+					teleport,
+					sdkUrl,
+					replayUserMessages: effectiveReplayUserMessages,
+					includePartialMessages: effectiveIncludePartialMessages,
+					forkSession: options.forkSession || false,
+					resumeSessionAt: options.resumeSessionAt || undefined,
+					rewindFiles: options.rewindFiles,
+					enableAuthStatus: options.enableAuthStatus,
+					agent: agentCli,
+					workload: options.workload,
+					setupTrigger: setupTrigger ?? undefined,
+					sessionStartHooksPromise,
+				});
 				return;
 			}
 

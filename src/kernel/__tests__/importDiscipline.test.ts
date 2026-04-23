@@ -52,4 +52,17 @@ describe('kernel import discipline', () => {
       /server\/serverLog\.js/,
     ])
   })
+
+  test('remote-control host surface re-exports from kernel instead of runtime bridge internals', async () => {
+    await expectNotToContain('src/hosts/remote-control/index.ts', [
+      /runtime\/capabilities\/bridge\/BridgeRuntime\.js/,
+    ])
+  })
+
+  test('daemon host surface re-exports from kernel instead of runtime daemon internals', async () => {
+    await expectNotToContain('src/hosts/daemon/index.ts', [
+      /runtime\/capabilities\/daemon\/DaemonWorkerRuntime\.js/,
+      /\brunDaemonWorkerRuntime\b/,
+    ])
+  })
 })

@@ -4,4 +4,4 @@ export {
   runBridgeHeadlessRuntime as runRemoteControlHeadlessHost,
   type BridgeCliEntry,
   type BridgeHeadlessEntry,
-} from '../../runtime/capabilities/bridge/BridgeRuntime.js'
+} from '../../kernel/bridge.js'

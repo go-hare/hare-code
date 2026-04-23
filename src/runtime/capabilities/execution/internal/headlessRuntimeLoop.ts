@@ -86,10 +86,6 @@ import {
   wrapChannelMessage,
   findChannelEntry,
 } from 'src/services/mcp/channelNotification.js'
-import {
-  isChannelAllowlisted,
-  isChannelsEnabled,
-} from 'src/services/mcp/channelAllowlist.js'
 import { parsePluginIdentifier } from 'src/utils/plugins/pluginIdentifier.js'
 import { validateUuid } from 'src/utils/uuid.js'
 import { fromArray } from 'src/utils/generators.js'
@@ -249,10 +245,7 @@ import {
   ElicitationCompleteNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { getMcpPrefix } from 'src/services/mcp/mcpStringUtils.js'
-import {
-  commandBelongsToServer,
-  filterToolsByServer,
-} from 'src/services/mcp/utils.js'
+import { commandBelongsToServer } from 'src/services/mcp/utils.js'
 import { setupVscodeSdkMcp } from 'src/services/mcp/vscodeSdkMcp.js'
 import { getAllMcpConfigs } from 'src/services/mcp/config.js'
 import {
@@ -352,6 +345,7 @@ import {
   handleMcpSetServers,
   reconcileMcpServers,
 } from './headlessMcp.js'
+import { buildMcpServerStatusesRuntime } from './headlessMcpRuntime.js'
 import {
   canBatchWith,
   createCanUseToolWithPermissionPrompt,
@@ -376,6 +370,7 @@ import {
   writeHeadlessResult,
   writeHeadlessStderr,
 } from './headlessHostIO.js'
+import { forwardMessagesToBridge as forwardBridgeMessages } from './headlessBridgeForwarding.js'
 import { jsonStringify } from '../../../../utils/slowOperations.js'
 import { skillChangeDetector } from '../../../../utils/skills/skillChangeDetector.js'
 import { getCommands, clearCommandsCache } from '../../../../commands.js'
@@ -1453,19 +1448,11 @@ function runHeadlessStreaming(
   // recentPostedUUIDs) — the index cursor here is a pre-filter to avoid
   // O(n) re-scanning of already-sent messages on every call.
   function forwardMessagesToBridge(): void {
-    if (!bridgeHandle) return
-    // Guard against mutableMessages shrinking (compaction truncates it).
-    const startIndex = Math.min(
+    bridgeLastForwardedIndex = forwardBridgeMessages({
+      bridgeHandle,
       bridgeLastForwardedIndex,
-      mutableMessages.length,
-    )
-    const newMessages = mutableMessages
-      .slice(startIndex)
-      .filter(m => m.type === 'user' || m.type === 'assistant')
-    bridgeLastForwardedIndex = mutableMessages.length
-    if (newMessages.length > 0) {
-      bridgeHandle.writeMessages(newMessages)
-    }
+      mutableMessages,
+    })
   }
 
   // Helper to apply MCP server changes - used by both mcp_set_servers control message
@@ -1548,98 +1535,11 @@ function runHeadlessStreaming(
   // Build McpServerStatus[] for control responses. Shared by mcp_status and
   // reload_plugins handlers. Reads closure state: sdkClients, dynamicMcpState.
   function buildMcpServerStatuses(): McpServerStatus[] {
-    const currentAppState = getAppState()
-    const currentMcpClients = currentAppState.mcp.clients
-    const allMcpTools = uniqBy(
-      [...currentAppState.mcp.tools, ...dynamicMcpState.tools],
-      'name',
-    )
-    const existingNames = new Set([
-      ...currentMcpClients.map(c => c.name),
-      ...sdkClients.map(c => c.name),
-    ])
-    return [
-      ...currentMcpClients,
-      ...sdkClients,
-      ...dynamicMcpState.clients.filter(c => !existingNames.has(c.name)),
-    ].map(connection => {
-      let config
-      if (
-        connection.config.type === 'sse' ||
-        connection.config.type === 'http'
-      ) {
-        config = {
-          type: connection.config.type,
-          url: connection.config.url,
-          headers: connection.config.headers,
-          oauth: connection.config.oauth,
-        }
-      } else if (connection.config.type === 'claudeai-proxy') {
-        config = {
-          type: 'claudeai-proxy' as const,
-          url: connection.config.url,
-          id: connection.config.id,
-        }
-      } else if (
-        connection.config.type === 'stdio' ||
-        connection.config.type === undefined
-      ) {
-        const stdioConfig = connection.config as {
-          command: string
-          args: string[]
-        }
-        config = {
-          type: 'stdio' as const,
-          command: stdioConfig.command,
-          args: stdioConfig.args,
-        }
-      }
-      const serverTools =
-        connection.type === 'connected'
-          ? filterToolsByServer(allMcpTools, connection.name).map(tool => ({
-              name: tool.mcpInfo?.toolName ?? tool.name,
-              annotations: {
-                readOnly: tool.isReadOnly({}) || undefined,
-                destructive: tool.isDestructive?.({}) || undefined,
-                openWorld: tool.isOpenWorld?.({}) || undefined,
-              },
-            }))
-          : undefined
-      // Capabilities passthrough with allowlist pre-filter. The IDE reads
-      // experimental['claude/channel'] to decide whether to show the
-      // Enable-channel prompt — only echo it if channel_enable would
-      // actually pass the allowlist. Not a security boundary (the
-      // handler re-runs the full gate); just avoids dead buttons.
-      let capabilities: { experimental?: Record<string, unknown> } | undefined
-      if (
-        (feature('KAIROS') || feature('KAIROS_CHANNELS')) &&
-        connection.type === 'connected' &&
-        connection.capabilities.experimental
-      ) {
-        const exp = { ...connection.capabilities.experimental }
-        if (
-          exp['claude/channel'] &&
-          (!isChannelsEnabled() ||
-            !isChannelAllowlisted(connection.config.pluginSource))
-        ) {
-          delete exp['claude/channel']
-        }
-        if (Object.keys(exp).length > 0) {
-          capabilities = { experimental: exp }
-        }
-      }
-      return {
-        name: connection.name,
-        status: connection.type as McpServerStatus['status'],
-        serverInfo:
-          connection.type === 'connected' ? connection.serverInfo : undefined,
-        error: connection.type === 'failed' ? connection.error : undefined,
-        config,
-        scope: connection.config.scope,
-        tools: serverTools,
-        capabilities,
-      }
-    }) as McpServerStatus[]
+    return buildMcpServerStatusesRuntime({
+      appState: getAppState(),
+      sdkClients,
+      dynamicMcpState,
+    })
   }
 
   // NOTE: Nested function required - needs closure access to applyMcpServerChanges and updateSdkMcp
