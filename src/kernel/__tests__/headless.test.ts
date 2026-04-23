@@ -3,37 +3,6 @@ import { describe, expect, mock, test } from 'bun:test'
 const mockRunHeadlessRuntime = mock(async () => {})
 const mockSetState = mock((_updater: unknown) => {})
 
-mock.module('../../state/AppStateStore.js', () => ({
-  getDefaultAppState: () => ({}),
-}))
-
-mock.module('../../state/onChangeAppState.js', () => ({
-  onChangeAppState: () => {},
-}))
-
-mock.module('../../state/store.js', () => ({
-  createStore: () => ({
-    getState: () => ({}),
-    setState: mockSetState,
-  }),
-}))
-
-mock.module('../../utils/effort.js', () => ({
-  getInitialEffortSetting: () => 'medium',
-  parseEffortValue: () => undefined,
-}))
-
-mock.module('../../utils/fastMode.js', () => ({
-  getInitialFastModeSetting: () => false,
-  isFastModeEnabled: () => false,
-}))
-
-mock.module('../../utils/permissions/permissionSetup.js', () => ({
-  verifyAutoModeGateAccess: mock(async () => ({
-    updateContext: (context: unknown) => context,
-  })),
-}))
-
 mock.module('../../runtime/capabilities/execution/HeadlessRuntime.js', () => ({
   runHeadlessRuntime: mockRunHeadlessRuntime,
 }))

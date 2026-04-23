@@ -1,2 +1,1 @@
-// Auto-generated stub — replace with real implementation
-export type Transport = any;
+export type { Transport } from '../../runtime/capabilities/execution/internal/io/transports/Transport.js'

@@ -23,6 +23,10 @@
 
 > 当前项目已经完成统一入口、宿主改道、第一轮包级导出和最小测试护栏；剩余工作主要是实现压平和稳定性强化，而不是架构方向性重做。
 
+结合 2026-04-23 本轮收口进展，更准确的补充口径是：
+
+> headless 的依赖方向已经完成第一轮纠偏：`HeadlessRuntime` 不再直接回落到 `src/cli/print.ts`，CLI 仍然是第一宿主，但 headless 可复用执行实现已经开始向 `src/runtime/capabilities/execution/internal/*` 下沉。
+
 当前已经成立的结构是：
 
 - CLI 仍是主宿主，但不再独占核心能力
@@ -62,7 +66,30 @@
 
 这意味着 headless 的接入归属已经清晰，外部可以通过 kernel headless 入口稳定接入。
 
-#### 3. server / direct-connect 顶层宿主已基本 kernel-first
+#### 3. headless 依赖方向第一轮纠偏已完成
+
+当前已经完成：
+
+- `src/runtime/capabilities/execution/HeadlessRuntime.ts` 不再直接 import `src/cli/print.ts`
+- `src/cli/print.ts` 已收缩为 CLI compatibility wrapper
+- runtime internal 已建立第一轮模块簇：
+  - `headlessSession.ts`
+  - `headlessSessionControl.ts`
+  - `headlessRuntimeLoop.ts`
+  - `headlessControl.ts`
+  - `headlessBootstrap.ts`
+  - `headlessHostIO.ts`
+  - `headlessMcp.ts`
+- `StructuredIO` / `RemoteIO` / `ndjsonSafeStringify` / transport stack 已迁到 `src/runtime/capabilities/execution/internal/io/*`
+- `installOAuthTokens` 已迁到 `src/services/oauth/installOAuthTokens.ts`
+
+这意味着：
+
+- CLI 仍然保留第一宿主地位
+- 但 runtime 已经开始真正拥有 headless 实现，而不是继续直接依赖 CLI 私有模块
+- headless runtime internal 子树已不再直接 import `src/cli/*`
+
+#### 4. server / direct-connect 顶层宿主已基本 kernel-first
 
 `src/kernel/serverHost.ts` 已统一暴露：
 
@@ -72,13 +99,13 @@
 
 同时 `main.tsx` 与 CLI host command 已优先经过 kernel façade，而不是直接拼接 `server/*` 细节。
 
-#### 4. bridge / daemon 顶层入口第一轮收口已完成
+#### 5. bridge / daemon 顶层入口第一轮收口已完成
 
 `bridgeMain.ts`、`createSession.ts`、`workerRegistry.ts` 现在都已经优先依赖 `src/kernel/bridge.ts` / `src/kernel/daemon.ts`，顶层宿主不再明显依赖 runtime 深路径。
 
 也就是说，bridge / daemon 第一轮“宿主只认 kernel”收口已经成立。
 
-#### 5. 最小 kernel contract / surface 护栏已落地
+#### 6. 最小 kernel contract / surface 护栏已落地
 
 当前已经有以下最小护栏：
 
@@ -91,7 +118,7 @@
 
 它们已经覆盖了最小的 surface / delegation / façade / direct-connect contract 断言，说明 kernel 已不再是“无护栏状态”。
 
-#### 6. package-level kernel 发布入口第一轮已建立
+#### 7. package-level kernel 发布入口第一轮已建立
 
 当前已经具备：
 
@@ -104,13 +131,31 @@
 
 ### 半完成
 
-#### 1. headless 实现收口：入口已完成，底层仍复用历史 CLI loop
+#### 1. headless 实现收口：主链已切到 runtime，内部 seam 已成型
 
 `main.tsx` 和 `src/kernel/headless.ts` 已统一经过 runtime 级 `HeadlessRuntime` 入口。
 
-但 `HeadlessRuntime` 底层仍复用 `cli/print.ts` 中的 `runHeadless()`，说明 headless 的最终实现还没有完全从历史 CLI 模块物理下沉。
+当前已经不再是：
 
-这是当前最典型的“外壳已 kernel 化、实现层仍未完全物理下沉”的点。
+- `HeadlessRuntime -> cli/print.ts`
+
+而是已经变成：
+
+- `HeadlessRuntime -> internal/headlessSession.ts -> internal/headlessRuntimeLoop.ts`
+
+同时，`headlessSession.ts` 已不再是纯 barrel，而是成为显式 session boundary，对外导出 `runHeadless()`，再委托给 `headlessRuntimeLoop.ts`。
+
+虽然 `runHeadlessStreaming(...)` 与主执行循环仍集中在 `headlessRuntimeLoop.ts`，但 `loadInitialMessages(...)`、`handleInitializeRequest(...)`、`handleRewindFiles(...)`、权限控制、channel 控制和 MCP diff 都已经分别下沉到
+
+- `headlessBootstrap.ts`
+- `headlessControl.ts`
+- `headlessSessionControl.ts`
+- `headlessHostIO.ts`
+- `headlessMcp.ts`
+
+同时，`HeadlessCore.ts` 已经退出主链并被删除；原先挂在其中的 MCP diff helper 已独立到 `headlessMcp.ts`。
+
+也就是说，当前已经完成“先改依赖方向”和“把 CLI 共享实现迁出 CLI 私有路径”；剩余更多是后续是否继续压平 `headlessRuntimeLoop.ts` 的实现粒度问题，而不是 runtime 继续落回 CLI 私有层。
 
 #### 2. serverHost / bridge / daemon 的 kernel 层仍偏薄 façade
 
@@ -140,16 +185,9 @@
 
 ### 未完成
 
-#### 1. headless 底层完全脱离历史 CLI 实现
-
-目标已经不是再改入口，而是继续把仍在 `cli/print.ts` 里的 headless 底层实现下沉到 runtime / kernel 内部边界。
-
-这一点仍然未完成。
-
-#### 2. kernel 内部链路进一步压平
+#### 1. kernel 内部链路进一步压平
 
 当前仍可描述为：
-
 - `kernel -> server`
 - `kernel -> bridge/runtime`
 - `kernel -> daemon/runtime`
@@ -171,6 +209,8 @@
 截至 2026-04-23，当前工程验证结果如下：
 
 - 已通过：`bun run typecheck`
+- 已通过：`bun test src/kernel/__tests__/headless.test.ts src/kernel/__tests__/serverHost.test.ts src/kernel/__tests__/surface.test.ts`
+- 已通过：`src/cli/print.ts` wrapper 导入 smoke
 - 已通过：`bun run build`
 - 已通过：包级导入 smoke（`@go-hare/hare-code/kernel`）
 - 已通过：kernel 相关定向测试（headless / serverHost / surface / DirectConnectSessionApi / workerRegistry / modeDispatch）
@@ -184,10 +224,73 @@
 1. 先收调用入口，再决定是否搬实现
 2. 先统一顶层宿主引用，再清理内部深路径
 3. 不把“入口收口”和“发布导出”混成一个提交
-4. 不在第一刀中物理大搬 `cli/print.ts`
-5. 等接口边界稳定后再补 contract tests
+4. headless 优先先改依赖方向，再按 `session / control / bootstrap` seam 继续拆内部实现
+5. CLI 始终保留第一宿主地位，剥离的是可复用核心实现，不是 CLI 宿主身份
+6. 等接口边界稳定后再补更强的 contract / smoke tests
 
-## 建议的 5 个 commit
+## 当前推荐执行阶段
+
+### Phase 1
+
+状态：已完成
+
+`refactor(runtime): 将 headless 执行核心下沉到 runtime internal`
+
+当前已完成：
+
+- `HeadlessRuntime.ts` 不再直接依赖 `src/cli/print.ts`
+- `src/cli/print.ts` 已退为 compatibility wrapper
+- `headlessControl` / `headlessBootstrap` / `headlessSession` seam 已立起来
+- `headlessSessionControl` / `headlessRuntimeLoop` / `headlessMcp` 已继续将会话控制、运行循环和 MCP diff 拆开
+- `headlessHostIO` 已将 `headlessRuntimeLoop` 中最明显的 host IO 职责抽离
+- `HeadlessCore.ts` 已退出主链并删除
+- `headlessSession.ts` 已成为显式 session boundary，而不是纯 barrel
+- `StructuredIO` / `RemoteIO` / transport / `ndjsonSafeStringify` 已迁到 runtime internal `io/*`
+- `installOAuthTokens` 已迁到非 CLI 的共享 service 路径
+
+验收标准：
+
+- `HeadlessRuntime.ts` 不再直接 import `src/cli/print.ts`
+- runtime internal 不再直接 import `src/cli/*`
+- `cli/print.ts` 退为 compatibility wrapper
+- headless 核心按 runtime internal seam 拆开，而不是继续堆在历史 CLI 私有路径中
+
+### Phase 2
+
+状态：未开始
+
+`refactor(kernel): 将 server/direct-connect 升级为 host-facing 轻编排层`
+
+目标：
+
+- 让 `src/kernel/serverHost.ts` 从 symbol re-export 升级为 host-facing 装配边界
+- 吸收 direct-connect / server 启动中的通用归一化和默认装配
+- 让 `main.tsx` 与 CLI host commands 更少了解 `server/*` 深路径细节
+
+### Phase 3
+
+状态：未开始
+
+`refactor(kernel): 将 bridge / daemon 宿主装配上提到 kernel`
+
+目标：
+
+- bridge 利用现有 injected-deps seam，把 host assembly 从 `bridgeMain.ts` 上提到 `src/kernel/bridge.ts`
+- daemon 只做 thin upgrade，把 `workerRegistry.ts` 当前的 wiring 继续收薄到 kernel
+
+### Phase 4
+
+状态：未开始
+
+`test(kernel): 补 contract / seam / smoke 护栏`
+
+目标：
+
+- 扩展 `src/kernel/__tests__/*` 的 seam tests
+- 补 `execution internal` 的 focused tests
+- 增加少量 kernel headless / direct-connect smoke
+
+## 建议的 5 个 commit（历史拆分视角）
 
 ### Commit 1
 

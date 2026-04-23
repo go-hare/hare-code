@@ -1,4 +1,3 @@
-import { runHeadless } from '../../../cli/print.js'
 import type { Command } from '../../../commands.js'
 import type { SDKStatus } from '../../../entrypoints/agentSdkTypes.js'
 import type { McpSdkServerConfig } from '../../../services/mcp/types.js'
@@ -44,9 +43,8 @@ export type HeadlessRuntimeOptions = {
 /**
  * Runtime-owned headless entry point.
  *
- * The current implementation still reuses cli/print.ts underneath, but
- * callers should depend on this runtime boundary instead of importing the CLI
- * module directly.
+ * The headless execution stack now lives under runtime-owned modules so
+ * callers can depend on this boundary without reaching into CLI internals.
  */
 export async function runHeadlessRuntime(
   inputPrompt: HeadlessRuntimeInput,
@@ -58,6 +56,7 @@ export async function runHeadlessRuntime(
   agents: AgentDefinition[],
   options: HeadlessRuntimeOptions,
 ): Promise<void> {
+  const { runHeadless } = await import('./internal/headlessSession.js')
   return runHeadless(
     inputPrompt,
     getAppState,
