@@ -47,9 +47,14 @@ describe('kernel import discipline', () => {
     await expectNotToContain('src/hosts/cli/registerCliHostCommands.ts', [
       /\bcreateDirectConnectSession\(/,
       /\bDirectConnectError\b/,
+      /\bassembleServerHost\(/,
       /server\/sessionManager\.js/,
       /server\/backends\/dangerousBackend\.js/,
       /server\/serverLog\.js/,
+      /server\/serverBanner\.js/,
+      /server\/lockfile\.js/,
+      /process\.once\(\s*['"]SIGINT['"]/,
+      /process\.once\(\s*['"]SIGTERM['"]/,
     ])
   })
 

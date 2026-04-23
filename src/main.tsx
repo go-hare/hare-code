@@ -387,11 +387,8 @@ import { migrateSonnet1mToSonnet45 } from "./migrations/migrateSonnet1mToSonnet4
 import { migrateSonnet45ToSonnet46 } from "./migrations/migrateSonnet45ToSonnet46.js";
 import { resetAutoModeOptInForDefaultOffer } from "./migrations/resetAutoModeOptInForDefaultOffer.js";
 import { resetProToOpusDefault } from "./migrations/resetProToOpusDefault.js";
+import { runDirectConnectLaunch } from "./hosts/cli/launchers/directConnectLauncher.js";
 import { runHeadlessLaunch } from "./hosts/cli/launchers/headlessLauncher.js";
-import {
-	connectDirectHostSession,
-	getDirectConnectErrorMessage,
-} from "./kernel/serverHost.js";
 import { createRemoteSessionConfig } from "./remote/RemoteSessionManager.js";
 /* eslint-enable @typescript-eslint/no-require-imports */
 // teleportWithProgress dynamically imported at call site
@@ -4270,49 +4267,34 @@ async function run(): Promise<CommanderCommand> {
 				// `claude connect <url>` — full interactive TUI connected to a remote server
 				const pendingConnect = _pendingConnect!;
 				const directConnectServerUrl = pendingConnect.url!;
-				let directConnectConfig;
-				try {
-					directConnectConfig = await connectDirectHostSession({
+				await runDirectConnectLaunch({
+					root,
+					appProps: { getFpsMetrics, stats, initialState },
+					replProps: {
+						debug: debug || debugToStderr,
+						commands,
+						autoConnectIdeFlag: ide,
+						mainThreadAgentDefinition,
+						disableSlashCommands,
+						thinkingConfig,
+					},
+					renderAndRun,
+					connect: {
 						serverUrl: directConnectServerUrl,
 						authToken: pendingConnect.authToken,
 						cwd: getOriginalCwd(),
 						dangerouslySkipPermissions:
 							pendingConnect.dangerouslySkipPermissions,
-					}, {
+					},
+					stateWriter: {
 						setOriginalCwd,
 						setCwdState,
 						setDirectConnectServerUrl,
-					});
-				} catch (err) {
-					return await exitWithError(
-						root,
-						getDirectConnectErrorMessage(err),
-						() => gracefulShutdown(1),
-					);
-				}
-
-				const connectInfoMessage = createSystemMessage(
-					`Connected to server at ${directConnectServerUrl}\nSession: ${directConnectConfig.sessionId}`,
-					"info",
-				);
-
-				await launchRepl(
-					root,
-					{ getFpsMetrics, stats, initialState },
-					{
-						debug: debug || debugToStderr,
-						commands,
-						initialTools: [],
-						initialMessages: [connectInfoMessage],
-						mcpClients: [],
-						autoConnectIdeFlag: ide,
-						mainThreadAgentDefinition,
-						disableSlashCommands,
-						directConnectConfig,
-						thinkingConfig,
 					},
-					renderAndRun,
-				);
+					onConnectionError(message) {
+						return exitWithError(root, message, () => gracefulShutdown(1));
+					},
+				});
 				return;
 			} else if (launchMode === "ssh-remote") {
 				// `claude ssh <host> [dir]` — probe remote, deploy binary if needed,

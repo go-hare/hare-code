@@ -12,7 +12,6 @@ import {
 import { registerMcpAddCommand } from '../../commands/mcp/addCommand.js'
 import { registerMcpXaaIdpCommand } from '../../commands/mcp/xaaIdpCommand.js'
 import {
-  assembleServerHost,
   connectDirectHostSession,
   getDirectConnectErrorMessage,
 } from '../../kernel/serverHost.js'
@@ -29,6 +28,7 @@ import {
   getCliCommandGraphNode,
   type CliCommandPath,
 } from '../../runtime/capabilities/commands/cliCommandGraph.js'
+import { runServerLaunch } from './launchers/serverLauncher.js'
 
 type SortedHelpConfig = {
   sortSubcommands: true
@@ -180,56 +180,19 @@ export function registerCliHostCommands(
           maxSessions: string
         }) => {
           const { randomBytes } = await import('crypto')
-          const { printBanner } = await import('../../server/serverBanner.js')
-          const {
-            writeServerLock,
-            removeServerLock,
-            probeRunningServer,
-          } = await import('../../server/lockfile.js')
-
-          const existing = await probeRunningServer()
-          if (existing) {
-            process.stderr.write(
-              `A claude server is already running (pid ${existing.pid}) at ${existing.httpUrl}\n`,
-            )
-            process.exit(1)
-          }
-
-          const { authToken, config, server, sessionManager } = assembleServerHost({
-            port: opts.port,
-            host: opts.host,
-            authToken: opts.authToken,
-            unix: opts.unix,
-            workspace: opts.workspace,
-            idleTimeoutMs: opts.idleTimeout,
-            maxSessions: opts.maxSessions,
+          await runServerLaunch({
+            input: {
+              port: opts.port,
+              host: opts.host,
+              authToken: opts.authToken,
+              unix: opts.unix,
+              workspace: opts.workspace,
+              idleTimeoutMs: opts.idleTimeout,
+              maxSessions: opts.maxSessions,
+            },
             createAuthToken: () =>
               `sk-ant-cc-${randomBytes(16).toString('base64url')}`,
           })
-          const actualPort = server.port ?? config.port
-          printBanner(config, authToken, actualPort)
-
-          await writeServerLock({
-            pid: process.pid,
-            port: actualPort,
-            host: config.host,
-            httpUrl: config.unix
-              ? `unix:${config.unix}`
-              : `http://${config.host}:${actualPort}`,
-            startedAt: Date.now(),
-          })
-
-          let shuttingDown = false
-          const shutdown = async () => {
-            if (shuttingDown) return
-            shuttingDown = true
-            server.stop(true)
-            await sessionManager.destroyAll()
-            await removeServerLock()
-            process.exit(0)
-          }
-          process.once('SIGINT', () => void shutdown())
-          process.once('SIGTERM', () => void shutdown())
         },
       )
   }
