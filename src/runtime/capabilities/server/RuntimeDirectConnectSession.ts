@@ -3,28 +3,25 @@ import {
   createSessionPersistenceOwner,
   type RuntimeSessionPersistenceOwner,
 } from '../persistence/SessionPersistenceOwner.js'
-import type { SessionLogger, SessionRuntimeHandle } from './contracts.js'
+import type {
+  RuntimeManagedSession,
+  SessionLogger,
+  SessionLifecycleFactory,
+  SessionRuntimeHandle,
+  SessionRuntimeSink,
+} from './contracts.js'
 import type { SessionInfo, SessionState } from '../../../server/types.js'
 import type { RuntimeSessionIndexEntry } from '../persistence/ServerSessionIndexStore.js'
 
 const MAX_BACKLOG_LINES = 500
 
-export type SessionSocketData = {
-  sessionId: string
-}
-
-export type DirectConnectClientSocket = {
-  send(data: string): unknown
-  close(code?: number, reason?: string): unknown
-}
-
-export class RuntimeDirectConnectSession {
+export class RuntimeDirectConnectSession implements RuntimeManagedSession {
   readonly persistenceOwner: RuntimeSessionPersistenceOwner
   readonly info: SessionInfo
   readonly closed: Promise<void>
 
   private readonly backlog: string[] = []
-  private readonly clients = new Set<DirectConnectClientSocket>()
+  private readonly sinks = new Set<SessionRuntimeSink>()
   private readonly createdAt = Date.now()
 
   private lastActiveAt = Date.now()
@@ -35,7 +32,7 @@ export class RuntimeDirectConnectSession {
     private readonly runtime: SessionRuntimeHandle,
     private readonly logger: SessionLogger,
     private readonly idleTimeoutMs: number,
-    private readonly onStopped: (session: RuntimeDirectConnectSession) => void,
+    private readonly onStopped: (session: RuntimeManagedSession) => void,
   ) {
     this.persistenceOwner = createSessionPersistenceOwner(runtime.sessionId)
     this.info = {
@@ -69,30 +66,30 @@ export class RuntimeDirectConnectSession {
     return this.info.status !== 'stopped' && this.info.status !== 'stopping'
   }
 
-  attachClient(socket: DirectConnectClientSocket): void {
+  attachSink(sink: SessionRuntimeSink): void {
     this.clearIdleTimer()
     this.touch()
-    this.clients.add(socket)
+    this.sinks.add(sink)
     if (this.info.status === 'detached') {
       this.setStatus('running')
     }
 
     for (const line of this.backlog) {
-      socket.send(line)
+      sink.send(line)
     }
   }
 
-  detachClient(socket: DirectConnectClientSocket): void {
-    this.clients.delete(socket)
+  detachSink(sink: SessionRuntimeSink): void {
+    this.sinks.delete(sink)
     this.touch()
 
-    if (this.clients.size === 0 && this.isLive) {
+    if (this.sinks.size === 0 && this.isLive) {
       this.setStatus('detached')
       this.startIdleTimer()
     }
   }
 
-  handleClientMessage(rawMessage: string): boolean {
+  handleInput(rawMessage: string): boolean {
     if (!this.isLive) {
       return false
     }
@@ -104,6 +101,18 @@ export class RuntimeDirectConnectSession {
     }
 
     return this.runtime.writeLine(rawMessage)
+  }
+
+  attachClient(socket: SessionRuntimeSink): void {
+    this.attachSink(socket)
+  }
+
+  detachClient(socket: SessionRuntimeSink): void {
+    this.detachSink(socket)
+  }
+
+  handleClientMessage(rawMessage: string): boolean {
+    return this.handleInput(rawMessage)
   }
 
   async stopAndWait(force = false): Promise<void> {
@@ -138,8 +147,8 @@ export class RuntimeDirectConnectSession {
       this.touch()
       this.pushBacklog(line)
 
-      for (const socket of this.clients) {
-        socket.send(line)
+      for (const sink of this.sinks) {
+        sink.send(line)
       }
     })
 
@@ -157,10 +166,10 @@ export class RuntimeDirectConnectSession {
       this.clearIdleTimer()
       this.info.process = null
       this.setStatus('stopped')
-      for (const socket of this.clients) {
-        socket.close(1000, 'Session ended')
+      for (const sink of this.sinks) {
+        sink.close(1000, 'Session ended')
       }
-      this.clients.clear()
+      this.sinks.clear()
       this.logger.info('Direct-connect session stopped', {
         sessionId: this.id,
         code,
@@ -208,3 +217,10 @@ export class RuntimeDirectConnectSession {
     }
   }
 }
+
+export const createRuntimeDirectConnectSession: SessionLifecycleFactory = ({
+  runtime,
+  logger,
+  idleTimeoutMs,
+  onStopped,
+}) => new RuntimeDirectConnectSession(runtime, logger, idleTimeoutMs, onStopped)

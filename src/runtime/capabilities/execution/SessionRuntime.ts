@@ -182,6 +182,18 @@ export type QueryEngineConfig = {
   ) => { messages: Message[]; executed: boolean } | undefined
 }
 
+export interface RuntimeExecutionSession {
+  submitMessage(
+    prompt: string | ContentBlockParam[],
+    options?: { uuid?: string; isMeta?: boolean },
+  ): AsyncGenerator<SDKMessage, void, unknown>
+  getReadFileState(): FileStateCache
+}
+
+export type ExecutionSessionFactory = (
+  config: QueryEngineConfig,
+) => RuntimeExecutionSession
+
 /**
  * SessionRuntime owns the query lifecycle and session state for a conversation.
  * It extracts the core logic from ask() into a standalone class that can be
@@ -191,7 +203,7 @@ export type QueryEngineConfig = {
  * turn within the same conversation. State (messages, file cache, usage, etc.)
  * persists across turns.
  */
-export class SessionRuntime {
+export class SessionRuntime implements RuntimeExecutionSession {
   private config: QueryEngineConfig
   private mutableMessages: Message[]
   private abortController: AbortController
@@ -1222,6 +1234,9 @@ export class SessionRuntime {
   }
 }
 
+export const createExecutionSessionRuntime: ExecutionSessionFactory = config =>
+  new SessionRuntime(config)
+
 /**
  * Sends a single prompt to the Claude API and returns the response.
  * Assumes that claude is being used non-interactively -- will not
@@ -1261,6 +1276,7 @@ export async function* ask({
   agents = [],
   setSDKStatus,
   orphanedPermission,
+  createSessionRuntime,
 }: {
   commands: Command[]
   prompt: string | Array<ContentBlockParam>
@@ -1293,8 +1309,9 @@ export async function* ask({
   agents?: AgentDefinition[]
   setSDKStatus?: (status: SDKStatus) => void
   orphanedPermission?: OrphanedPermission
+  createSessionRuntime?: ExecutionSessionFactory
 }): AsyncGenerator<SDKMessage, void, unknown> {
-  const engine = new SessionRuntime({
+  const engine = (createSessionRuntime ?? createExecutionSessionRuntime)({
     cwd,
     tools,
     commands,

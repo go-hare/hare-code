@@ -29,6 +29,10 @@ import {
   isBypassPermissionsModeDisabled,
   transitionPermissionMode,
 } from 'src/utils/permissions/permissionSetup.js'
+import {
+  createHeadlessSessionBootstrap,
+  type HeadlessSessionBootstrap,
+} from './headlessSessionBootstrap.js'
 
 const MAX_RECEIVED_UUIDS = 10_000
 
@@ -45,6 +49,7 @@ export type HeadlessSessionControl = {
 export type HeadlessSessionContext = {
   control: HeadlessSessionControl
   bootstrapStateProvider: RuntimeBootstrapStateProvider
+  bootstrap: HeadlessSessionBootstrap
   registerCleanup(cleanup: () => void | Promise<void>): void
   cleanup(): Promise<void>
 }
@@ -91,6 +96,7 @@ export function createHeadlessSessionContext(
   return {
     control,
     bootstrapStateProvider,
+    bootstrap: createHeadlessSessionBootstrap(bootstrapStateProvider),
     registerCleanup(cleanup) {
       cleanupStack.push(cleanup)
     },

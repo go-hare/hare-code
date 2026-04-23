@@ -1,9 +1,7 @@
 import { feature } from 'bun:bundle'
 import { randomUUID } from 'crypto'
-import { dirname } from 'path'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import type { AppState } from 'src/state/AppStateStore.js'
-import { externalMetadataToAppState } from 'src/state/onChangeAppState.js'
 import type { RewindFilesResult } from 'src/entrypoints/agentSdkTypes.js'
 import type { SessionExternalMetadata } from 'src/utils/sessionState.js'
 import type { Message, NormalizedUserMessage } from 'src/types/message.js'
@@ -18,12 +16,8 @@ import { logError } from 'src/utils/log.js'
 import {
   hydrateRemoteSession,
   hydrateFromCCRv2InternalEvents,
-  resetSessionFilePointer,
-  resetSessionMetadataForResume,
-  restoreSessionMetadata,
   saveMode,
 } from 'src/utils/sessionStorage.js'
-import { restoreSessionStateFromLog } from 'src/utils/sessionRestore.js'
 import { parseSessionIdentifier } from 'src/utils/sessionUrl.js'
 import { processSessionStartHooks } from 'src/utils/sessionStart.js'
 import { gracefulShutdownSync } from 'src/utils/gracefulShutdown.js'
@@ -36,9 +30,10 @@ import {
 import { errorMessage } from '../../../../utils/errors.js'
 import { isEnvTruthy } from '../../../../utils/envUtils.js'
 import { jsonStringify } from '../../../../utils/slowOperations.js'
-import { asSessionId } from 'src/types/ids.js'
 import type { UUID } from 'crypto'
 import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
+import type { HeadlessSessionContext } from './headlessSessionControl.js'
+import type { HeadlessLoadedConversationResult } from './headlessSessionBootstrap.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const coordinatorModeModule = feature('COORDINATOR_MODE')
@@ -60,6 +55,8 @@ export type LoadInitialMessagesResult = {
   messages: Message[]
   turnInterruptionState?: TurnInterruptionState
   agentSetting?: string
+  externalMetadata?: SessionExternalMetadata | null
+  loadedConversation?: HeadlessLoadedConversationResult
 }
 
 export function emitLoadError(
@@ -145,7 +142,7 @@ export async function handleRewindFiles(
 }
 
 export async function loadInitialMessages(
-  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+  session: HeadlessSessionContext,
   setAppState: (f: (prev: AppState) => AppState) => void,
   options: {
     continue: boolean | undefined
@@ -159,6 +156,7 @@ export async function loadInitialMessages(
   },
   emitLoadError: (message: string, outputFormat: string | undefined) => void,
 ): Promise<LoadInitialMessagesResult> {
+  const bootstrapStateProvider = session.bootstrapStateProvider
   const persistSession = !bootstrapStateProvider.isSessionPersistenceDisabled()
   if (options.continue) {
     try {
@@ -191,23 +189,6 @@ export async function loadInitialMessages(
           }
         }
 
-        if (!options.forkSession && result.sessionId) {
-          bootstrapStateProvider.switchSession(
-            asSessionId(result.sessionId),
-            result.fullPath ? dirname(result.fullPath) : null,
-          )
-          if (persistSession) {
-            await resetSessionFilePointer()
-          }
-        }
-        restoreSessionStateFromLog(result, setAppState)
-        resetSessionMetadataForResume()
-        restoreSessionMetadata(
-          options.forkSession
-            ? { ...result, worktreeSession: undefined }
-            : result,
-        )
-
         if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
           saveMode(
             coordinatorModeModule.isCoordinatorMode()
@@ -220,6 +201,7 @@ export async function loadInitialMessages(
           messages: result.messages,
           turnInterruptionState: result.turnInterruptionState,
           agentSetting: result.agentSetting,
+          loadedConversation: result,
         }
       }
     } catch (error) {
@@ -270,6 +252,7 @@ export async function loadInitialMessages(
   if (options.resume) {
     try {
       logEvent('tengu_resume_print', {})
+      let externalMetadata: SessionExternalMetadata | null = null
 
       const parsedSessionId = parseSessionIdentifier(
         typeof options.resume === 'string' ? options.resume : '',
@@ -291,14 +274,7 @@ export async function loadInitialMessages(
           hydrateFromCCRv2InternalEvents(sessionId),
           options.restoredWorkerState,
         ])
-        if (metadata) {
-          setAppState(externalMetadataToAppState(metadata))
-          if (typeof metadata.model === 'string') {
-            bootstrapStateProvider.patchPromptState({
-              mainLoopModelOverride: metadata.model,
-            })
-          }
-        }
+        externalMetadata = metadata
       } else if (
         parsedSessionId.isUrl &&
         parsedSessionId.ingressUrl &&
@@ -373,23 +349,6 @@ export async function loadInitialMessages(
         }
       }
 
-      if (!options.forkSession && result.sessionId) {
-        bootstrapStateProvider.switchSession(
-          asSessionId(result.sessionId),
-          result.fullPath ? dirname(result.fullPath) : null,
-        )
-        if (persistSession) {
-          await resetSessionFilePointer()
-        }
-      }
-      restoreSessionStateFromLog(result, setAppState)
-      resetSessionMetadataForResume()
-      restoreSessionMetadata(
-        options.forkSession
-          ? { ...result, worktreeSession: undefined }
-          : result,
-      )
-
       if (feature('COORDINATOR_MODE') && coordinatorModeModule) {
         saveMode(
           coordinatorModeModule.isCoordinatorMode() ? 'coordinator' : 'normal',
@@ -400,6 +359,8 @@ export async function loadInitialMessages(
         messages: result.messages,
         turnInterruptionState: result.turnInterruptionState,
         agentSetting: result.agentSetting,
+        externalMetadata,
+        loadedConversation: result,
       }
     } catch (error) {
       logError(error)

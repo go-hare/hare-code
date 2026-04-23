@@ -1,0 +1,36 @@
+import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
+
+const bootstrapContent = readFileSync(
+  join(
+    process.cwd(),
+    'src/runtime/capabilities/execution/internal/headlessBootstrap.ts',
+  ),
+  'utf8',
+)
+const loopContent = readFileSync(
+  join(
+    process.cwd(),
+    'src/runtime/capabilities/execution/internal/headlessRuntimeLoop.ts',
+  ),
+  'utf8',
+)
+
+describe('headless bootstrap ownership', () => {
+  test('loadInitialMessages returns loaded conversation data instead of adopting it directly', () => {
+    expect(bootstrapContent).toContain('loadedConversation?:')
+    expect(bootstrapContent).toContain('externalMetadata?:')
+    expect(bootstrapContent).not.toContain(
+      'session.bootstrap.applyLoadedConversation(',
+    )
+    expect(bootstrapContent).not.toContain(
+      'session.bootstrap.applyExternalMetadata(',
+    )
+  })
+
+  test('headless runtime loop adopts loaded conversations through the session bootstrap seam', () => {
+    expect(loopContent).toContain('session.bootstrap.applyExternalMetadata(')
+    expect(loopContent).toContain('session.bootstrap.applyLoadedConversation(')
+  })
+})

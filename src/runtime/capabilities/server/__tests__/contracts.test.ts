@@ -15,6 +15,9 @@ describe('server runtime contracts', () => {
     )
 
     expect(content).toContain('export interface SessionRuntimeHandle')
+    expect(content).toContain('export interface SessionRuntimeSink')
+    expect(content).toContain('export interface RuntimeManagedSession')
+    expect(content).toContain('export type SessionLifecycleFactory')
     expect(content).toContain('export interface SessionRuntimeBackend')
     expect(content).toContain('export interface SessionLogger')
     expect(content).toContain('export const noopSessionLogger')
@@ -29,10 +32,19 @@ describe('server runtime contracts', () => {
     )
 
     expect(sessionManager).toContain("from './contracts.js'")
+    expect(sessionManager).toContain("from './SessionRegistry.js'")
+    expect(sessionManager).toContain('createManagedSession')
+    expect(sessionManager).not.toContain('new RuntimeDirectConnectSession')
     expect(sessionManager).not.toContain('server/backends/dangerousBackend.js')
     expect(sessionManager).not.toContain('server/serverLog.js')
+    expect(sessionManager).not.toContain(
+      '../persistence/ServerSessionIndexStore.js',
+    )
 
     expect(directSession).toContain("from './contracts.js'")
+    expect(directSession).toContain('attachSink(')
+    expect(directSession).toContain('handleInput(')
+    expect(directSession).not.toContain('export type DirectConnectClientSocket')
     expect(directSession).not.toContain('server/backends/dangerousBackend.js')
     expect(directSession).not.toContain('server/serverLog.js')
   })

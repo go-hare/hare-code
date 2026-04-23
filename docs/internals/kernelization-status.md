@@ -27,6 +27,8 @@
 
 > headless 的依赖方向已经完成第一轮纠偏：`HeadlessRuntime` 不再直接回落到 `src/cli/print.ts`，CLI 仍然是第一宿主，但 headless 可复用执行实现已经开始向 `src/runtime/capabilities/execution/internal/*` 下沉。
 
+> 同时，runtime-vs-host state split 已开始进入“真实注入”阶段：`bootstrapProvider` 已从 `adapters.ts` 抽离，`SessionRuntime` / `TurnEngine` / `headlessBootstrap` / `RemoteIO` 已开始经由 provider 或显式入参读取 session state；shared session core 这边也已经起了第一轮 runtime-owned `SessionRegistry`，但离真正统一 session core 仍有距离。
+
 当前已经成立的结构是：
 
 - CLI 仍是主宿主，但不再独占核心能力
@@ -299,13 +301,17 @@
   - `tests/integration/kernel-server-smoke.test.ts`
   - `src/kernel/__tests__/importDiscipline.test.ts`
   - launcher 级编排测试（headless / direct-connect / server）
+- 已通过：server/runtime 定向 contract 与 lifecycle 测试，包括：
+  - `src/runtime/capabilities/server/__tests__/RuntimeDirectConnectSession.test.ts`
+  - `src/runtime/capabilities/server/__tests__/SessionRegistry.test.ts`
+  - `src/runtime/capabilities/server/__tests__/DirectConnectSessionApi.test.ts`
+  - `src/runtime/capabilities/server/__tests__/contracts.test.ts`
+  - `src/kernel/__tests__/serverHost.test.ts`
 - 已通过：`bun run build`
 - 已通过：`node -e "import('./dist/kernel.js')"` 可导入 built entry
 - 未通过：`tests/integration/kernel-package-smoke.test.ts`
   - 当前 `dist/kernel.js` 里 bridge / daemon 相关导出名仍未和稳定 kernel surface 完全对齐
-- 未通过：`src/runtime/capabilities/server/__tests__/DirectConnectSessionApi.test.ts`
 - 未通过：`src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
-- 未通过：`src/runtime/capabilities/server/__tests__/contracts.test.ts`
 - 未通过：`src/runtime/capabilities/daemon/__tests__/contracts.test.ts`
 - 未全绿：`bun run test:all` 仍存在仓库存量失败；除了若干无关模块解析与 WebSearch adapter 测试外，也仍包含 kernel package / runtime contracts / direct-connect runtime 相关失败
 - 未全绿：`bun run lint` 仍存在仓库存量问题，主要是一批 `unused suppression` 与少量风格项
@@ -342,6 +348,37 @@
 - session-local cleanup / UUID 去重 / orphaned permission 状态已变为 per-session context
 - `StructuredIO` / `RemoteIO` / transport / `ndjsonSafeStringify` 已迁到 runtime internal `io/*`
 - `installOAuthTokens` 已迁到非 CLI 的共享 service 路径
+
+#### 9. runtime state seam 与 shared session core 准备已进入可执行状态
+
+当前已经完成：
+
+- `bootstrapProvider.ts` 已从 `runtime/core/state/adapters.ts` 中独立出来，`adapters.ts` 只保留 provider 装配职责
+- `SessionRuntime.ts` / `TurnEngine.ts` 已不再直接依赖 `src/bootstrap/state.js`
+- headless 主链现在会显式把 bootstrap-backed provider 沿 `HeadlessRuntime -> headlessSession -> headlessRuntimeLoop -> ask()` 传下去
+- `headlessBootstrap.ts` / `RemoteIO.ts` 已摘掉对 `src/bootstrap/state.js` 的直接依赖
+- `runtime/capabilities/server/SessionRegistry.ts` 已把 `SessionManager` 里的 `sessions map + indexStore` 所有权抽成 runtime-owned registry
+- `RuntimeDirectConnectSession` 的 backlog replay / detach / idle-timeout / stop 行为已补上最小生命周期测试
+- `RuntimeDirectConnectSession` 已把 websocket-style socket contract 收成通用 `SessionRuntimeSink`
+- `HostRuntime.ts` 现在只负责 `WebSocket -> SessionRuntimeSink` 适配；对外 `ws_url` / `/sessions/:id/ws` 协议保持不变
+- `SessionManager.ts` 已开始依赖 `RuntimeManagedSession` + `SessionLifecycleFactory` contract，不再直接 `new RuntimeDirectConnectSession(...)`
+- `SessionManager` 的 `registry` 现在也可显式注入，manager/session lifecycle/persistence 边界比之前清楚一层
+- execution 侧的 `ask()` 现在也开始依赖 `ExecutionSessionFactory`，不再直接 `new SessionRuntime(...)`
+- `SessionRuntime.ts` 已暴露最小 `RuntimeExecutionSession` contract，headless/CLI 共用的 execution session owner 开始有稳定 seam
+- `headlessManagedSession.ts` 已开始接管 `headlessRuntimeLoop.ts` 里的 `mutableMessages` / `readFileState` / `abortController` 这类 session-local 状态，loop 正在退回编排层
+- `headlessSessionBootstrap.ts` 已开始接管 `continue/resume/fork` 路径里的 session identity / metadata / file-pointer side effects，`headlessBootstrap.ts` 不再直接摸这些 session storage 细节
+- `loadInitialMessages()` 现在开始退回 source selection / validation / load-result shaping；loaded conversation 的 AppState/session 采纳重新回到 session bootstrap seam
+
+这一步的意义不是“shared session core 已完成”，而是：
+
+- runtime-vs-host state split 已不再只停留在 contract 定义，而是开始走真实注入路径
+- server/direct-connect 这边也已经开始把 session ownership 从单一 `SessionManager` 类往可复用 runtime core 结构迁移
+- session core 和 transport adapter 的分界已经开始形成，但 outward protocol transport-neutralization 还没开始做
+- manager 这一层已经开始从“知道具体 session 类怎么构造”转成“只编排 lifecycle contract”，但 shared session core 仍未覆盖 CLI/headless 一侧
+- CLI/headless 一侧虽然还没和 server 合成同一套 session core，但 execution session owner 也开始从具体类实例化转成 contract + factory 模式
+- headless 侧当前仍保留 cleanup stack / continue-resume bootstrap / command queue 在 loop 外层，shared session core 还只是沿 execution seam 前进，没有进入 REPL split 阶段
+- headless bootstrap ownership 虽然开始走 session seam，但 hydration / resume 数据装载本身仍在 `loadInitialMessages()`，还没和 REPL 侧统一
+- headless 的 loaded-conversation adoption 现在已经从 `loadInitialMessages()` 挪回 loop + session bootstrap seam，但 teleport / coordinator-mode refresh / startup hooks 这些 host-adjacent 行为还没继续下沉
 
 验收标准：
 

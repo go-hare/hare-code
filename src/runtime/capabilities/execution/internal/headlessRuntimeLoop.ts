@@ -86,13 +86,8 @@ import { validateUuid } from 'src/utils/uuid.js'
 import { fromArray } from 'src/utils/generators.js'
 import { ask } from 'src/QueryEngine.js'
 import type { PermissionPromptTool } from 'src/utils/queryHelpers.js'
-import {
-  createFileStateCacheWithSizeLimit,
-  mergeFileStateCaches,
-  READ_FILE_STATE_CACHE_SIZE,
-} from 'src/utils/fileStateCache.js'
+import { type FileState } from 'src/utils/fileStateCache.js'
 import { expandPath } from 'src/utils/path.js'
-import { extractReadFilesFromMessages } from 'src/utils/queryHelpers.js'
 import { registerHookEventHandler } from 'src/utils/hooks/hookEvents.js'
 import { executeFilePersistence } from 'src/utils/filePersistence/filePersistence.js'
 import { finalizePendingAsyncHooks } from 'src/utils/hooks/AsyncHookRegistry.js'
@@ -374,6 +369,7 @@ import {
   writeHeadlessResult,
   writeHeadlessStderr,
 } from './headlessHostIO.js'
+import { createHeadlessManagedSession } from './headlessManagedSession.js'
 import { forwardMessagesToBridge as forwardBridgeMessages } from './headlessBridgeForwarding.js'
 import { jsonStringify } from '../../../../utils/slowOperations.js'
 import { skillChangeDetector } from '../../../../utils/skills/skillChangeDetector.js'
@@ -677,8 +673,10 @@ export async function runHeadlessRuntimeLoop(
     messages: initialMessages,
     turnInterruptionState,
     agentSetting: resumedAgentSetting,
+    externalMetadata,
+    loadedConversation,
   } = await loadInitialMessages(
-    session.bootstrapStateProvider,
+    session,
     setAppState,
     {
     continue: options.continue,
@@ -693,6 +691,20 @@ export async function runHeadlessRuntimeLoop(
     (message, outputFormat) =>
       emitLoadError(session.bootstrapStateProvider, message, outputFormat),
   )
+  const persistSession =
+    !session.bootstrapStateProvider.isSessionPersistenceDisabled()
+
+  session.bootstrap.applyExternalMetadata(externalMetadata ?? null, setAppState)
+  if (loadedConversation) {
+    await session.bootstrap.applyLoadedConversation(
+      loadedConversation,
+      setAppState,
+      {
+        forkSession: options.forkSession,
+        persistSession,
+      },
+    )
+  }
 
   // SessionStart hooks can emit initialUserMessage — the first user turn for
   // headless orchestrator sessions where stdin is empty and additionalContext
@@ -924,17 +936,19 @@ function runHeadlessStreaming(
   let inputClosed = false
   let shutdownPromptInjected = false
   let heldBackResult: StdoutMessage | null = null
-  let abortController: AbortController | undefined
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
+  const managedSession = createHeadlessManagedSession(initialMessages, cwd())
+  const mutableMessages = managedSession.messages
 
   // Ctrl+C in -p mode: abort the in-flight query, then shut down gracefully.
   // gracefulShutdown persists session state and flushes analytics, with a
   // failsafe timer that force-exits if cleanup hangs.
   const sigintHandler = () => {
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGINT' })
-    if (abortController && !abortController.signal.aborted) {
-      abortController.abort()
+    const activeAbortController = managedSession.getAbortController()
+    if (activeAbortController && !activeAbortController.signal.aborted) {
+      activeAbortController.abort()
     }
     void gracefulShutdown(0)
   }
@@ -1054,33 +1068,6 @@ function runHeadlessStreaming(
   session.registerCleanup(() => {
     statusListeners.delete(rateLimitListener)
   })
-
-  // Messages for internal tracking, directly mutated by ask(). These messages
-  // include Assistant, User, Attachment, and Progress messages.
-  // TODO: Clean up this code to avoid passing around a mutable array.
-  const mutableMessages: Message[] = initialMessages
-
-  // Seed the readFileState cache from the transcript (content the model saw,
-  // with message timestamps) so getChangedFiles can detect external edits.
-  // This cache instance must persist across ask() calls, since the edit tool
-  // relies on this as a global state.
-  let readFileState = extractReadFilesFromMessages(
-    initialMessages,
-    cwd(),
-    READ_FILE_STATE_CACHE_SIZE,
-  )
-
-  // Client-supplied readFileState seeds (via seed_read_state control request).
-  // The stdin IIFE runs concurrently with ask() — a seed arriving mid-turn
-  // would be lost to ask()'s clone-then-replace (QueryEngine.ts finally block)
-  // if written directly into readFileState. Instead, seeds land here, merge
-  // into getReadFileCache's view (readFileState-wins-ties: seeds fill gaps),
-  // and are re-applied then CLEARED in setReadFileCache. One-shot: each seed
-  // survives exactly one clone-replace cycle, then becomes a regular
-  // readFileState entry subject to compact's clear like everything else.
-  const pendingSeeds = createFileStateCacheWithSizeLimit(
-    READ_FILE_STATE_CACHE_SIZE,
-  )
 
   // Auto-resume interrupted turns on restart so CC continues from where it
   // left off without requiring the SDK to re-send the prompt.
@@ -1653,8 +1640,9 @@ function runHeadlessStreaming(
 
   // Abort the current operation when a 'now' priority message arrives.
   const unsubscribeQueueAbort = subscribeToCommandQueue(() => {
-    if (abortController && getCommandsByMaxPriority('now').length > 0) {
-      abortController.abort('interrupt')
+    const activeAbortController = managedSession.getAbortController()
+    if (activeAbortController && getCommandsByMaxPriority('now').length > 0) {
+      activeAbortController.abort('interrupt')
     }
   })
   session.registerCleanup(unsubscribeQueueAbort)
@@ -1931,7 +1919,7 @@ function runHeadlessStreaming(
             }
           }
 
-          abortController = createAbortController()
+          const turnAbortController = managedSession.startTurn()
           const turnStartTime = feature('FILE_PERSISTENCE')
             ? Date.now()
             : undefined
@@ -1973,26 +1961,15 @@ function runHeadlessStreaming(
                   fallbackModel: options.fallbackModel,
                   jsonSchema: getInitJsonSchema() ?? options.jsonSchema,
                   mutableMessages,
-                  getReadFileCache: () =>
-                    pendingSeeds.size === 0
-                      ? readFileState
-                      : mergeFileStateCaches(readFileState, pendingSeeds),
-                  setReadFileCache: cache => {
-                    readFileState = cache
-                    for (const [path, seed] of pendingSeeds.entries()) {
-                      const existing = readFileState.get(path)
-                      if (!existing || seed.timestamp > existing.timestamp) {
-                        readFileState.set(path, seed)
-                      }
-                    }
-                    pendingSeeds.clear()
-                  },
+                  getReadFileCache: () => managedSession.getReadFileCache(),
+                  setReadFileCache: cache =>
+                    managedSession.commitReadFileCache(cache),
                   customSystemPrompt: options.systemPrompt,
                   appendSystemPrompt: options.appendSystemPrompt,
                   getAppState,
                   setAppState,
                   bootstrapStateProvider: session.bootstrapStateProvider,
-                  abortController,
+                  abortController: turnAbortController,
                   replayUserMessages: options.replayUserMessages,
                   includePartialMessages: options.includePartialMessages,
                   handleElicitation: (serverName, params, elicitSignal) =>
@@ -2087,7 +2064,7 @@ function runHeadlessStreaming(
               {
                 turnStartTime,
               } as import('src/utils/filePersistence/types.js').TurnStartTime,
-              abortController.signal,
+              turnAbortController.signal,
               result => {
                 const filesResult = result as unknown as {
                   persistedFiles: { filename: string; file_id: string }[]
@@ -2699,9 +2676,7 @@ function runHeadlessStreaming(
               },
             }))
           }
-          if (abortController) {
-            abortController.abort()
-          }
+          managedSession.abortActiveTurn()
           suggestionState.abortController?.abort()
           suggestionState.abortController = null
           suggestionState.lastEmitted = null
@@ -2711,9 +2686,7 @@ function runHeadlessStreaming(
           logForDebugging(
             `[print.ts] end_session received, reason=${req.reason ?? 'unspecified'}`,
           )
-          if (abortController) {
-            abortController.abort()
-          }
+          managedSession.abortActiveTurn()
           suggestionState.abortController?.abort()
           suggestionState.abortController = null
           suggestionState.lastEmitted = null
@@ -2878,8 +2851,9 @@ function runHeadlessStreaming(
           })
         } else if (msg.request.subtype === 'seed_read_state') {
           // Client observed a Read that was later removed from context (e.g.
-          // by snip), so transcript-based seeding missed it. Queued into
-          // pendingSeeds; applied at the next clone-replace boundary.
+          // by snip), so transcript-based seeding missed it. Queued into the
+          // managed session's pending read-state cache; applied at the next
+          // clone-replace boundary.
           try {
             // expandPath: all other readFileState writers normalize (~, relative,
             // session cwd vs process cwd). FileEditTool looks up by expandPath'd
@@ -2903,12 +2877,12 @@ function runHeadlessStreaming(
               const content = (
                 raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw
               ).replaceAll('\r\n', '\n')
-              pendingSeeds.set(normalizedPath, {
+              managedSession.seedReadFileState(normalizedPath, {
                 content,
                 timestamp: diskMtime,
                 offset: undefined,
                 limit: undefined,
-              })
+              } satisfies FileState)
             }
           } catch {
             // ENOENT etc — skip seeding but still succeed
@@ -3654,12 +3628,13 @@ function runHeadlessStreaming(
           // interrupts for the duration of the API roundtrip).
           const description = req.description as string
           const persist = req.persist as boolean
+          const activeAbortController = managedSession.getAbortController()
           // Reuse the live controller only if it has not already been aborted
           // (e.g. by interrupt()); an aborted signal would cause queryHaiku to
           // immediately throw APIUserAbortError → {title: null}.
           const titleSignal = (
-            abortController && !abortController.signal.aborted
-              ? abortController
+            activeAbortController && !activeAbortController.signal.aborted
+              ? activeAbortController
               : createAbortController()
           ).signal
           void (async () => {
@@ -3724,7 +3699,8 @@ function runHeadlessStreaming(
                       ...dynamicMcpState.clients,
                     ],
                     messages: mutableMessages,
-                    readFileState,
+                    readFileState:
+                      managedSession.getCommittedReadFileState(),
                     getAppState,
                     setAppState,
                     customSystemPrompt: options.systemPrompt,
@@ -3804,7 +3780,7 @@ function runHeadlessStreaming(
                     structuredIO.injectControlResponse(response)
                   },
                   onInterrupt() {
-                    abortController?.abort()
+                    managedSession.abortActiveTurn()
                   },
                   onSetModel(model) {
                     const resolved =

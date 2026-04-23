@@ -1,5 +1,4 @@
 export {
   RuntimeDirectConnectSession,
-  type DirectConnectClientSocket,
-  type SessionSocketData,
+  type SessionRuntimeSink,
 } from '../../runtime/capabilities/server/index.js'

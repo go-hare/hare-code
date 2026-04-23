@@ -147,14 +147,14 @@ export function startServerRuntimeHost(
     },
     websocket: {
       open(ws) {
-        const session = sessionManager.attachClient(ws.data.sessionId, ws)
+        const session = sessionManager.attachSink(ws.data.sessionId, ws)
         if (!session) {
           ws.close(1008, 'Session not found')
         }
       },
       message(ws, message) {
         const rawMessage = normalizeWebSocketMessage(message)
-        const handled = sessionManager.handleClientMessage(
+        const handled = sessionManager.handleSessionInput(
           ws.data.sessionId,
           rawMessage,
         )
@@ -163,7 +163,7 @@ export function startServerRuntimeHost(
         }
       },
       close(ws) {
-        sessionManager.detachClient(ws.data.sessionId, ws)
+        sessionManager.detachSink(ws.data.sessionId, ws)
       },
     },
   })

@@ -1,20 +1,22 @@
 import { randomUUID } from 'crypto'
 import { resolve } from 'path'
-import {
-  type DirectConnectClientSocket,
-  RuntimeDirectConnectSession,
-} from './RuntimeDirectConnectSession.js'
-import { createServerSessionIndexStore } from '../persistence/ServerSessionIndexStore.js'
+import { createRuntimeDirectConnectSession } from './RuntimeDirectConnectSession.js'
 import {
   noopSessionLogger,
+  type RuntimeManagedSession,
+  type SessionLifecycleFactory,
   type SessionLogger,
   type SessionRuntimeBackend,
+  type SessionRuntimeSink,
 } from './contracts.js'
+import { RuntimeSessionRegistry } from './SessionRegistry.js'
 
 type SessionManagerOptions = {
   idleTimeoutMs?: number
   maxSessions?: number
   logger?: SessionLogger
+  createManagedSession?: SessionLifecycleFactory
+  registry?: RuntimeSessionRegistry<RuntimeManagedSession>
 }
 
 type CreateSessionOptions = {
@@ -23,11 +25,11 @@ type CreateSessionOptions = {
 }
 
 export class SessionManager {
-  private readonly sessions = new Map<string, RuntimeDirectConnectSession>()
-  private readonly indexStore = createServerSessionIndexStore()
+  private readonly registry: RuntimeSessionRegistry<RuntimeManagedSession>
   private readonly idleTimeoutMs: number
   private readonly maxSessions: number
   private readonly logger?: SessionLogger
+  private readonly createManagedSession: SessionLifecycleFactory
 
   constructor(
     private readonly backend: SessionRuntimeBackend,
@@ -36,24 +38,25 @@ export class SessionManager {
     this.idleTimeoutMs = options.idleTimeoutMs ?? 0
     this.maxSessions = options.maxSessions ?? 0
     this.logger = options.logger
+    this.registry =
+      options.registry ?? new RuntimeSessionRegistry<RuntimeManagedSession>()
+    this.createManagedSession =
+      options.createManagedSession ?? createRuntimeDirectConnectSession
   }
 
   hasSession(sessionId: string): boolean {
-    return this.sessions.has(sessionId)
+    return this.registry.has(sessionId)
   }
 
-  getSession(sessionId: string): RuntimeDirectConnectSession | null {
-    return this.sessions.get(sessionId) ?? null
+  getSession(sessionId: string): RuntimeManagedSession | null {
+    return this.registry.get(sessionId)
   }
 
   async createSession({
     cwd,
     dangerouslySkipPermissions,
   }: CreateSessionOptions): Promise<{ sessionId: string; workDir: string }> {
-    const liveSessions = [...this.sessions.values()].filter(session =>
-      session.isLive,
-    )
-    if (this.maxSessions > 0 && liveSessions.length >= this.maxSessions) {
+    if (this.maxSessions > 0 && this.registry.liveCount() >= this.maxSessions) {
       throw new Error(
         `Maximum concurrent sessions reached (${this.maxSessions})`,
       )
@@ -66,60 +69,73 @@ export class SessionManager {
       sessionId,
       dangerouslySkipPermissions,
     })
-    const session = new RuntimeDirectConnectSession(
+    const session = this.createManagedSession({
       runtime,
-      this.logger ?? noopSessionLogger,
-      this.idleTimeoutMs,
-      endedSession => {
-        this.sessions.delete(endedSession.id)
-        void this.indexStore.remove(endedSession.id)
+      logger: this.logger ?? noopSessionLogger,
+      idleTimeoutMs: this.idleTimeoutMs,
+      onStopped: endedSession => {
+        void this.registry.remove(endedSession.id)
       },
-    )
-    this.sessions.set(sessionId, session)
-    await this.indexStore.upsert(sessionId, session.toIndexEntry())
+    })
+    await this.registry.add(session)
 
     return { sessionId, workDir }
   }
 
   attachClient(
     sessionId: string,
-    socket: DirectConnectClientSocket,
-  ): RuntimeDirectConnectSession | null {
-    const session = this.sessions.get(sessionId) ?? null
-    session?.attachClient(socket)
+    socket: SessionRuntimeSink,
+  ): RuntimeManagedSession | null {
+    return this.attachSink(sessionId, socket)
+  }
+
+  attachSink(
+    sessionId: string,
+    sink: SessionRuntimeSink,
+  ): RuntimeManagedSession | null {
+    const session = this.registry.get(sessionId)
+    session?.attachSink(sink)
     if (session) {
-      void this.indexStore.upsert(session.id, session.toIndexEntry())
+      this.registry.sync(session)
     }
     return session
   }
 
-  detachClient(sessionId: string, socket: DirectConnectClientSocket): void {
-    const session = this.sessions.get(sessionId)
+  detachClient(sessionId: string, socket: SessionRuntimeSink): void {
+    this.detachSink(sessionId, socket)
+  }
+
+  detachSink(sessionId: string, sink: SessionRuntimeSink): void {
+    const session = this.registry.get(sessionId)
     if (!session) {
       return
     }
 
-    session.detachClient(socket)
-    void this.indexStore.upsert(session.id, session.toIndexEntry())
+    session.detachSink(sink)
+    this.registry.sync(session)
   }
 
   handleClientMessage(sessionId: string, rawMessage: string): boolean {
-    const session = this.sessions.get(sessionId)
+    return this.handleSessionInput(sessionId, rawMessage)
+  }
+
+  handleSessionInput(sessionId: string, rawMessage: string): boolean {
+    const session = this.registry.get(sessionId)
     if (!session) {
       return false
     }
 
-    const handled = session.handleClientMessage(rawMessage)
+    const handled = session.handleInput(rawMessage)
     if (handled) {
-      void this.indexStore.upsert(session.id, session.toIndexEntry())
+      this.registry.sync(session)
     }
     return handled
   }
 
   async destroyAll(): Promise<void> {
     await Promise.allSettled(
-      [...this.sessions.values()].map(session => session.stopAndWait(true)),
+      [...this.registry.values()].map(session => session.stopAndWait(true)),
     )
-    this.sessions.clear()
+    this.registry.clear()
   }
 }
