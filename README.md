@@ -19,6 +19,7 @@ Hare Code 是一个面向终端交互、headless 嵌入、direct-connect、serve
 当前内核化现状与后续收口计划见：
 
 - [docs/internals/kernelization-status.md](docs/internals/kernelization-status.md)
+- [docs/internals/current-architecture.md](docs/internals/current-architecture.md)
 
 ## 项目定位
 

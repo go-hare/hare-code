@@ -16,6 +16,11 @@ The goal of the current codebase is not to keep restructuring around the CLI. Th
 - let external hosts integrate through kernel facades first
 - continue tightening runtime boundaries without breaking the main interaction path
 
+Current architecture and kernelization status:
+
+- [docs/internals/current-architecture.md](docs/internals/current-architecture.md)
+- [docs/internals/kernelization-status.md](docs/internals/kernelization-status.md)
+
 ## Project Position
 
 The current codebase can be understood as three layers:
