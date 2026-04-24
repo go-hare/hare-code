@@ -5,12 +5,19 @@
  * existing bridge capability implementation.
  */
 import { basename } from 'path'
-import { createBridgeApiClient } from '../bridge/bridgeApi.js'
+import {
+  BridgeFatalError,
+  createBridgeApiClient,
+  validateBridgeId,
+} from '../bridge/bridgeApi.js'
 import { getTrustedDeviceToken } from '../bridge/trustedDevice.js'
+import { toInfraSessionId } from '../bridge/sessionIdCompat.js'
 import { createSessionSpawner } from '../bridge/sessionRunner.js'
 import { createBridgeLogger } from '../bridge/bridgeUI.js'
 import {
   BRIDGE_LOGIN_ERROR,
+  type BridgeApiClient,
+  type BridgeConfig,
   type BridgeLogger,
   type SessionSpawner,
   type SpawnMode,
@@ -160,6 +167,327 @@ export async function createBridgeCliInitialSession(
   }
 
   return initialSessionId
+}
+
+export type StartBridgeCliPointerRefreshParams = {
+  dir: string
+  sessionId: string | null
+  environmentId: string
+  spawnMode: SpawnMode
+  source?: 'standalone' | 'repl'
+}
+
+export type BridgeCliPointerRefresh = {
+  stop(): void
+}
+
+export class BridgeCliResumeError extends Error {
+  constructor(
+    readonly code:
+      | 'invalid_session_id'
+      | 'session_not_found'
+      | 'missing_environment_id',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'BridgeCliResumeError'
+  }
+}
+
+export class BridgeCliRegistrationError extends Error {
+  constructor(readonly status: number | undefined, message: string) {
+    super(message)
+    this.name = 'BridgeCliRegistrationError'
+  }
+}
+
+export type RegisterBridgeCliEnvironmentParams = {
+  api: Pick<BridgeApiClient, 'registerBridgeEnvironment'>
+  config: BridgeConfig
+}
+
+export async function registerBridgeCliEnvironment(
+  params: RegisterBridgeCliEnvironmentParams,
+): Promise<{ environmentId: string; environmentSecret: string }> {
+  try {
+    const reg = await params.api.registerBridgeEnvironment(params.config)
+    return {
+      environmentId: reg.environment_id,
+      environmentSecret: reg.environment_secret,
+    }
+  } catch (err) {
+    const { errorMessage } = await import('../utils/errors.js')
+    throw new BridgeCliRegistrationError(
+      err instanceof BridgeFatalError ? err.status : undefined,
+      err instanceof BridgeFatalError && err.status === 404
+        ? 'Remote Control environments are not available for your account.'
+        : `Error: ${errorMessage(err)}`,
+    )
+  }
+}
+
+export type ResolveBridgeCliResumeRegistrationParams = {
+  resumeSessionId?: string
+  resumePointerDir?: string
+  baseUrl: string
+  getAccessToken: () => string | undefined
+  refreshAccessTokenIfNeeded?: () => Promise<unknown>
+  clearAccessTokenCache?: () => void
+  onDebug: (message: string) => void
+}
+
+export async function resolveBridgeCliResumeRegistration(
+  params: ResolveBridgeCliResumeRegistrationParams,
+): Promise<string | undefined> {
+  if (!params.resumeSessionId) {
+    return undefined
+  }
+
+  try {
+    validateBridgeId(params.resumeSessionId, 'sessionId')
+  } catch {
+    throw new BridgeCliResumeError(
+      'invalid_session_id',
+      `Error: Invalid session ID "${params.resumeSessionId}". Session IDs must not contain unsafe characters.`,
+    )
+  }
+
+  await params.refreshAccessTokenIfNeeded?.()
+  params.clearAccessTokenCache?.()
+
+  const session = await getBridgeSessionRuntime(params.resumeSessionId, {
+    baseUrl: params.baseUrl,
+    getAccessToken: params.getAccessToken,
+  })
+
+  if (!session) {
+    if (params.resumePointerDir) {
+      const { clearBridgePointer } = await import('../bridge/bridgePointer.js')
+      await clearBridgePointer(params.resumePointerDir)
+    }
+    throw new BridgeCliResumeError(
+      'session_not_found',
+      `Error: Session ${params.resumeSessionId} not found. It may have been archived or expired, or your login may have lapsed (run \`claude /login\`).`,
+    )
+  }
+
+  if (!session.environment_id) {
+    if (params.resumePointerDir) {
+      const { clearBridgePointer } = await import('../bridge/bridgePointer.js')
+      await clearBridgePointer(params.resumePointerDir)
+    }
+    throw new BridgeCliResumeError(
+      'missing_environment_id',
+      `Error: Session ${params.resumeSessionId} has no environment_id. It may never have been attached to a bridge.`,
+    )
+  }
+
+  params.onDebug(
+    `[bridge:init] Resuming session ${params.resumeSessionId} on environment ${session.environment_id}`,
+  )
+  return session.environment_id
+}
+
+export class BridgeCliResumeReconnectError extends Error {
+  constructor(readonly fatal: boolean, message: string) {
+    super(message)
+    this.name = 'BridgeCliResumeReconnectError'
+  }
+}
+
+export type ResolveBridgeCliResumeReconnectParams = {
+  api: Pick<BridgeApiClient, 'reconnectSession'>
+  environmentId: string
+  reuseEnvironmentId?: string
+  resumeSessionId?: string
+  resumePointerDir?: string
+  onDebug: (message: string) => void
+  onEnvMismatch?: (
+    requestedEnvironmentId: string,
+    actualEnvironmentId: string,
+  ) => void
+}
+
+export type BridgeCliResumeReconnectResult = {
+  effectiveResumeSessionId?: string
+  warningMessage?: string
+}
+
+export async function resolveBridgeCliResumeReconnect(
+  params: ResolveBridgeCliResumeReconnectParams,
+): Promise<BridgeCliResumeReconnectResult> {
+  if (!params.resumeSessionId) {
+    return {}
+  }
+
+  if (
+    params.reuseEnvironmentId &&
+    params.environmentId !== params.reuseEnvironmentId
+  ) {
+    params.onEnvMismatch?.(params.reuseEnvironmentId, params.environmentId)
+    return {
+      warningMessage: `Warning: Could not resume session ${params.resumeSessionId} — its environment has expired. Creating a fresh session instead.`,
+    }
+  }
+
+  const infraResumeId = toInfraSessionId(params.resumeSessionId)
+  const reconnectCandidates =
+    infraResumeId === params.resumeSessionId
+      ? [params.resumeSessionId]
+      : [params.resumeSessionId, infraResumeId]
+
+  let lastReconnectErr: unknown
+  for (const candidateId of reconnectCandidates) {
+    try {
+      await params.api.reconnectSession(params.environmentId, candidateId)
+      params.onDebug(
+        `[bridge:init] Session ${candidateId} re-queued via bridge/reconnect`,
+      )
+      return { effectiveResumeSessionId: params.resumeSessionId }
+    } catch (err) {
+      lastReconnectErr = err
+      const { errorMessage } = await import('../utils/errors.js')
+      params.onDebug(
+        `[bridge:init] reconnectSession(${candidateId}) failed: ${errorMessage(err)}`,
+      )
+    }
+  }
+
+  const err = lastReconnectErr
+  const isFatal = err instanceof BridgeFatalError
+  if (params.resumePointerDir && isFatal) {
+    const { clearBridgePointer } = await import('../bridge/bridgePointer.js')
+    await clearBridgePointer(params.resumePointerDir)
+  }
+  const { errorMessage } = await import('../utils/errors.js')
+  throw new BridgeCliResumeReconnectError(
+    isFatal,
+    isFatal
+      ? `Error: ${errorMessage(err)}`
+      : `Error: Failed to reconnect session ${params.resumeSessionId}: ${errorMessage(err)}\nThe session may still be resumable — try running the same command again.`,
+  )
+}
+
+export type BridgeCliHostControls = {
+  controller: AbortController
+  onStdinData(data: Buffer): void
+  onSigint(): void
+  onSigterm(): void
+  attach(): void
+  stop(): void
+}
+
+export type CreateBridgeCliHostControlsParams = {
+  logger: Pick<
+    BridgeLogger,
+    'toggleQr' | 'logStatus' | 'setSpawnModeDisplay' | 'refreshDisplay'
+  >
+  toggleAvailable: boolean
+  config: { spawnMode: SpawnMode }
+  onDebug: (message: string) => void
+  onSpawnModeToggled?: (mode: 'same-dir' | 'worktree') => void
+  persistSpawnMode?: (mode: 'same-dir' | 'worktree') => void
+}
+
+export function createBridgeCliHostControls(
+  params: CreateBridgeCliHostControlsParams,
+): BridgeCliHostControls {
+  const controller = new AbortController()
+
+  const onSigint = (): void => {
+    params.onDebug('[bridge:shutdown] SIGINT received, shutting down')
+    controller.abort()
+  }
+
+  const onSigterm = (): void => {
+    params.onDebug('[bridge:shutdown] SIGTERM received, shutting down')
+    controller.abort()
+  }
+
+  const onStdinData = (data: Buffer): void => {
+    if (data[0] === 0x03 || data[0] === 0x04) {
+      onSigint()
+      return
+    }
+    if (data[0] === 0x20) {
+      params.logger.toggleQr()
+      return
+    }
+    if (data[0] !== 0x77 || !params.toggleAvailable) {
+      return
+    }
+
+    const newMode: 'same-dir' | 'worktree' =
+      params.config.spawnMode === 'same-dir' ? 'worktree' : 'same-dir'
+    params.config.spawnMode = newMode
+    params.onSpawnModeToggled?.(newMode)
+    params.logger.logStatus(
+      newMode === 'worktree'
+        ? 'Spawn mode: worktree (new sessions get isolated git worktrees)'
+        : 'Spawn mode: same-dir (new sessions share the current directory)',
+    )
+    params.logger.setSpawnModeDisplay(newMode)
+    params.logger.refreshDisplay()
+    params.persistSpawnMode?.(newMode)
+  }
+
+  const attach = (): void => {
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true)
+      process.stdin.resume()
+      process.stdin.on('data', onStdinData)
+    }
+    process.on('SIGINT', onSigint)
+    process.on('SIGTERM', onSigterm)
+  }
+
+  const stop = (): void => {
+    process.off('SIGINT', onSigint)
+    process.off('SIGTERM', onSigterm)
+    process.stdin.off('data', onStdinData)
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false)
+    }
+    process.stdin.pause()
+  }
+
+  return {
+    controller,
+    onStdinData,
+    onSigint,
+    onSigterm,
+    attach,
+    stop,
+  }
+}
+
+export async function startBridgeCliPointerRefresh(
+  params: StartBridgeCliPointerRefreshParams,
+): Promise<BridgeCliPointerRefresh | null> {
+  if (!params.sessionId || params.spawnMode !== 'single-session') {
+    return null
+  }
+
+  const { writeBridgePointer } = await import('../bridge/bridgePointer.js')
+  const pointerPayload = {
+    sessionId: params.sessionId,
+    environmentId: params.environmentId,
+    source: params.source ?? ('standalone' as const),
+  }
+  await writeBridgePointer(params.dir, pointerPayload)
+  const timer = setInterval(
+    writeBridgePointer,
+    60 * 60 * 1000,
+    params.dir,
+    pointerPayload,
+  )
+  timer.unref?.()
+
+  return {
+    stop() {
+      clearInterval(timer)
+    },
+  }
 }
 
 export function createBridgeHeadlessDeps(

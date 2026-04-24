@@ -38,9 +38,17 @@
   - startupModes
   - startup telemetry scheduling
 - `REPL.tsx` 的 query turn orchestration 已上提到独立 controller
+- `REPL.tsx` 的 foreground query orchestration 也已上提到独立 controller
+- `REPL.tsx` 的 background query orchestration 也已上提到独立 controller
+- `REPL.tsx` 的 initial message orchestration 也已上提到独立 controller
+- `REPL.tsx` 的 startup messages 注入 effect 也已收成独立 helper
 - `REPL.tsx` 的 bottom / bubble 区域已拆成独立 view 组件
 - `bridgeMain.ts` 也已开始第一轮瘦身：
   - `spawner / logger / initial session` 的宿主装配已上提到 `src/kernel/bridge.ts`
+  - `initial session` 关联的 crash-recovery pointer refresh 生命周期也已开始经由 `src/kernel/bridge.ts` 管理
+  - `stdin / signal / spawn-mode toggle` 这类宿主控制 wiring 也已开始经由 `src/kernel/bridge.ts` 管理
+  - `resume / reuseEnvironmentId` 的启动编排也已开始经由 `src/kernel/bridge.ts` 管理
+  - `registration / reconnect failure mapping` 也已开始经由 `src/kernel/bridge.ts` 管理
   - `bridgeMain.ts` 不再直接拼这三块默认实现
 
 因此当前这阶段的重点已经从“先把 launcher 抽出去”，推进到：

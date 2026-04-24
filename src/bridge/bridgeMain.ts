@@ -42,10 +42,18 @@ import { safeFilenameId } from './sessionRunner.js'
 import { getTrustedDeviceToken } from './trustedDevice.js'
 import {
   assembleBridgeCliHost,
+  BridgeCliRegistrationError,
+  BridgeCliResumeReconnectError,
+  BridgeCliResumeError,
+  createBridgeCliHostControls,
   createBridgeCliInitialSession,
   getBridgeSessionRuntime,
+  registerBridgeCliEnvironment,
+  resolveBridgeCliResumeRegistration,
+  resolveBridgeCliResumeReconnect,
   type HeadlessBridgeOpts,
   runBridgeHeadless as runKernelBridgeHeadless,
+  startBridgeCliPointerRefresh,
   updateBridgeSessionTitleRuntime,
 } from '../kernel/bridge.js'
 import {
@@ -2357,56 +2365,24 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   let reuseEnvironmentId: string | undefined
   if (feature('KAIROS') && resumeSessionId) {
     try {
-      validateBridgeId(resumeSessionId, 'sessionId')
-    } catch {
-      // biome-ignore lint/suspicious/noConsole: intentional error output
-      console.error(
-        `Error: Invalid session ID "${resumeSessionId}". Session IDs must not contain unsafe characters.`,
-      )
-      // eslint-disable-next-line custom-rules/no-process-exit
-      process.exit(1)
-    }
-    // Proactively refresh the OAuth token — getBridgeSession uses raw axios
-    // without the withOAuthRetry 401-refresh logic. An expired-but-present
-    // token would otherwise produce a misleading "not found" error.
-    await checkAndRefreshOAuthTokenIfNeeded()
-    clearOAuthTokenCache()
-    const session = await getBridgeSessionRuntime(resumeSessionId, {
-      baseUrl,
-      getAccessToken: getBridgeAccessToken,
-    })
-    if (!session) {
-      // Session gone on server → pointer is stale. Clear it so the user
-      // isn't re-prompted next launch. (Explicit --session-id leaves the
-      // pointer alone — it's an independent file they may not even have.)
-      // resumePointerDir may be a worktree sibling — clear THAT file.
-      if (resumePointerDir) {
-        const { clearBridgePointer } = await import('./bridgePointer.js')
-        await clearBridgePointer(resumePointerDir)
+      reuseEnvironmentId = await resolveBridgeCliResumeRegistration({
+        resumeSessionId,
+        resumePointerDir,
+        baseUrl,
+        getAccessToken: getBridgeAccessToken,
+        refreshAccessTokenIfNeeded: checkAndRefreshOAuthTokenIfNeeded,
+        clearAccessTokenCache: clearOAuthTokenCache,
+        onDebug: logForDebugging,
+      })
+    } catch (err) {
+      if (err instanceof BridgeCliResumeError) {
+        // biome-ignore lint/suspicious/noConsole: intentional error output
+        console.error(err.message)
+        // eslint-disable-next-line custom-rules/no-process-exit
+        process.exit(1)
       }
-      // biome-ignore lint/suspicious/noConsole: intentional error output
-      console.error(
-        `Error: Session ${resumeSessionId} not found. It may have been archived or expired, or your login may have lapsed (run \`claude /login\`).`,
-      )
-      // eslint-disable-next-line custom-rules/no-process-exit
-      process.exit(1)
+      throw err
     }
-    if (!session.environment_id) {
-      if (resumePointerDir) {
-        const { clearBridgePointer } = await import('./bridgePointer.js')
-        await clearBridgePointer(resumePointerDir)
-      }
-      // biome-ignore lint/suspicious/noConsole: intentional error output
-      console.error(
-        `Error: Session ${resumeSessionId} has no environment_id. It may never have been attached to a bridge.`,
-      )
-      // eslint-disable-next-line custom-rules/no-process-exit
-      process.exit(1)
-    }
-    reuseEnvironmentId = session.environment_id
-    logForDebugging(
-      `[bridge:init] Resuming session ${resumeSessionId} on environment ${reuseEnvironmentId}`,
-    )
   }
 
   const config: BridgeConfig = {
@@ -2442,22 +2418,20 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   let environmentId: string
   let environmentSecret: string
   try {
-    const reg = await api.registerBridgeEnvironment(config)
-    environmentId = reg.environment_id
-    environmentSecret = reg.environment_secret
+    const reg = await registerBridgeCliEnvironment({ api, config })
+    environmentId = reg.environmentId
+    environmentSecret = reg.environmentSecret
   } catch (err) {
     logEvent('tengu_bridge_registration_failed', {
-      status: err instanceof BridgeFatalError ? err.status : undefined,
+      status: err instanceof BridgeCliRegistrationError ? err.status : undefined,
     })
-    // Registration failures are fatal — print a clean message instead of a stack trace.
-    // biome-ignore lint/suspicious/noConsole:: intentional console output
-    console.error(
-      err instanceof BridgeFatalError && err.status === 404
-        ? 'Remote Control environments are not available for your account.'
-        : `Error: ${errorMessage(err)}`,
-    )
-    // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(1)
+    if (err instanceof BridgeCliRegistrationError) {
+      // biome-ignore lint/suspicious/noConsole:: intentional console output
+      console.error(err.message)
+      // eslint-disable-next-line custom-rules/no-process-exit
+      process.exit(1)
+    }
+    throw err
   }
 
   // Tracks whether the --session-id resume flow completed successfully.
@@ -2465,76 +2439,35 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // Cleared on env mismatch so we gracefully fall back to a new session.
   let effectiveResumeSessionId: string | undefined
   if (feature('KAIROS') && resumeSessionId) {
-    if (reuseEnvironmentId && environmentId !== reuseEnvironmentId) {
-      // Backend returned a different environment_id — the original env
-      // expired or was reaped. Reconnect won't work against the new env
-      // (session is bound to the old one). Log to sentry for visibility
-      // and fall through to fresh session creation on the new env.
-      logError(
-        new Error(
-          `Bridge resume env mismatch: requested ${reuseEnvironmentId}, backend returned ${environmentId}. Falling back to fresh session.`,
-        ),
-      )
-      // biome-ignore lint/suspicious/noConsole: intentional warning output
-      console.warn(
-        `Warning: Could not resume session ${resumeSessionId} — its environment has expired. Creating a fresh session instead.`,
-      )
-      // Don't deregister — we're going to use this new environment.
-      // effectiveResumeSessionId stays undefined → fresh session path below.
-    } else {
-      // Force-stop any stale worker instances for this session and re-queue
-      // it so our poll loop picks it up. Must happen after registration so
-      // the backend knows a live worker exists for the environment.
-      //
-      // The pointer stores a session_* ID but /bridge/reconnect looks
-      // sessions up by their infra tag (cse_*) when ccr_v2_compat_enabled
-      // is on. Try both; the conversion is a no-op if already cse_*.
-      const infraResumeId = toInfraSessionId(resumeSessionId)
-      const reconnectCandidates =
-        infraResumeId === resumeSessionId
-          ? [resumeSessionId]
-          : [resumeSessionId, infraResumeId]
-      let reconnected = false
-      let lastReconnectErr: unknown
-      for (const candidateId of reconnectCandidates) {
-        try {
-          await api.reconnectSession(environmentId, candidateId)
-          logForDebugging(
-            `[bridge:init] Session ${candidateId} re-queued via bridge/reconnect`,
+    try {
+      const reconnectResult = await resolveBridgeCliResumeReconnect({
+        api,
+        environmentId,
+        reuseEnvironmentId,
+        resumeSessionId,
+        resumePointerDir,
+        onDebug: logForDebugging,
+        onEnvMismatch(requestedEnvironmentId, actualEnvironmentId) {
+          logError(
+            new Error(
+              `Bridge resume env mismatch: requested ${requestedEnvironmentId}, backend returned ${actualEnvironmentId}. Falling back to fresh session.`,
+            ),
           )
-          effectiveResumeSessionId = resumeSessionId
-          reconnected = true
-          break
-        } catch (err) {
-          lastReconnectErr = err
-          logForDebugging(
-            `[bridge:init] reconnectSession(${candidateId}) failed: ${errorMessage(err)}`,
-          )
-        }
+        },
+      })
+      effectiveResumeSessionId = reconnectResult.effectiveResumeSessionId
+      if (reconnectResult.warningMessage) {
+        // biome-ignore lint/suspicious/noConsole: intentional warning output
+        console.warn(reconnectResult.warningMessage)
       }
-      if (!reconnected) {
-        const err = lastReconnectErr
-
-        // Do NOT deregister on transient reconnect failure — at this point
-        // environmentId IS the session's own environment. Deregistering
-        // would make retry impossible. The backend's 4h TTL cleans up.
-        const isFatal = err instanceof BridgeFatalError
-        // Clear pointer only on fatal reconnect failure. Transient failures
-        // ("try running the same command again") should keep the pointer so
-        // next launch re-prompts — that IS the retry mechanism.
-        if (resumePointerDir && isFatal) {
-          const { clearBridgePointer } = await import('./bridgePointer.js')
-          await clearBridgePointer(resumePointerDir)
-        }
+    } catch (err) {
+      if (err instanceof BridgeCliResumeReconnectError) {
         // biome-ignore lint/suspicious/noConsole: intentional error output
-        console.error(
-          isFatal
-            ? `Error: ${errorMessage(err)}`
-            : `Error: Failed to reconnect session ${resumeSessionId}: ${errorMessage(err)}\nThe session may still be resumable — try running the same command again.`,
-        )
+        console.error(err.message)
         // eslint-disable-next-line custom-rules/no-process-exit
         process.exit(1)
       }
+      throw err
     }
   }
 
@@ -2576,57 +2509,25 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     onDebug: logForDebugging,
   })
 
-  // Listen for keys: space toggles QR code, w toggles spawn mode
-  const onStdinData = (data: Buffer): void => {
-    if (data[0] === 0x03 || data[0] === 0x04) {
-      // Ctrl+C / Ctrl+D — trigger graceful shutdown
-      process.emit('SIGINT')
-      return
-    }
-    if (data[0] === 0x20 /* space */) {
-      logger.toggleQr()
-      return
-    }
-    if (data[0] === 0x77 /* 'w' */) {
-      if (!toggleAvailable) return
-      const newMode: 'same-dir' | 'worktree' =
-        config.spawnMode === 'same-dir' ? 'worktree' : 'same-dir'
-      config.spawnMode = newMode
+  const hostControls = createBridgeCliHostControls({
+    logger,
+    toggleAvailable,
+    config,
+    onDebug: logForDebugging,
+    onSpawnModeToggled(newMode) {
       logEvent('tengu_bridge_spawn_mode_toggled', {
         spawn_mode:
           newMode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
-      logger.logStatus(
-        newMode === 'worktree'
-          ? 'Spawn mode: worktree (new sessions get isolated git worktrees)'
-          : 'Spawn mode: same-dir (new sessions share the current directory)',
-      )
-      logger.setSpawnModeDisplay(newMode)
-      logger.refreshDisplay()
+    },
+    persistSpawnMode(newMode) {
       saveCurrentProjectConfig(current => {
         if (current.remoteControlSpawnMode === newMode) return current
         return { ...current, remoteControlSpawnMode: newMode }
       })
-      return
-    }
-  }
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true)
-    process.stdin.resume()
-    process.stdin.on('data', onStdinData)
-  }
-
-  const controller = new AbortController()
-  const onSigint = (): void => {
-    logForDebugging('[bridge:shutdown] SIGINT received, shutting down')
-    controller.abort()
-  }
-  const onSigterm = (): void => {
-    logForDebugging('[bridge:shutdown] SIGTERM received, shutting down')
-    controller.abort()
-  }
-  process.on('SIGINT', onSigint)
-  process.on('SIGTERM', onSigterm)
+    },
+  })
+  hostControls.attach()
 
   // Auto-create an empty session so the user has somewhere to type
   // immediately (matching /remote-control behavior). Controlled by
@@ -2646,7 +2547,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     title: name,
     gitRepoUrl,
     branch,
-    signal: controller.signal,
+    signal: hostControls.controller.signal,
     baseUrl,
     getAccessToken: getBridgeAccessToken,
     permissionMode,
@@ -2661,28 +2562,13 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // closes the terminal before copying the printed --session-id hint).
   // Refreshed hourly so a 5h+ session that crashes still has a fresh
   // pointer (staleness checks file mtime, backend TTL is rolling-from-poll).
-  let pointerRefreshTimer: ReturnType<typeof setInterval> | null = null
-  // Single-session only: --continue forces single-session mode on resume,
-  // so a pointer written in multi-session mode would contradict the user's
-  // config when they try to resume. The resumable-shutdown path is also
-  // gated to single-session (line ~1254) so the pointer would be orphaned.
-  if (initialSessionId && spawnMode === 'single-session') {
-    const { writeBridgePointer } = await import('./bridgePointer.js')
-    const pointerPayload = {
-      sessionId: initialSessionId,
-      environmentId,
-      source: 'standalone' as const,
-    }
-    await writeBridgePointer(config.dir, pointerPayload)
-    pointerRefreshTimer = setInterval(
-      writeBridgePointer,
-      60 * 60 * 1000,
-      config.dir,
-      pointerPayload,
-    )
-    // Don't let the interval keep the process alive on its own.
-    pointerRefreshTimer.unref?.()
-  }
+  const pointerRefresh = await startBridgeCliPointerRefresh({
+    dir: config.dir,
+    sessionId: initialSessionId,
+    environmentId,
+    spawnMode,
+    source: 'standalone',
+  })
 
   try {
     await runBridgeLoop(
@@ -2692,7 +2578,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
       api,
       spawner,
       logger,
-      controller.signal,
+      hostControls.controller.signal,
       undefined,
       initialSessionId ?? undefined,
       async () => {
@@ -2705,16 +2591,8 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
       },
     )
   } finally {
-    if (pointerRefreshTimer !== null) {
-      clearInterval(pointerRefreshTimer)
-    }
-    process.off('SIGINT', onSigint)
-    process.off('SIGTERM', onSigterm)
-    process.stdin.off('data', onStdinData)
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false)
-    }
-    process.stdin.pause()
+    pointerRefresh?.stop()
+    hostControls.stop()
   }
 
   // The bridge bypasses init.ts (and its graceful shutdown handler), so we

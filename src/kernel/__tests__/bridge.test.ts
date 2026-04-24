@@ -1,8 +1,20 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { BridgeFatalError } from '../../bridge/bridgeApi.js'
 
 const mockRunHeadlessBridgeRuntime = mock(async () => {})
 const mockCreateSessionSpawner = mock(() => ({ spawn: mock(() => {}) }))
 const mockCreateBridgeSessionRuntime = mock(async () => 'session-1')
+const mockGetBridgeSessionRuntime = mock(async (): Promise<any> => null)
+const mockWriteBridgePointer = mock(async () => {})
+const mockClearBridgePointer = mock(async () => {})
+const mockTimerUnref = mock(() => {})
+const mockTimer = { unref: mockTimerUnref } as unknown as ReturnType<
+  typeof setInterval
+>
+const originalSetInterval = globalThis.setInterval
+const originalClearInterval = globalThis.clearInterval
+const mockSetInterval = mock(() => mockTimer)
+const mockClearInterval = mock(() => {})
 const lastLogger = {
   current: null as
     | {
@@ -32,23 +44,44 @@ mock.module('../../bridge/bridgeUI.js', () => ({
 mock.module('../../runtime/capabilities/bridge/SessionApi.js', () => ({
   archiveBridgeSessionRuntime: mock(async () => {}),
   createBridgeSessionRuntime: mockCreateBridgeSessionRuntime,
-  getBridgeSessionRuntime: mock(async () => null),
+  getBridgeSessionRuntime: mockGetBridgeSessionRuntime,
   updateBridgeSessionTitleRuntime: mock(async () => {}),
+}))
+mock.module('../../bridge/bridgePointer.js', () => ({
+  writeBridgePointer: mockWriteBridgePointer,
+  clearBridgePointer: mockClearBridgePointer,
 }))
 
 const {
   assembleBridgeCliHost,
+  BridgeCliRegistrationError,
+  BridgeCliResumeReconnectError,
+  BridgeCliResumeError,
+  createBridgeCliHostControls,
   createBridgeCliInitialSession,
   createBridgeHeadlessDeps,
+  registerBridgeCliEnvironment,
+  resolveBridgeCliResumeRegistration,
+  resolveBridgeCliResumeReconnect,
   runBridgeHeadless,
+  startBridgeCliPointerRefresh,
 } = await import('../bridge.js')
 
 describe('kernel bridge surface', () => {
+  globalThis.setInterval = mockSetInterval as unknown as typeof setInterval
+  globalThis.clearInterval = mockClearInterval as unknown as typeof clearInterval
+
   beforeEach(() => {
     mockRunHeadlessBridgeRuntime.mockClear()
     mockCreateSessionSpawner.mockClear()
     mockCreateBridgeSessionRuntime.mockClear()
+    mockGetBridgeSessionRuntime.mockClear()
+    mockWriteBridgePointer.mockClear()
+    mockClearBridgePointer.mockClear()
     mockCreateBridgeLogger.mockClear()
+    mockSetInterval.mockClear()
+    mockClearInterval.mockClear()
+    mockTimerUnref.mockClear()
     lastLogger.current = null
   })
 
@@ -122,6 +155,195 @@ describe('kernel bridge surface', () => {
     expect(mockCreateBridgeSessionRuntime).toHaveBeenCalledTimes(0)
   })
 
+  test('resolves bridge resume registration through kernel helper', async () => {
+    mockGetBridgeSessionRuntime.mockResolvedValueOnce({
+      environment_id: 'env-1',
+    })
+    const refreshAccessTokenIfNeeded = mock(async () => {})
+    const clearAccessTokenCache = mock(() => {})
+    const onDebug = mock(() => {})
+
+    const reuseEnvironmentId = await resolveBridgeCliResumeRegistration({
+      resumeSessionId: 'session-1',
+      baseUrl: 'https://example.com',
+      getAccessToken: () => 'token',
+      refreshAccessTokenIfNeeded,
+      clearAccessTokenCache,
+      onDebug,
+    })
+
+    expect(reuseEnvironmentId).toBe('env-1')
+    expect(refreshAccessTokenIfNeeded).toHaveBeenCalledTimes(1)
+    expect(clearAccessTokenCache).toHaveBeenCalledTimes(1)
+    expect(mockGetBridgeSessionRuntime).toHaveBeenCalledWith('session-1', {
+      baseUrl: 'https://example.com',
+      getAccessToken: expect.any(Function),
+    })
+    expect(onDebug).toHaveBeenCalledWith(
+      '[bridge:init] Resuming session session-1 on environment env-1',
+    )
+  })
+
+  test('maps bridge registration 404 through kernel helper', async () => {
+    await expect(
+      registerBridgeCliEnvironment({
+        api: {
+          registerBridgeEnvironment: mock(async () => {
+            throw new BridgeFatalError('not found', 404)
+          }),
+        },
+        config: {} as any,
+      }),
+    ).rejects.toMatchObject({
+      name: 'BridgeCliRegistrationError',
+      status: 404,
+      message: 'Remote Control environments are not available for your account.',
+    })
+  })
+
+  test('clears stale bridge pointer when resumed session is missing', async () => {
+    mockGetBridgeSessionRuntime.mockResolvedValueOnce(null)
+
+    await expect(
+      resolveBridgeCliResumeRegistration({
+        resumeSessionId: 'session-1',
+        resumePointerDir: '/tmp/work/project',
+        baseUrl: 'https://example.com',
+        getAccessToken: () => 'token',
+        onDebug: mock(() => {}),
+      }),
+    ).rejects.toMatchObject({
+      name: 'BridgeCliResumeError',
+      code: 'session_not_found',
+    })
+
+    expect(mockClearBridgePointer).toHaveBeenCalledWith('/tmp/work/project')
+  })
+
+  test('returns warning when resumed environment no longer matches', async () => {
+    const onEnvMismatch = mock(() => {})
+
+    const result = await resolveBridgeCliResumeReconnect({
+      api: {
+        reconnectSession: mock(async () => {}),
+      },
+      environmentId: 'env-2',
+      reuseEnvironmentId: 'env-1',
+      resumeSessionId: 'session-1',
+      onDebug: mock(() => {}),
+      onEnvMismatch,
+    })
+
+    expect(result.effectiveResumeSessionId).toBeUndefined()
+    expect(result.warningMessage).toContain('Creating a fresh session instead.')
+    expect(onEnvMismatch).toHaveBeenCalledWith('env-1', 'env-2')
+  })
+
+  test('throws typed reconnect error and clears pointer on fatal failure', async () => {
+    await expect(
+      resolveBridgeCliResumeReconnect({
+        api: {
+          reconnectSession: mock(async () => {
+            throw new BridgeFatalError('environment expired', 410)
+          }),
+        },
+        environmentId: 'env-1',
+        reuseEnvironmentId: 'env-1',
+        resumeSessionId: 'session-1',
+        resumePointerDir: '/tmp/work/project',
+        onDebug: mock(() => {}),
+      }),
+    ).rejects.toMatchObject({
+      name: 'BridgeCliResumeReconnectError',
+      fatal: true,
+    })
+
+    expect(mockClearBridgePointer).toHaveBeenCalledWith('/tmp/work/project')
+  })
+
+  test('starts single-session bridge pointer refresh through kernel helper', async () => {
+    const refresh = await startBridgeCliPointerRefresh({
+      dir: '/tmp/work/project',
+      sessionId: 'session-1',
+      environmentId: 'env-1',
+      spawnMode: 'single-session',
+    })
+
+    expect(mockWriteBridgePointer).toHaveBeenCalledTimes(1)
+    expect(mockWriteBridgePointer).toHaveBeenCalledWith('/tmp/work/project', {
+      sessionId: 'session-1',
+      environmentId: 'env-1',
+      source: 'standalone',
+    })
+    expect(mockSetInterval).toHaveBeenCalledTimes(1)
+    expect(mockTimerUnref).toHaveBeenCalledTimes(1)
+
+    refresh?.stop()
+    expect(mockClearInterval).toHaveBeenCalledTimes(1)
+    expect(mockClearInterval).toHaveBeenCalledWith(mockTimer)
+  })
+
+  test('skips pointer refresh outside single-session mode', async () => {
+    const refresh = await startBridgeCliPointerRefresh({
+      dir: '/tmp/work/project',
+      sessionId: 'session-1',
+      environmentId: 'env-1',
+      spawnMode: 'worktree',
+    })
+
+    expect(refresh).toBeNull()
+    expect(mockWriteBridgePointer).toHaveBeenCalledTimes(0)
+    expect(mockSetInterval).toHaveBeenCalledTimes(0)
+  })
+
+  test('toggles spawn mode through kernel-owned host controls', () => {
+    const config = { spawnMode: 'same-dir' as 'same-dir' | 'worktree' }
+    const logger = {
+      toggleQr: mock(() => {}),
+      logStatus: mock(() => {}),
+      setSpawnModeDisplay: mock(() => {}),
+      refreshDisplay: mock(() => {}),
+    }
+    const onSpawnModeToggled = mock(() => {})
+    const persistSpawnMode = mock(() => {})
+
+    const controls = createBridgeCliHostControls({
+      logger,
+      toggleAvailable: true,
+      config,
+      onDebug: mock(() => {}),
+      onSpawnModeToggled,
+      persistSpawnMode,
+    })
+
+    controls.onStdinData(Buffer.from([0x77]))
+
+    expect(config.spawnMode).toBe('worktree')
+    expect(onSpawnModeToggled).toHaveBeenCalledWith('worktree')
+    expect(logger.logStatus).toHaveBeenCalledTimes(1)
+    expect(logger.setSpawnModeDisplay).toHaveBeenCalledWith('worktree')
+    expect(logger.refreshDisplay).toHaveBeenCalledTimes(1)
+    expect(persistSpawnMode).toHaveBeenCalledWith('worktree')
+  })
+
+  test('aborts bridge host controls on ctrl+c', () => {
+    const controls = createBridgeCliHostControls({
+      logger: {
+        toggleQr: mock(() => {}),
+        logStatus: mock(() => {}),
+        setSpawnModeDisplay: mock(() => {}),
+        refreshDisplay: mock(() => {}),
+      },
+      toggleAvailable: false,
+      config: { spawnMode: 'single-session' },
+      onDebug: mock(() => {}),
+    })
+
+    expect(controls.controller.signal.aborted).toBe(false)
+    controls.onStdinData(Buffer.from([0x03]))
+    expect(controls.controller.signal.aborted).toBe(true)
+  })
+
   test('assembles default headless bridge deps in kernel', () => {
     const runBridgeLoop = mock(async () => {})
     const deps = createBridgeHeadlessDeps(runBridgeLoop as never)
@@ -157,4 +379,9 @@ describe('kernel bridge surface', () => {
     expect(call?.[1]).toBe(signal)
     expect(call?.[2]?.runBridgeLoop).toBe(runBridgeLoop)
   })
+})
+
+afterAll(() => {
+  globalThis.setInterval = originalSetInterval
+  globalThis.clearInterval = originalClearInterval
 })

@@ -31,7 +31,9 @@
 
 > 宿主瘦身这边也继续往前推进了一轮：`main.tsx` 已把 shared launch context 和 shared startup assembly 收口到独立 helper，`kernel/serverHost.ts` 也已摘掉对 `server/*` / `hosts/server/*` 历史兼容层的依赖，直接接到 runtime-owned server capability。
 
-> `bridgeMain.ts` 也已开始第一轮宿主装配上提：`spawner / logger / initial session` 这三块默认组装现在经由 `src/kernel/bridge.ts` 提供，`bridgeMain.ts` 本身进一步退回到参数、UI 与控制流协调。
+> `bridgeMain.ts` 也已开始第一轮宿主装配上提：`spawner / logger / initial session`、相关 `bridge pointer refresh` 生命周期、`stdin / signal / spawn-mode toggle` 这类宿主控制 wiring、`resume / reuseEnvironmentId` 的启动编排，以及 `registration / reconnect failure mapping` 现在都经由 `src/kernel/bridge.ts` 提供，`bridgeMain.ts` 本身进一步退回到参数、UI 与控制流协调。
+
+> `REPL.tsx` 这边也继续往前收了一刀：前台 `onQuery` orchestration、background query orchestration、initial message orchestration，以及 startup messages 注入 effect 都已从主文件上提到独立 controller/helper，当前主文件进一步退回到状态接线和视图组装。
 
 当前已经成立的结构是：
 

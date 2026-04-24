@@ -284,8 +284,12 @@ import {
 } from './replTurnCompletion.js';
 import { runReplCancelShell } from './replCancelShell.js';
 import { runReplInitialMessageShell } from './replInitialMessageShell.js';
+import { attachPendingReplStartupMessages } from './replStartupMessages.js';
 import { maybeRestoreCancelledReplTurn } from './replTurnRestore.js';
+import { runReplBackgroundQueryController } from './repl/controllers/runReplBackgroundQueryController.js';
+import { runReplInitialMessageController } from './repl/controllers/runReplInitialMessageController.js';
 import { runReplQueryTurnController } from './repl/controllers/runReplQueryTurnController.js';
+import { runReplForegroundQueryController } from './repl/controllers/runReplForegroundQueryController.js';
 import { getTools, assembleToolPool } from '../tools.js';
 import type { AgentDefinition } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { resolveAgentTools } from '@go-hare/builtin-tools/tools/AgentTool/agentToolUtils.js';
@@ -1496,15 +1500,10 @@ export function REPL({
   const awaitPendingHooks = useDeferredHookMessages(pendingHookMessages, setMessages);
 
   useEffect(() => {
-    if (!pendingStartupMessages) return;
-    let cancelled = false;
-    void pendingStartupMessages.then(msgs => {
-      if (cancelled || msgs.length === 0) return;
-      setMessages(prev => [...prev, ...msgs]);
+    return attachPendingReplStartupMessages({
+      pendingStartupMessages,
+      setMessages,
     });
-    return () => {
-      cancelled = true;
-    };
   }, [pendingStartupMessages, setMessages]);
 
   // Deferred messages for the Messages component — renders at transition
@@ -2887,75 +2886,37 @@ export function REPL({
 
   // Session backgrounding (Ctrl+B to background/foreground)
   const handleBackgroundQuery = useCallback(() => {
-    // Stop the foreground query so the background one takes over
-    abortController?.abort('background');
-    // Aborting subagents may produce task-completed notifications.
-    // Clear task notifications so the queue processor doesn't immediately
-    // start a new foreground query; forward them to the background session.
-    const removedNotifications = removeByFilter(cmd => cmd.mode === 'task-notification');
-
-    void (async () => {
-      const toolUseContext = getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel);
-      const {
-        toolUseContext: preparedContext,
-        systemPrompt,
-        userContext,
-        systemContext,
-      } = await prepareReplRuntimeQuery({
-        toolUseContext,
-        mainThreadAgentDefinition,
-      });
-
-      const notificationAttachments = await getQueuedCommandAttachments(removedNotifications).catch(() => []);
-      const notificationMessages = notificationAttachments.map(createAttachmentMessage);
-
-      // Deduplicate: if the query loop already yielded a notification into
-      // messagesRef before we removed it from the queue, skip duplicates.
-      // We use prompt text for dedup because source_uuid is not set on
-      // task-notification QueuedCommands (enqueuePendingNotification callers
-      // don't pass uuid), so it would always be undefined.
-      const existingPrompts = new Set<string>();
-      for (const m of messagesRef.current) {
-        if (
-          m.type === 'attachment' &&
-          m.attachment!.type === 'queued_command' &&
-          m.attachment!.commandMode === 'task-notification' &&
-          typeof m.attachment!.prompt === 'string'
-        ) {
-          existingPrompts.add(m.attachment!.prompt);
-        }
-      }
-      const uniqueNotifications = notificationMessages.filter(
-        m =>
-          m.attachment.type === 'queued_command' &&
-          (typeof m.attachment.prompt !== 'string' || !existingPrompts.has(m.attachment.prompt)),
-      );
-
-      startBackgroundSession({
-        messages: [...messagesRef.current, ...uniqueNotifications],
-        queryParams: {
-          systemPrompt,
-          userContext,
-          systemContext,
-          canUseTool,
-          toolUseContext: preparedContext,
-          querySource: getQuerySourceForREPL(),
-        },
-        description: terminalTitle,
-        setAppState,
-        agentDefinition: mainThreadAgentDefinition,
-      });
-    })();
+    void runReplBackgroundQueryController({
+      abortForegroundQuery: () => {
+        abortController?.abort('background');
+      },
+      removeTaskNotifications: () =>
+        removeByFilter(cmd => cmd.mode === 'task-notification'),
+      getCurrentMessages: () => messagesRef.current,
+      getToolUseContext,
+      mainLoopModel,
+      mainThreadAgentDefinition,
+      prepareBackgroundQuery: prepareReplRuntimeQuery,
+      getNotificationMessages: async removedNotifications => {
+        const notificationAttachments = await getQueuedCommandAttachments(
+          removedNotifications,
+        ).catch(() => []);
+        return notificationAttachments.map(createAttachmentMessage);
+      },
+      canUseTool,
+      querySource: getQuerySourceForREPL(),
+      description: terminalTitle,
+      setAppState,
+      startBackgroundSession,
+    });
   }, [
     abortController,
     mainLoopModel,
-    toolPermissionContext,
     mainThreadAgentDefinition,
     getToolUseContext,
-    customSystemPrompt,
-    appendSystemPrompt,
     canUseTool,
     setAppState,
+    terminalTitle,
   ]);
 
   const { handleBackgroundSession } = useSessionBackgrounding({
@@ -3247,205 +3208,98 @@ export function REPL({
       input?: string,
       effort?: EffortValue,
     ): Promise<void> => {
-      // If this is a teammate, mark them as active when starting a turn
       if (isAgentSwarmsEnabled()) {
         const teamName = getTeamName();
         const agentName = getAgentName();
         if (teamName && agentName) {
-          // Fire and forget - turn starts immediately, write happens in background
           void setMemberActive(teamName, agentName, true);
         }
       }
 
-      // Concurrent guard via state machine. tryStart() atomically checks
-      // and transitions idle→running, returning the generation number.
-      // Returns null if already running — no separate check-then-set.
-      const thisGeneration = queryGuard.tryStart();
-      if (thisGeneration === null) {
-        logEvent('tengu_concurrent_onquery_detected', {});
-
-        // Extract and enqueue user message text, skipping meta messages
-        // (e.g. expanded skill content, tick prompts) that should not be
-        // replayed as user-visible text.
-        newMessages
-          .filter((m): m is UserMessage => m.type === 'user' && !m.isMeta)
-          .map(_ => getContentText(_.message.content as string | ContentBlockParam[]))
-          .filter(_ => _ !== null)
-          .forEach((msg, i) => {
-            enqueue({ value: msg, mode: 'prompt' });
-            if (i === 0) {
-              logEvent('tengu_concurrent_onquery_enqueued', {});
-            }
-          });
-        return;
-      }
-
-      try {
-        pipeReturnHadErrorRef.current = false;
-        // isLoading is derived from queryGuard — tryStart() above already
-        // transitioned dispatching→running, so no setter call needed here.
-        resetTimingRefs();
-        setMessages(oldMessages => [...oldMessages, ...newMessages]);
-        responseLengthRef.current = 0;
-        if (feature('TOKEN_BUDGET')) {
-          const parsedBudget = input ? parseTokenBudget(input) : null;
-          snapshotOutputTokensForTurn(parsedBudget ?? getCurrentTurnTokenBudget());
-        }
-        apiMetricsRef.current = [];
-        setStreamingToolUses([]);
-        setStreamingText(null);
-
-        // messagesRef is updated synchronously by the setMessages wrapper
-        // above, so it already includes newMessages from the append at the
-        // top of this try block.  No reconstruction needed, no waiting for
-        // React's scheduler (previously cost 20-56ms per prompt; the 56ms
-        // case was a GC pause caught during the await).
-        const latestMessages = messagesRef.current;
-
-        if (input) {
-          await mrOnBeforeQuery(input, latestMessages, newMessages.length);
-        }
-
-        // Pass full conversation history to callback
-        if (onBeforeQueryCallback && input) {
-          const shouldProceed = await onBeforeQueryCallback(input, latestMessages);
-          if (!shouldProceed) {
-            return;
-          }
-        }
-
-        try {
-          await onQueryImpl(
-            latestMessages,
-            newMessages,
-            abortController,
-            shouldQuery,
-            additionalAllowedTools,
-            mainLoopModelParam,
-            effort,
-          );
-        } catch (error) {
-          if (feature('UDS_INBOX')) {
-            pipeReturnHadErrorRef.current = true;
-            relayPipeMessage({
-              type: 'error',
-              data: error instanceof Error ? error.message : String(error),
-            });
-          }
-          throw error;
-        }
-      } finally {
-        // queryGuard.end() atomically checks generation and transitions
-        // running→idle. Returns false if a newer query owns the guard
-        // (cancel+resubmit race where the stale finally fires as a microtask).
-        if (queryGuard.end(thisGeneration)) {
-          setLastQueryCompletionTime(Date.now());
-          skipIdleCheckRef.current = false;
-          // Always reset loading state in finally - this ensures cleanup even
-          // if onQueryImpl throws. onTurnComplete is called separately in
-          // onQueryImpl only on successful completion.
-          resetLoadingState();
-
-          await mrOnTurnComplete(messagesRef.current, abortController.signal.aborted);
-
-          let shouldSignalPipeDone = false;
-          if (feature('UDS_INBOX')) {
-            shouldSignalPipeDone = !pipeReturnHadErrorRef.current;
-          }
-
-          finalizeReplCompletedTurnHostShell({
-            shouldSignalPipeDone,
-            signalPipeDone: () => {
-              relayPipeMessage({
-                type: 'done',
-                data: '',
-              });
-            },
-            sendBridgeResult: () => {
-              sendBridgeResultRef.current();
-            },
-            shouldAutoHideTungsten:
-              process.env.USER_TYPE === 'ant' &&
-              !abortController.signal.aborted,
-            setTungstenAutoHidden: updater => {
-              setAppState(updater);
-            },
-            setAbortController,
-          });
-
-          let budgetInfo:
-            | { tokens: number; limit: number; nudges: number }
-            | undefined;
-          if (feature('TOKEN_BUDGET')) {
-            budgetInfo = captureReplTurnBudgetInfo({
-              tokenBudget: getCurrentTurnTokenBudget(),
-              isAborted: abortController.signal.aborted,
-              getTurnOutputTokens,
-              getBudgetContinuationCount,
-              clearTurnBudget: () => {
-                snapshotOutputTokensForTurn(null);
-              },
-            });
-          }
-
-          const turnDurationMs = Date.now() - loadingStartTimeRef.current - totalPausedMsRef.current;
-          finalizeReplTurnDurationShell({
-            turnDurationMs,
-            budgetInfo,
-            isAborted: abortController.signal.aborted,
-            proactiveActive: proactiveActive === true,
-            hasRunningSwarmAgents: getAllInProcessTeammateTasks(
-              store.getState().tasks,
-            ).some(t => t.status === 'running'),
-            loadingStartTimeMs: loadingStartTimeRef.current,
-            recordDeferredSwarmStartTime: timeMs => {
-              if (swarmStartTimeRef.current === null) {
-                swarmStartTimeRef.current = timeMs;
+      await runReplForegroundQueryController({
+        turn: {
+          newMessages,
+          abortController,
+          shouldQuery,
+          additionalAllowedTools,
+          mainLoopModelParam,
+          input,
+          effort,
+        },
+        runtime: {
+          runTurn: onQueryImpl,
+          queryGuard,
+        },
+        host: {
+          setMessages,
+          messagesRef,
+          resetTimingRefs,
+          responseLengthRef,
+          snapshotOutputTokensForTurn,
+          getCurrentTurnTokenBudget,
+          parseTokenBudget,
+          apiMetricsRef,
+          setStreamingToolUses,
+          setStreamingText,
+          mrOnBeforeQuery,
+          onBeforeQueryCallback: input && onBeforeQueryCallback
+            ? async (_input, latestMessages) => onBeforeQueryCallback(_input, latestMessages)
+            : undefined,
+          pipeReturnHadErrorRef,
+          relayPipeError: feature('UDS_INBOX')
+            ? message => {
+                relayPipeMessage({
+                  type: 'error',
+                  data: message,
+                });
               }
-            },
-            recordDeferredBudgetInfo: nextBudgetInfo => {
-              swarmBudgetInfoRef.current = nextBudgetInfo;
-            },
-            appendTurnDurationMessage: (nextTurnDurationMs, nextBudgetInfo) => {
-              setMessages(prev => [
-                ...prev,
-                createTurnDurationMessage(
-                  nextTurnDurationMs,
-                  nextBudgetInfo,
-                  count(prev, isLoggableMessage),
-                ),
-              ]);
-            },
-          });
-        }
-
-        // Auto-restore: if the user interrupted before any meaningful response
-        // arrived, rewind the conversation and restore their prompt — same as
-        // opening the message selector and picking the last message.
-        // This runs OUTSIDE the queryGuard.end() check because onCancel calls
-        // forceEnd(), which bumps the generation so end() returns false above.
-        // Guards: reason === 'user-cancel' (onCancel/Esc; programmatic aborts
-        // use 'background'/'interrupt' and must not rewind — note abort() with
-        // no args sets reason to a DOMException, not undefined), !isActive (no
-        // newer query started — cancel+resubmit race), empty input (don't
-        // clobber text typed during loading), no queued commands (user queued
-        // B while A was loading → they've moved on, don't restore A; also
-        // avoids removeLastFromHistory removing B's entry instead of A's),
-        // not viewing a teammate (messagesRef is the main conversation — the
-        // old Up-arrow quick-restore had this guard, preserve it).
-        maybeRestoreCancelledReplTurn({
-          abortReason: abortController.signal.reason,
-          hasActiveQuery: queryGuard.isActive,
-          inputValue: inputValueRef.current,
-          commandQueueLength: getCommandQueueLength(),
+            : undefined,
+          setLastQueryCompletionTime,
+          skipIdleCheckRef,
+          resetLoadingState,
+          mrOnTurnComplete,
+          signalPipeDone: () => {
+            relayPipeMessage({
+              type: 'done',
+              data: '',
+            });
+          },
+          sendBridgeResult: () => {
+            sendBridgeResultRef.current();
+          },
+          setTungstenAutoHidden: updater => {
+            setAppState(updater);
+          },
+          setAbortController,
+          loadingStartTimeRef,
+          totalPausedMsRef,
+          getTurnOutputTokens,
+          getBudgetContinuationCount,
+          proactiveActive: proactiveActive === true,
+          hasRunningSwarmAgents: () =>
+            getAllInProcessTeammateTasks(store.getState().tasks).some(
+              task => task.status === 'running',
+            ),
+          recordDeferredSwarmStartTime: timeMs => {
+            if (swarmStartTimeRef.current === null) {
+              swarmStartTimeRef.current = timeMs;
+            }
+          },
+          recordDeferredBudgetInfo: nextBudgetInfo => {
+            swarmBudgetInfoRef.current = nextBudgetInfo;
+          },
+          inputValueRef,
+          getCommandQueueLength,
           viewingAgentTaskId: store.getState().viewingAgentTaskId,
-          messages: messagesRef.current,
           removeLastFromHistory,
           restoreMessage: message => {
             restoreMessageSyncRef.current(message);
           },
-        });
-      }
+          enqueuePrompt: value => {
+            enqueue({ value, mode: 'prompt' });
+          },
+        },
+      });
     },
     [onQueryImpl, setAppState, resetLoadingState, queryGuard, mrOnBeforeQuery, mrOnTurnComplete],
   );
@@ -3454,19 +3308,10 @@ export function REPL({
   // This effect runs when isLoading becomes false and there's a pending message
   const initialMessageRef = useRef(false);
   useEffect(() => {
-    const pending = initialMessage;
-    if (!pending || isLoading || initialMessageRef.current) return;
-
-    // Mark as processing to prevent re-entry
-    initialMessageRef.current = true;
-
-    let shouldRestrictAutoPermissions = false;
-    if (feature('TRANSCRIPT_CLASSIFIER')) {
-      shouldRestrictAutoPermissions = true;
-    }
-
-    void runReplInitialMessageShell({
-      initialMessage: pending,
+    runReplInitialMessageController({
+      initialMessage,
+      isLoading,
+      initialMessageRef,
       clearContextForInitialMessage: async initialMsg => {
         const oldPlanSlug = initialMsg.message.planContent
           ? getPlanSlug()
@@ -3494,7 +3339,6 @@ export function REPL({
         }
       },
       setAppState,
-      shouldRestrictAutoPermissions,
       createFileHistorySnapshot: messageUuid => {
         if (!fileHistoryEnabled()) {
           return;
