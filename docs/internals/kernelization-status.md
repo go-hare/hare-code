@@ -337,7 +337,7 @@
 
 ## 工程验证状态
 
-截至 2026-04-24，当前工程验证结果如下：
+截至 2026-04-24（本轮定向复核），当前工程验证结果如下：
 
 - 已通过：`bun run typecheck`
 - 已通过：kernel 相关定向 smoke / seam 测试，包括：
@@ -356,10 +356,10 @@
 - 已通过：`bun -e "import('@go-hare/hare-code/kernel')"` 可导入 package-level kernel entry
 - 已通过：`tests/integration/kernel-package-smoke.test.ts`
   - built package `@go-hare/hare-code/kernel` 已与稳定 kernel root surface 对齐
-- 未通过：`src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
-- 未通过：`src/runtime/capabilities/daemon/__tests__/contracts.test.ts`
-- 未全绿：`bun run test:all` 仍存在仓库存量失败；除了若干无关模块解析与 WebSearch adapter 测试外，也仍包含 kernel package / runtime contracts / direct-connect runtime 相关失败
-- 未全绿：`bun run lint` 仍存在仓库存量问题，主要是一批 `unused suppression` 与少量风格项
+- 已通过：`src/runtime/capabilities/bridge/__tests__/contracts.test.ts`
+- 已通过：`src/runtime/capabilities/daemon/__tests__/contracts.test.ts`
+- 未复跑：`bun run test:all`
+- 未复跑：`bun run lint`
 
 ## 收口原则
 

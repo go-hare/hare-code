@@ -31,13 +31,37 @@ const packageEntry = await import('../../entrypoints/kernel.js')
 const packageJson = JSON.parse(
   await readFile(join(process.cwd(), 'package.json'), 'utf8'),
 ) as {
-  exports?: Record<string, unknown>
+  exports?: Record<
+    string,
+    {
+      types?: string
+      import?: string
+      default?: string
+    }
+  >
 }
 
 describe('kernel package entry', () => {
   test('declares the package-level ./kernel export', () => {
     expect(packageJson.exports).toBeDefined()
     expect(packageJson.exports?.['./kernel']).toBeDefined()
+  })
+
+  test('publishes a standalone declaration file for the ./kernel surface', async () => {
+    const kernelExport = packageJson.exports?.['./kernel']
+    expect(kernelExport?.types).toBe('./src/kernel/index.d.ts')
+
+    const declaration = await readFile(
+      join(process.cwd(), kernelExport!.types!),
+      'utf8',
+    )
+
+    expect(declaration).toContain(
+      'export type KernelHeadlessEnvironment = {',
+    )
+    expect(declaration).not.toContain("'src/")
+    expect(declaration).not.toContain('"src/')
+    expect(declaration).not.toContain('packages/')
   })
 
   test('re-exports the stable kernel surface through src/entrypoints/kernel.ts', () => {

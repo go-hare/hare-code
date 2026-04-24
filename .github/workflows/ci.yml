@@ -23,6 +23,12 @@ jobs:
       - name: Type check
         run: bunx tsc --noEmit
 
+      - name: Build publish artifact
+        run: bun run build
+
+      - name: Verify npm package contents
+        run: npm pack --dry-run --ignore-scripts
+
       - name: Test with Coverage
         run: |
           set -o pipefail
@@ -33,6 +39,3 @@ jobs:
         with:
           file: ./coverage/lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
-
-      - name: Build
-        run: bun run build:vite

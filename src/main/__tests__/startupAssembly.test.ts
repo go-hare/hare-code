@@ -368,7 +368,7 @@ describe("shared launch assembly helpers", () => {
 });
 
 describe("mergeStartupMcpState", () => {
-	test("throws when startup MCP prefetches surface different tools with the same name", () => {
+	test("keeps the first startup MCP tool when sources surface different tools with the same name", () => {
 		const localTool = createTestTool({
 			name: "duplicate_tool",
 			description: "local",
@@ -378,12 +378,12 @@ describe("mergeStartupMcpState", () => {
 			description: "claudeai",
 		});
 
-		expect(() =>
-			mergeStartupMcpState(
-				{ clients: [], tools: [localTool], commands: [] },
-				{ clients: [], tools: [claudeaiTool], commands: [] },
-			),
-		).toThrow('Conflicting tools share primary name "duplicate_tool"');
+		const merged = mergeStartupMcpState(
+			{ clients: [], tools: [localTool], commands: [] },
+			{ clients: [], tools: [claudeaiTool], commands: [] },
+		);
+
+		expect(merged.tools).toEqual([localTool]);
 	});
 
 	test("deduplicates the same MCP logical tool across startup sources", () => {

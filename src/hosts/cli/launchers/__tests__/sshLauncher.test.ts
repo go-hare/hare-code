@@ -85,6 +85,7 @@ function createLaunchOptions(): SSHLaunchOptions {
       local: false,
       permissionMode: 'default',
       dangerouslySkipPermissions: true,
+      remoteBin: 'bun /tmp/project/dist/cli.js',
       extraCliArgs: ['--debug'],
     },
     localVersion: '1.2.3',
@@ -120,6 +121,12 @@ describe('runSshRemoteLaunch', () => {
     await runSshRemoteLaunch(options)
 
     expect(mockCreateSSHSession).toHaveBeenCalledTimes(1)
+    expect(mockCreateSSHSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        remoteBin: 'bun /tmp/project/dist/cli.js',
+      }),
+      expect.any(Object),
+    )
     expect(options.stateWriter.setOriginalCwd).toHaveBeenCalledWith(
       '/tmp/remote-cwd',
     )

@@ -38,6 +38,7 @@ import {
   transitionPlanAutoMode,
 } from '../../utils/permissions/permissionSetup.js'
 import { logError } from '../../utils/log.js'
+import { getPlatform } from '../../utils/platform.js'
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1054,24 +1055,32 @@ export function Config({
     },
     // Teammate mode (only shown when agent swarms are enabled)
     ...(isAgentSwarmsEnabled()
-      ? (() => {
-          const cliOverride = getCliTeammateModeOverride()
-          const label = cliOverride
-            ? `Teammate mode [overridden: ${cliOverride}]`
-            : 'Teammate mode'
+        ? (() => {
+            const cliOverride = getCliTeammateModeOverride()
+            const label = cliOverride
+              ? `Teammate mode [overridden: ${cliOverride}]`
+              : 'Teammate mode'
+          const isWindows = getPlatform() === 'windows'
+          const teammateModeOptions = isWindows
+            ? ['auto', 'tmux', 'windows-terminal', 'in-process']
+            : ['auto', 'tmux', 'in-process']
           return [
             {
               id: 'teammateMode',
               label,
               value: globalConfig.teammateMode ?? 'auto',
-              options: ['auto', 'tmux', 'in-process'],
+              options: teammateModeOptions,
               type: 'enum' as const,
               onChange(mode: string) {
                 if (
                   mode !== 'auto' &&
                   mode !== 'tmux' &&
+                  mode !== 'windows-terminal' &&
                   mode !== 'in-process'
                 ) {
+                  return
+                }
+                if (mode === 'windows-terminal' && !isWindows) {
                   return
                 }
                 // Clear CLI override and set new mode (pass mode to avoid race condition)

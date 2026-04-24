@@ -24,6 +24,7 @@ export type SSHLaunchOptions = {
     local?: boolean
     permissionMode?: SSHPermissionMode
     dangerouslySkipPermissions?: boolean
+    remoteBin?: string
     extraCliArgs?: string[]
   }
   localVersion: string
@@ -64,12 +65,13 @@ export async function runSshRemoteLaunch(
       let hadProgress = false
       sshSession = await createSSHSession(
         {
-          host: options.ssh.host,
+          host: options.ssh.host!,
           cwd: options.ssh.cwd,
           localVersion: options.localVersion,
           permissionMode: options.ssh.permissionMode,
           dangerouslySkipPermissions: options.ssh.dangerouslySkipPermissions,
-          extraCliArgs: options.ssh.extraCliArgs,
+          remoteBin: options.ssh.remoteBin,
+          extraCliArgs: options.ssh.extraCliArgs ?? [],
         },
         isTTY
           ? {

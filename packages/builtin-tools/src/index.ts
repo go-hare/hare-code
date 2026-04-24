@@ -38,6 +38,7 @@ export { TestingPermissionTool } from './tools/testing/TestingPermissionTool.js'
 // Feature-gated tools
 export { OVERFLOW_TEST_TOOL_NAME } from './tools/OverflowTestTool/OverflowTestTool.js'
 export { CtxInspectTool } from './tools/CtxInspectTool/CtxInspectTool.js'
+export { DiscoverSkillsTool } from './tools/DiscoverSkillsTool/DiscoverSkillsTool.js'
 export { ListPeersTool } from './tools/ListPeersTool/ListPeersTool.js'
 export { MonitorTool } from './tools/MonitorTool/MonitorTool.js'
 export { PowerShellTool } from './tools/PowerShellTool/PowerShellTool.js'

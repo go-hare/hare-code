@@ -14,6 +14,7 @@ import {
   createAssistantAPIErrorMessage,
   createUserMessage,
   createUserInterruptionMessage,
+  normalizeAttachmentForAPI,
   prepareUserContent,
   createToolResultStopMessage,
   extractTag,
@@ -510,5 +511,45 @@ describe("normalizeMessagesForAPI", () => {
 
     expect(block.type).toBe("tool_use");
     expect(block._geminiThoughtSignature).toBe("sig-123");
+  });
+});
+
+describe("normalizeAttachmentForAPI", () => {
+  test("adds completion hint for linked in-progress task", () => {
+    const messages = normalizeAttachmentForAPI({
+      type: "task_status",
+      taskId: "a123",
+      taskType: "local_agent",
+      status: "completed",
+      description: "worker",
+      deltaSummary: "done",
+      outputFilePath: "/tmp/out.txt",
+      linkedTaskId: "10",
+      linkedTaskStatus: "in_progress",
+      shouldSuggestTaskCompletion: true,
+    } as any);
+
+    expect(messages).toHaveLength(1);
+    const text = messages[0]!.message.content as string;
+    expect(text).toContain("Background task for task #10 has completed.");
+    expect(text).toContain('call TaskUpdate with status: "completed"');
+  });
+
+  test("does not add completion hint when suggestion flag is absent", () => {
+    const messages = normalizeAttachmentForAPI({
+      type: "task_status",
+      taskId: "a123",
+      taskType: "local_agent",
+      status: "completed",
+      description: "worker",
+      deltaSummary: "done",
+      outputFilePath: "/tmp/out.txt",
+      linkedTaskId: "10",
+      linkedTaskStatus: "in_progress",
+      shouldSuggestTaskCompletion: false,
+    } as any);
+
+    const text = messages[0]!.message.content as string;
+    expect(text).not.toContain("Background task for task #10 has completed.");
   });
 });

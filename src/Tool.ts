@@ -4,7 +4,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/index.mjs'
 export type { ToolResultBlockParam }
 import type {
-  ElicitRequestURLParams,
+  ElicitRequestParams,
   ElicitResult,
 } from '@modelcontextprotocol/sdk/types.js'
 import type { UUID } from 'crypto'
@@ -199,7 +199,7 @@ export type ToolUseContext = {
    */
   handleElicitation?: (
     serverName: string,
-    params: ElicitRequestURLParams,
+    params: ElicitRequestParams,
     signal: AbortSignal,
   ) => Promise<ElicitResult>
   setToolJSX?: SetToolJSXFn
@@ -379,19 +379,14 @@ function hasSameMcpToolIdentity(a: Tool, b: Tool): boolean {
   )
 }
 
-function describeToolIdentity(tool: Tool): string {
-  if (tool.mcpInfo) {
-    return `MCP(${tool.mcpInfo.serverName}/${tool.mcpInfo.toolName})`
-  }
-  return `built-in(${tool.name})`
-}
-
 /**
- * Deduplicates tools by primary name while rejecting conflicting implementations.
+ * Deduplicates tools by primary name while preserving the first occurrence.
  *
  * Duplicate entries are only tolerated when they point at the same tool object,
  * or when they are the same MCP logical tool surfaced through multiple merge
- * paths (same serverName + toolName).
+ * paths (same serverName + toolName). Distinct tools that share a primary name
+ * are silently deduplicated for backwards compatibility, so earlier merge
+ * inputs keep precedence over later ones.
  */
 export function dedupeToolsByName(tools: Tools): Tool[] {
   const deduped: Tool[] = []
@@ -408,10 +403,6 @@ export function dedupeToolsByName(tools: Tools): Tool[] {
     if (existing === tool || hasSameMcpToolIdentity(existing, tool)) {
       continue
     }
-
-    throw new Error(
-      `Conflicting tools share primary name "${tool.name}": ${describeToolIdentity(existing)} vs ${describeToolIdentity(tool)}`,
-    )
   }
 
   return deduped

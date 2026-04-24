@@ -60,6 +60,10 @@ import { runWithAgentContext, type SubagentContext } from 'src/utils/agentContex
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import {
+  getActiveTaskExecutionContext,
+  linkTaskToBackgroundTask,
+} from 'src/utils/tasks.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { AbortError, errorMessage, toError } from 'src/utils/errors.js'
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js'
@@ -969,6 +973,7 @@ export const AgentTool = buildTool({
 
     if (shouldRunAsync) {
       const asyncAgentId = earlyAgentId
+      const taskExecutionContext = getActiveTaskExecutionContext()
       const agentBackgroundTask = registerAsyncAgent({
         agentId: asyncAgentId,
         description,
@@ -980,6 +985,21 @@ export const AgentTool = buildTool({
         // They are killed explicitly via chat:killAgents.
         toolUseId: toolUseContext.toolUseId,
       })
+      if (taskExecutionContext) {
+        void linkTaskToBackgroundTask(
+          taskExecutionContext.taskListId,
+          taskExecutionContext.taskId,
+          {
+            backgroundTaskId: agentBackgroundTask.agentId,
+            backgroundTaskType: 'local_agent',
+            agentId: agentBackgroundTask.agentId,
+          },
+        ).catch(error => {
+          logForDebugging(
+            `[AgentTool] Failed to link task #${taskExecutionContext.taskId} to background agent ${agentBackgroundTask.agentId}: ${errorMessage(error)}`,
+          )
+        })
+      }
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
       // so we don't leave a stale entry if spawn fails. Sync agents skipped —

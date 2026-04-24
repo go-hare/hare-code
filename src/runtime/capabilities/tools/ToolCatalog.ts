@@ -125,6 +125,10 @@ const coordinatorModeModule = feature('COORDINATOR_MODE')
 const SnipTool = feature('HISTORY_SNIP')
   ? require('@go-hare/builtin-tools/tools/SnipTool/SnipTool.js').SnipTool
   : null
+const DiscoverSkillsTool = feature('EXPERIMENTAL_SKILL_SEARCH')
+  ? require('@go-hare/builtin-tools/tools/DiscoverSkillsTool/DiscoverSkillsTool.js')
+      .DiscoverSkillsTool
+  : null
 const ReviewArtifactTool = feature('REVIEW_ARTIFACT')
   ? require('@go-hare/builtin-tools/tools/ReviewArtifactTool/ReviewArtifactTool.js')
       .ReviewArtifactTool
@@ -237,6 +241,7 @@ export function getAllBaseTools(): Tools {
     ...(PushNotificationTool ? [PushNotificationTool] : []),
     ...(SubscribePRTool ? [SubscribePRTool] : []),
     ...(ReviewArtifactTool ? [ReviewArtifactTool] : []),
+    ...(DiscoverSkillsTool ? [DiscoverSkillsTool] : []),
     ...(getPowerShellTool() ? [getPowerShellTool()] : []),
     ...(SnipTool ? [SnipTool] : []),
     ...(process.env.NODE_ENV === 'test' ? [TestingPermissionTool] : []),

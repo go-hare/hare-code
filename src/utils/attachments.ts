@@ -30,9 +30,11 @@ import { SKILL_TOOL_NAME } from '@go-hare/builtin-tools/tools/SkillTool/constant
 import type { TodoList } from './todo/types.js'
 import {
   type Task,
+  getTaskExecutionMetadata,
   listTasks,
   getTaskListId,
   isTodoV2Enabled,
+  markTaskCompletionSuggested,
 } from './tasks.js'
 import { getPlanFilePath, getPlan } from './plans.js'
 import { getConnectedIdeName } from './ide.js'
@@ -615,6 +617,9 @@ export type Attachment =
       description: string
       deltaSummary: string | null
       outputFilePath?: string
+      linkedTaskId?: string
+      linkedTaskStatus?: 'pending' | 'in_progress' | 'completed'
+      shouldSuggestTaskCompletion?: boolean
     }
   | AsyncHookResponseAttachment
   | {
@@ -3510,16 +3515,47 @@ async function getUnifiedTaskAttachments(
     evictedTaskIds,
   )
 
+  const taskListId = getTaskListId()
+  const taskList = await listTasks(taskListId)
+
   // Convert TaskAttachment to Attachment format
-  return attachments.map(taskAttachment => ({
-    type: 'task_status' as const,
-    taskId: taskAttachment.taskId,
-    taskType: taskAttachment.taskType,
-    status: taskAttachment.status,
-    description: taskAttachment.description,
-    deltaSummary: taskAttachment.deltaSummary,
-    outputFilePath: getTaskOutputPath(taskAttachment.taskId),
-  }))
+  return Promise.all(
+    attachments.map(async taskAttachment => {
+      const linkedTask = taskList.find(task => {
+        const metadata = getTaskExecutionMetadata(task)
+        return metadata?.linkedBackgroundTaskId === taskAttachment.taskId
+      })
+
+      let shouldSuggestTaskCompletion = false
+      if (
+        linkedTask &&
+        taskAttachment.status === 'completed' &&
+        linkedTask.status === 'in_progress' &&
+        toolUseContext.options.tools.some(t =>
+          toolMatchesName(t, TASK_UPDATE_TOOL_NAME),
+        )
+      ) {
+        shouldSuggestTaskCompletion = await markTaskCompletionSuggested(
+          taskListId,
+          linkedTask.id,
+          taskAttachment.taskId,
+        )
+      }
+
+      return {
+        type: 'task_status' as const,
+        taskId: taskAttachment.taskId,
+        taskType: taskAttachment.taskType,
+        status: taskAttachment.status,
+        description: taskAttachment.description,
+        deltaSummary: taskAttachment.deltaSummary,
+        outputFilePath: getTaskOutputPath(taskAttachment.taskId),
+        linkedTaskId: linkedTask?.id,
+        linkedTaskStatus: linkedTask?.status,
+        shouldSuggestTaskCompletion,
+      }
+    }),
+  )
 }
 
 async function getAsyncHookResponseAttachments(): Promise<Attachment[]> {

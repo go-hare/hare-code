@@ -4066,6 +4066,16 @@ You have exited auto mode. The user may now want to interact more directly. You 
         )
       }
 
+      if (
+        attachment.shouldSuggestTaskCompletion &&
+        attachment.linkedTaskId &&
+        attachment.linkedTaskStatus === 'in_progress'
+      ) {
+        messageParts.push(
+          `Background task for task #${attachment.linkedTaskId} has completed. If the work is done, call ${TASK_UPDATE_TOOL_NAME} with status: "completed" before proceeding.`,
+        )
+      }
+
       return [
         createUserMessage({
           content: wrapInSystemReminder(messageParts.join(' ')),

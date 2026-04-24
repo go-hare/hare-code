@@ -183,16 +183,19 @@ import * as path from 'node:path'
  * Returns the original path if it's outside the project directory or if no cwd is provided.
  */
 export function toDisplayPath(filePath: string, cwd?: string): string {
-  if (!cwd) return filePath
+  const normalizeDisplayPath = (displayPath: string) =>
+    displayPath.replace(/\\/g, '/')
+
+  if (!cwd) return normalizeDisplayPath(filePath)
   const resolvedCwd = path.resolve(cwd)
   const resolvedFile = path.resolve(filePath)
   if (
     resolvedFile.startsWith(resolvedCwd + path.sep) ||
     resolvedFile === resolvedCwd
   ) {
-    return path.relative(resolvedCwd, resolvedFile)
+    return normalizeDisplayPath(path.relative(resolvedCwd, resolvedFile))
   }
-  return filePath
+  return normalizeDisplayPath(filePath)
 }
 
 // ── Markdown helpers ──────────────────────────────────────────────

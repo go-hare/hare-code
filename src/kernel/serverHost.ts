@@ -5,14 +5,14 @@
  * `server/*` compatibility modules directly.
  */
 import {
-  createDirectConnectSessionRuntime,
+  createDirectConnectSession as createDirectConnectSessionCompat,
   DirectConnectError,
-} from '../runtime/capabilities/server/DirectConnectSessionApi.js'
+} from '../server/createDirectConnectSession.js'
 import {
   runConnectHeadlessRuntime,
-  startServerRuntimeHost,
 } from '../runtime/capabilities/server/HostRuntime.js'
-import { SessionManager } from '../runtime/capabilities/server/SessionManager.js'
+import { startServer as startServerHost } from '../server/server.js'
+import { SessionManager } from '../server/sessionManager.js'
 import { DangerousBackend } from '../server/backends/dangerousBackend.js'
 import { createServerLogger } from '../server/serverLog.js'
 import type { SessionLogger } from '../runtime/capabilities/server/contracts.js'
@@ -53,7 +53,7 @@ export type KernelServerHostAssembly = {
   config: ServerConfig
   sessionManager: SessionManager
   logger: SessionLogger
-  server: ReturnType<typeof startServerRuntimeHost>
+  server: ReturnType<typeof startServerHost>
 }
 
 function parseRequiredInteger(value: IntegerLike, field: string): number {
@@ -83,7 +83,7 @@ export async function createDirectConnectSession(options: {
   dangerouslySkipPermissions?: boolean
   unixSocket?: string
 }): Promise<KernelDirectConnectSessionResult> {
-  const session = await createDirectConnectSessionRuntime(options)
+  const session = await createDirectConnectSessionCompat(options)
   return {
     ...session,
     state: {
@@ -154,7 +154,7 @@ export function assembleServerHost(
     config,
     sessionManager,
     logger,
-    server: startServerRuntimeHost(config, sessionManager, logger),
+    server: startServerHost(config, sessionManager, logger),
   }
 }
 
@@ -163,7 +163,7 @@ export function startServer(
   sessionManager: SessionManager,
   logger: SessionLogger,
 ) {
-  return startServerRuntimeHost(config, sessionManager, logger)
+  return startServerHost(config, sessionManager, logger)
 }
 
 export function startKernelServer(

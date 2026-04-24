@@ -830,6 +830,7 @@ type PendingSSH = {
 	cwd: string | undefined;
 	permissionMode: string | undefined;
 	dangerouslySkipPermissions: boolean;
+	remoteBin: string | undefined;
 	/** --local: spawn the child CLI directly, skip ssh/probe/deploy. e2e test mode. */
 	local: boolean;
 	/** Extra CLI args to forward to the remote CLI on initial spawn (--resume, -c). */
@@ -841,6 +842,7 @@ const _pendingSSH: PendingSSH | undefined = feature("SSH_REMOTE")
 			cwd: undefined,
 			permissionMode: undefined,
 			dangerouslySkipPermissions: false,
+			remoteBin: undefined,
 			local: false,
 			extraCliArgs: [],
 		}
@@ -1018,6 +1020,25 @@ export async function main() {
 			if (pmEqIdx !== -1) {
 				_pendingSSH.permissionMode = rawCliArgs[pmEqIdx]!.split("=")[1];
 				rawCliArgs.splice(pmEqIdx, 1);
+			}
+			const rbIdx = rawCliArgs.indexOf("--remote-bin");
+			if (
+				rbIdx !== -1 &&
+				rawCliArgs[rbIdx + 1] &&
+				!rawCliArgs[rbIdx + 1]!.startsWith("-")
+			) {
+				_pendingSSH.remoteBin = rawCliArgs[rbIdx + 1];
+				rawCliArgs.splice(rbIdx, 2);
+			}
+			const rbEqIdx = rawCliArgs.findIndex((a) =>
+				a.startsWith("--remote-bin="),
+			);
+			if (rbEqIdx !== -1) {
+				_pendingSSH.remoteBin = rawCliArgs[rbEqIdx]!
+					.split("=")
+					.slice(1)
+					.join("=");
+				rawCliArgs.splice(rbEqIdx, 1);
 			}
 			// Forward session-resume + model flags to the remote CLI's initial spawn.
 			// --continue/-c and --resume <uuid> operate on the REMOTE session history
@@ -2477,8 +2498,8 @@ async function run(): Promise<CommanderCommand> {
 
 			// chicago MCP: guarded Computer Use (app allowlist + frontmost gate +
 			// SCContentFilter screenshots). Ant-only, GrowthBook-gated — failures
-			// are silent (this is dogfooding). Platform + interactive checks inline
-			// so non-macOS / print-mode ants skip the heavy @ant/computer-use-mcp
+			// are silent (this is dogfooding). Platform checks stay inline so
+			// unsupported platforms skip the heavy @ant/computer-use-mcp import
 			// import entirely. gates.js is light (type-only package import).
 			//
 			// Placed AFTER the enterprise-MCP-config check: that check rejects any
@@ -4474,9 +4495,9 @@ async function run(): Promise<CommanderCommand> {
 	program.addOption(
 		new Option(
 			"--teammate-mode <mode>",
-			'How to spawn teammates: "tmux", "in-process", or "auto"',
+			'How to spawn teammates: "tmux", "windows-terminal", "in-process", or "auto"',
 		)
-			.choices(["auto", "tmux", "in-process"])
+			.choices(["auto", "tmux", "windows-terminal", "in-process"])
 			.hideHelp(),
 	);
 	program.addOption(
@@ -4753,7 +4774,7 @@ type TeammateOptions = {
 	agentColor?: string;
 	planModeRequired?: boolean;
 	parentSessionId?: string;
-	teammateMode?: "auto" | "tmux" | "in-process";
+	teammateMode?: "auto" | "tmux" | "windows-terminal" | "in-process";
 	agentType?: string;
 };
 
@@ -4781,6 +4802,7 @@ function extractTeammateOptions(options: unknown): TeammateOptions {
 		teammateMode:
 			teammateMode === "auto" ||
 			teammateMode === "tmux" ||
+			teammateMode === "windows-terminal" ||
 			teammateMode === "in-process"
 				? teammateMode
 				: undefined,

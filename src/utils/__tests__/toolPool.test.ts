@@ -35,26 +35,29 @@ describe('mergeAndFilterTools', () => {
     ).toEqual([shared])
   })
 
-  test('throws when different implementations share the same primary name', () => {
+  test('keeps the first tool when different implementations share the same primary name', () => {
     const first = makeTool('FileRead')
     const second = makeTool('FileRead', {
       mcpInfo: { serverName: 'docs', toolName: 'search' },
     })
 
-    expect(() =>
+    expect(
       mergeAndFilterTools([first], [second], getEmptyToolPermissionContext().mode),
-    ).toThrow('Conflicting tools share primary name "FileRead"')
+    ).toEqual([first])
   })
 })
 
 describe('assembleToolPool', () => {
-  test('throws when an MCP tool collides with a built-in primary name', () => {
+  test('keeps the built-in tool when an MCP tool collides with its primary name', () => {
     const conflictingMcpTool = makeTool('Bash', {
       mcpInfo: { serverName: 'docs', toolName: 'search' },
     })
 
-    expect(() =>
-      assembleToolPool(getEmptyToolPermissionContext(), [conflictingMcpTool]),
-    ).toThrow('Conflicting tools share primary name "Bash"')
+    const tools = assembleToolPool(
+      getEmptyToolPermissionContext(),
+      [conflictingMcpTool],
+    )
+
+    expect(tools.find(tool => tool.name === 'Bash')?.mcpInfo).toBeUndefined()
   })
 })

@@ -207,6 +207,10 @@ export function registerCliHostCommands(
         'Skip all permission prompts on the remote (dangerous)',
       )
       .option(
+        '--remote-bin <command>',
+        "Custom remote binary command (skips probe/deploy). Example: --remote-bin 'bun /path/to/project/dist/cli.js'",
+      )
+      .option(
         '--local',
         'e2e test mode - spawn the child CLI locally (skip ssh/deploy). Exercises the auth proxy and unix-socket plumbing without a remote host.',
       )
@@ -594,6 +598,73 @@ export function registerCliHostCommands(
         })
     }
   }
+
+  const autonomyCmd = program
+    .command('autonomy')
+    .description(describe(['autonomy']))
+    .configureHelp(options.createSortedHelpConfig())
+
+  autonomyCmd
+    .command('status')
+    .description(describe(['autonomy', 'status']))
+    .option(
+      '--deep',
+      'Include teams, pipes, daemon, and remote-control sections',
+    )
+    .action(async (commandOptions: { deep?: boolean }) => {
+      const { autonomyStatusHandler } = await import('../../cli/handlers/autonomy.js')
+      await autonomyStatusHandler(commandOptions)
+      process.exit(0)
+    })
+
+  autonomyCmd
+    .command('runs [limit]')
+    .description(describe(['autonomy', 'runs']))
+    .action(async (limit?: string) => {
+      const { autonomyRunsHandler } = await import('../../cli/handlers/autonomy.js')
+      await autonomyRunsHandler(limit)
+      process.exit(0)
+    })
+
+  autonomyCmd
+    .command('flows [limit]')
+    .description(describe(['autonomy', 'flows']))
+    .action(async (limit?: string) => {
+      const { autonomyFlowsHandler } = await import('../../cli/handlers/autonomy.js')
+      await autonomyFlowsHandler(limit)
+      process.exit(0)
+    })
+
+  const autonomyFlowCmd = autonomyCmd
+    .command('flow <flowId>')
+    .description(describe(['autonomy', 'flow']))
+    .action(async (flowId: string) => {
+      const { autonomyFlowHandler } = await import('../../cli/handlers/autonomy.js')
+      await autonomyFlowHandler(flowId)
+      process.exit(0)
+    })
+
+  autonomyFlowCmd
+    .command('cancel <flowId>')
+    .description(describe(['autonomy', 'flow', 'cancel']))
+    .action(async (flowId: string) => {
+      const { autonomyFlowCancelHandler } = await import(
+        '../../cli/handlers/autonomy.js'
+      )
+      await autonomyFlowCancelHandler(flowId)
+      process.exit(0)
+    })
+
+  autonomyFlowCmd
+    .command('resume <flowId>')
+    .description(describe(['autonomy', 'flow', 'resume']))
+    .action(async (flowId: string) => {
+      const { autonomyFlowResumeHandler } = await import(
+        '../../cli/handlers/autonomy.js'
+      )
+      await autonomyFlowResumeHandler(flowId)
+      process.exit(0)
+    })
 
   if (feature('BRIDGE_MODE')) {
     applyAliases(

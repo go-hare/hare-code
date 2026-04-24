@@ -190,7 +190,7 @@ describe('dedupeToolsByName', () => {
     expect(dedupeToolsByName([first, second])).toEqual([first])
   })
 
-  test('throws when distinct tools share the same primary name', () => {
+  test('keeps the first distinct tool when primary names collide', () => {
     const first = buildTool(makeMinimalToolDef({ name: 'FileRead' }))
     const second = buildTool(
       makeMinimalToolDef({
@@ -199,9 +199,7 @@ describe('dedupeToolsByName', () => {
       }),
     )
 
-    expect(() => dedupeToolsByName([first, second])).toThrow(
-      'Conflicting tools share primary name "FileRead"',
-    )
+    expect(dedupeToolsByName([first, second])).toEqual([first])
   })
 })
 

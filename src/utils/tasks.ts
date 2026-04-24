@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks'
 import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { z } from 'zod/v4'
@@ -87,6 +88,129 @@ export const TaskSchema = lazySchema(() =>
   }),
 )
 export type Task = z.infer<ReturnType<typeof TaskSchema>>
+
+export type ActiveTaskExecutionContext = {
+  taskListId: string
+  taskId: string
+}
+
+export type TaskExecutionMetadata = {
+  linkedBackgroundTaskId?: string
+  linkedBackgroundTaskType?: string
+  linkedAgentId?: string
+  completionSuggestedAt?: string
+  completionSuggestedByBackgroundTaskId?: string
+}
+
+const taskExecutionContextStorage =
+  new AsyncLocalStorage<ActiveTaskExecutionContext>()
+
+export function runWithActiveTaskExecutionContext<T>(
+  context: ActiveTaskExecutionContext,
+  fn: () => T,
+): T {
+  return taskExecutionContextStorage.run(context, fn)
+}
+
+export function getActiveTaskExecutionContext():
+  | ActiveTaskExecutionContext
+  | undefined {
+  return taskExecutionContextStorage.getStore()
+}
+
+export function getTaskExecutionMetadata(
+  task: Task,
+): TaskExecutionMetadata | undefined {
+  const value = task.metadata?.taskExecution
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+  return value as TaskExecutionMetadata
+}
+
+async function updateTaskExecutionMetadata(
+  taskListId: string,
+  taskId: string,
+  updater: (
+    existing: TaskExecutionMetadata | undefined,
+    task: Task,
+  ) => TaskExecutionMetadata | undefined,
+): Promise<Task | null> {
+  const existingTask = await getTask(taskListId, taskId)
+  if (!existingTask) {
+    return null
+  }
+
+  const nextTaskExecution = updater(
+    getTaskExecutionMetadata(existingTask),
+    existingTask,
+  )
+  const nextMetadata = { ...(existingTask.metadata ?? {}) }
+
+  if (nextTaskExecution && Object.keys(nextTaskExecution).length > 0) {
+    nextMetadata.taskExecution = nextTaskExecution
+  } else {
+    delete nextMetadata.taskExecution
+  }
+
+  return updateTask(taskListId, taskId, {
+    metadata:
+      Object.keys(nextMetadata).length > 0 ? nextMetadata : undefined,
+  })
+}
+
+export async function linkTaskToBackgroundTask(
+  taskListId: string,
+  taskId: string,
+  linkage: {
+    backgroundTaskId: string
+    backgroundTaskType: string
+    agentId?: string
+  },
+): Promise<Task | null> {
+  return updateTaskExecutionMetadata(taskListId, taskId, existing => ({
+    ...(existing ?? {}),
+    linkedBackgroundTaskId: linkage.backgroundTaskId,
+    linkedBackgroundTaskType: linkage.backgroundTaskType,
+    linkedAgentId: linkage.agentId,
+    completionSuggestedAt: undefined,
+    completionSuggestedByBackgroundTaskId: undefined,
+  }))
+}
+
+export async function markTaskCompletionSuggested(
+  taskListId: string,
+  taskId: string,
+  backgroundTaskId: string,
+): Promise<boolean> {
+  let wroteSuggestion = false
+  const updated = await updateTaskExecutionMetadata(
+    taskListId,
+    taskId,
+    (existing, task) => {
+      if (
+        task.status !== 'in_progress' ||
+        existing?.linkedBackgroundTaskId !== backgroundTaskId ||
+        existing?.completionSuggestedByBackgroundTaskId === backgroundTaskId
+      ) {
+        return existing
+      }
+
+      wroteSuggestion = true
+      return {
+        ...(existing ?? {}),
+        completionSuggestedAt: new Date().toISOString(),
+        completionSuggestedByBackgroundTaskId: backgroundTaskId,
+      }
+    },
+  )
+
+  if (!updated) {
+    return false
+  }
+
+  return wroteSuggestion
+}
 
 // High water mark file name - stores the maximum task ID ever assigned
 const HIGH_WATER_MARK_FILE = '.highwatermark'

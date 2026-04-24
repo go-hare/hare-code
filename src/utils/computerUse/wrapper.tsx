@@ -8,7 +8,8 @@
  * `bindSessionContext`. This file binds it once per process,
  * caches the dispatcher, and updates a per-call ref for the pieces of
  * `ToolUseContext` that vary per-call (`abortController`, `setToolJSX`,
- * `sendOSNotification`). AppState accessors are read through the ref too —
+ * `handleElicitation`, `sendOSNotification`). AppState accessors are read
+ * through the ref too —
  * they're likely stable but we don't depend on that.
  *
  * External callers reach this via the lazy require thunk in `client.ts`, gated
@@ -38,6 +39,7 @@ import {
 import { registerEscHotkey } from './escHotkey.js'
 import { getChicagoCoordinateMode } from './gates.js'
 import { getComputerUseHostAdapter } from './hostAdapter.js'
+import { COMPUTER_USE_MCP_SERVER_NAME } from './common.js'
 import { getComputerUseMCPRenderingOverrides } from './toolRendering.js'
 
 type CallOverride = Pick<Tool, 'call'>['call']
@@ -47,13 +49,36 @@ type Binding = {
   dispatch: (name: string, args: unknown) => Promise<CuCallToolResult>
 }
 
+type HeadlessPermissionPayload = {
+  reason: string
+  apps: Array<{
+    requestedName: string
+    bundleId?: string
+    displayName?: string
+    alreadyGranted: boolean
+    sentinel: boolean
+    status: 'resolved' | 'not_installed'
+  }>
+  requestedFlags: string[]
+  willHide?: string[]
+  autoUnhideEnabled?: boolean
+  screenshotFiltering: CuPermissionRequest['screenshotFiltering']
+  tccMissing?: string[]
+}
+
+const DENY_ALL_RESPONSE: CuPermissionResponse = {
+  granted: [],
+  denied: [],
+  flags: DEFAULT_GRANT_FLAGS,
+}
+
 /**
  * Cached binding — built on first `.call()`, reused for process lifetime.
  * The dispatcher's closure-held screenshot blob persists across calls.
  *
  * `currentToolUseContext` is updated on every call. Every getter/callback in
  * `ctx` reads through it, so the per-call pieces (`abortController`,
- * `setToolJSX`, `sendOSNotification`) are always current.
+ * `setToolJSX`, `handleElicitation`, `sendOSNotification`) are always current.
  *
  * Module-level `let` is a deliberate exception to the no-module-scope-state
  * rule (src/CLAUDE.md): the dispatcher closure must persist across calls so
@@ -62,6 +87,11 @@ type Binding = {
  */
 let binding: Binding | undefined
 let currentToolUseContext: ToolUseContext | undefined
+
+export function resetComputerUseWrapperStateForTests(): void {
+  binding = undefined
+  currentToolUseContext = undefined
+}
 
 function tuc(): ToolUseContext {
   // Safe: `binding` is only populated when `currentToolUseContext` is set.
@@ -102,11 +132,11 @@ export function buildSessionContext(): ComputerUseSessionContext {
     },
 
     // ── Write-backs ────────────────────────────────────────────────────────
-    // `setToolJSX` is guaranteed present — the gate in `main.tsx` excludes
-    // non-interactive sessions. The package's `_dialogSignal` (tool-finished
-    // dismissal) is irrelevant here: `setToolJSX` blocks the tool call, so
-    // the dialog can't outlive it. Ctrl+C is what matters, and
-    // `runPermissionDialog` wires that from the per-call ref's abortController.
+    // Interactive sessions render the approval UI with `setToolJSX`.
+    // Non-interactive sessions reuse the existing elicitation channel so
+    // headless/SDK hosts can allow or deny the request without bespoke CU I/O.
+    // The package's `_dialogSignal` (tool-finished dismissal) is irrelevant
+    // here: our prompt lifetime is tied to the current tool call.
     onPermissionRequest: (req, _dialogSignal) => runPermissionDialog(req),
 
     // Package does the merge (dedupe + truthy-only flags). We just persist.
@@ -331,7 +361,8 @@ export function getComputerUseMCPToolOverrides(
                 type: 'image' as const,
                 source: {
                   type: 'base64' as const,
-                  media_type: item.mimeType ?? detectImageFormatFromBase64(item.data),
+                  media_type:
+                    item.mimeType ?? detectImageFormatFromBase64(item.data),
                   data: item.data,
                 },
               }
@@ -350,9 +381,139 @@ export function getComputerUseMCPToolOverrides(
   }
 }
 
+function buildHeadlessPermissionPayload(
+  req: CuPermissionRequest,
+): HeadlessPermissionPayload {
+  const requestedFlags = Object.entries(req.requestedFlags)
+    .filter(([, enabled]) => enabled)
+    .map(([flag]) => flag)
+  const tccMissing = req.tccState
+    ? [
+        !req.tccState.accessibility ? 'Accessibility' : null,
+        !req.tccState.screenRecording ? 'Screen Recording' : null,
+      ].filter((value): value is string => value !== null)
+    : undefined
+
+  return {
+    reason: req.reason,
+    apps: req.apps.map(app => ({
+      requestedName: app.requestedName,
+      bundleId: app.resolved?.bundleId,
+      displayName: app.resolved?.displayName,
+      alreadyGranted: app.alreadyGranted,
+      sentinel: app.isSentinel,
+      status: app.resolved ? 'resolved' : 'not_installed',
+    })),
+    requestedFlags,
+    willHide: req.willHide?.map(app => app.displayName),
+    autoUnhideEnabled: req.autoUnhideEnabled,
+    screenshotFiltering: req.screenshotFiltering,
+    ...(tccMissing && tccMissing.length > 0 ? { tccMissing } : {}),
+  }
+}
+
+function buildHeadlessPermissionMessage(req: CuPermissionRequest): string {
+  const payload = buildHeadlessPermissionPayload(req)
+  const lines = [
+    'Allow Claude to use computer-use for this request?',
+    `Reason: ${payload.reason}`,
+  ]
+
+  if (payload.tccMissing && payload.tccMissing.length > 0) {
+    lines.push(
+      `Missing macOS permissions: ${payload.tccMissing.join(', ')}`,
+      'Grant them in System Settings, then retry request_access.',
+    )
+  }
+
+  if (payload.apps.length > 0) {
+    lines.push('Requested apps:')
+    for (const app of payload.apps) {
+      const name = app.displayName ?? app.bundleId ?? app.requestedName
+      const details = [
+        app.status === 'not_installed' ? 'not installed' : null,
+        app.alreadyGranted ? 'already granted' : null,
+        app.sentinel ? 'sentinel app' : null,
+      ].filter(Boolean)
+      lines.push(`- ${name}${details.length > 0 ? ` (${details.join(', ')})` : ''}`)
+    }
+  }
+
+  if (payload.requestedFlags.length > 0) {
+    lines.push(`Requested flags: ${payload.requestedFlags.join(', ')}`)
+  }
+
+  if (payload.willHide && payload.willHide.length > 0) {
+    lines.push(
+      `${payload.autoUnhideEnabled ? 'Apps hidden during the turn and restored after:' : 'Apps hidden during the turn:'} ${payload.willHide.join(', ')}`,
+    )
+  }
+
+  if (payload.screenshotFiltering === 'none') {
+    lines.push(
+      'Warning: screenshots are not filtered on this platform and may include other visible apps.',
+    )
+  }
+
+  return lines.join('\n')
+}
+
+async function runHeadlessPermissionDialog(
+  context: ToolUseContext,
+  req: CuPermissionRequest,
+): Promise<CuPermissionResponse> {
+  if (req.tccState) {
+    return DENY_ALL_RESPONSE
+  }
+
+  const handleElicitation = context.handleElicitation
+  if (!handleElicitation) {
+    return DENY_ALL_RESPONSE
+  }
+
+  const result = await handleElicitation(
+    COMPUTER_USE_MCP_SERVER_NAME,
+    {
+      message: buildHeadlessPermissionMessage(req),
+      mode: 'form',
+      requestedSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    context.abortController.signal,
+  )
+
+  if (result.action !== 'accept') {
+    return DENY_ALL_RESPONSE
+  }
+
+  return {
+    granted: req.apps
+      .filter(app => app.resolved && !app.alreadyGranted)
+      .map(app => ({
+        bundleId: app.resolved!.bundleId,
+        displayName: app.resolved!.displayName,
+        grantedAt: Date.now(),
+        tier: app.proposedTier,
+      })),
+    denied: req.apps
+      .filter(app => !app.resolved)
+      .map(app => ({
+        bundleId: app.requestedName,
+        reason: 'not_installed' as const,
+      })),
+    flags: {
+      ...DEFAULT_GRANT_FLAGS,
+      ...req.requestedFlags,
+    },
+  }
+}
+
 /**
  * Render the approval dialog mid-call via `setToolJSX` + `Promise`, wait for
- * the user. Mirrors `spawnMultiAgent.ts:419-436` (the `It2SetupPrompt` pattern).
+ * the user in interactive sessions, or reuse the existing elicitation pipeline
+ * in headless sessions.
  *
  * The merge-into-AppState that used to live here (dedupe + truthy-only flags)
  * is now in the package's `bindSessionContext` → `onAllowedAppsChanged`.
@@ -361,12 +522,11 @@ async function runPermissionDialog(
   req: CuPermissionRequest,
 ): Promise<CuPermissionResponse> {
   const context = tuc()
-  const setToolJSX = context.setToolJSX
-  if (!setToolJSX) {
-    // Shouldn't happen — main.tsx gate excludes non-interactive. Fail safe.
-    return { granted: [], denied: [], flags: DEFAULT_GRANT_FLAGS }
+  if (context.options.isNonInteractiveSession || !context.setToolJSX) {
+    return runHeadlessPermissionDialog(context, req)
   }
 
+  const setToolJSX = context.setToolJSX
   try {
     return await new Promise<CuPermissionResponse>((resolve, reject) => {
       const signal = context.abortController.signal

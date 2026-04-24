@@ -30,7 +30,7 @@
   },
   "exports": {
     "./kernel": {
-      "types": "./src/kernel/index.ts",
+      "types": "./src/kernel/index.d.ts",
       "import": "./dist/kernel.js",
       "default": "./dist/kernel.js"
     },

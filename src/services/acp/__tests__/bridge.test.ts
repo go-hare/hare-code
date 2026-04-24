@@ -665,6 +665,20 @@ describe('forwardSessionUpdates', () => {
     expect(((usageCall![0] as Record<string, unknown>).update as Record<string, unknown>).used).toBe(0)
   })
 
+  test('skips null updates emitted by the stream iterator', async () => {
+    const conn = makeConn()
+    const msgs = [
+      null,
+      { type: 'system', subtype: 'compact_boundary' } as unknown as SDKMessage,
+    ] as SDKMessage[]
+
+    await expect(
+      forwardSessionUpdates('s1', makeStream(msgs), conn, new AbortController().signal, {}),
+    ).resolves.toMatchObject({
+      stopReason: 'end_turn',
+    })
+  })
+
   test('re-throws unexpected errors from stream', async () => {
     const conn = makeConn()
     async function* errorStream(): AsyncGenerator<SDKMessage, void, unknown> {

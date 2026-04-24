@@ -35,7 +35,7 @@ import {
   getBackendByType,
   getCachedBackend,
 } from '../../utils/swarm/backends/registry.js'
-import type { PaneBackendType } from '../../utils/swarm/backends/types.js'
+import { isPaneBackend, type PaneBackendType } from '../../utils/swarm/backends/types.js'
 import {
   getSwarmSocketName,
   TMUX_COMMAND,
@@ -184,12 +184,35 @@ export function TeamsDialog({ initialTeams, onDone }: Props): React.ReactNode {
           memberName: teammateStatuses[selectedIndex].name,
         })
       } else if (dialogLevel.type === 'teammateDetail' && currentTeammate) {
-        // View output - switch to tmux pane
+        // View output - switch to teammate pane, or surface a notice if unsupported
         void viewTeammateOutput(
           currentTeammate.tmuxPaneId,
-          currentTeammate.backendType,
-        )
-        onDone()
+          currentTeammate.backendType && isPaneBackend(currentTeammate.backendType)
+            ? currentTeammate.backendType
+            : undefined,
+        ).then(notice => {
+          if (notice) {
+            setAppState(prev => ({
+              ...prev,
+              inbox: {
+                messages: [
+                  ...prev.inbox.messages,
+                  {
+                    id: randomUUID(),
+                    from: 'system',
+                    text: jsonStringify({
+                      type: 'teammate_terminated',
+                      message: notice,
+                    }),
+                    timestamp: new Date().toISOString(),
+                    status: 'pending' as const,
+                  },
+                ],
+              },
+            }))
+          }
+          onDone()
+        })
       }
       return
     }
@@ -202,7 +225,10 @@ export function TeamsDialog({ initialTeams, onDone }: Props): React.ReactNode {
       ) {
         void killTeammate(
           teammateStatuses[selectedIndex].tmuxPaneId,
-          teammateStatuses[selectedIndex].backendType,
+          teammateStatuses[selectedIndex].backendType &&
+            isPaneBackend(teammateStatuses[selectedIndex].backendType)
+            ? teammateStatuses[selectedIndex].backendType
+            : undefined,
           dialogLevel.teamName,
           teammateStatuses[selectedIndex].agentId,
           teammateStatuses[selectedIndex].name,
@@ -217,7 +243,9 @@ export function TeamsDialog({ initialTeams, onDone }: Props): React.ReactNode {
       } else if (dialogLevel.type === 'teammateDetail' && currentTeammate) {
         void killTeammate(
           currentTeammate.tmuxPaneId,
-          currentTeammate.backendType,
+          currentTeammate.backendType && isPaneBackend(currentTeammate.backendType)
+            ? currentTeammate.backendType
+            : undefined,
           dialogLevel.teamName,
           currentTeammate.agentId,
           currentTeammate.name,
@@ -658,22 +686,31 @@ async function killTeammate(
   logForDebugging(`[TeamsDialog] Removed ${teammateId} from teamContext`)
 }
 
-async function viewTeammateOutput(
+export async function viewTeammateOutput(
   paneId: string,
   backendType: PaneBackendType | undefined,
-): Promise<void> {
+): Promise<string | null> {
   if (backendType === 'iterm2') {
     // -s is required to target a specific session (ITermBackend.ts:216-217)
     await execFileNoThrow(IT2_COMMAND, ['session', 'focus', '-s', paneId])
-  } else {
-    // External-tmux teammates live on the swarm socket — without -L, this
-    // targets the default server and silently no-ops. Mirrors runTmuxInSwarm
-    // in TmuxBackend.ts:85-89.
-    const args = isInsideTmuxSync()
-      ? ['select-pane', '-t', paneId]
-      : ['-L', getSwarmSocketName(), 'select-pane', '-t', paneId]
-    await execFileNoThrow(TMUX_COMMAND, args)
+    return null
   }
+
+  if (backendType === 'windows-terminal') {
+    logForDebugging(
+      `[TeamsDialog] viewTeammateOutput: Windows Terminal pane ${paneId} — manual tab switch required`,
+    )
+    return 'Windows Terminal cannot focus teammate output automatically yet. Switch to the teammate tab manually to view its output.'
+  }
+
+  // External-tmux teammates live on the swarm socket — without -L, this
+  // targets the default server and silently no-ops. Mirrors runTmuxInSwarm
+  // in TmuxBackend.ts:85-89.
+  const args = isInsideTmuxSync()
+    ? ['select-pane', '-t', paneId]
+    : ['-L', getSwarmSocketName(), 'select-pane', '-t', paneId]
+  await execFileNoThrow(TMUX_COMMAND, args)
+  return null
 }
 
 /**
@@ -694,20 +731,51 @@ async function toggleTeammateVisibility(
  * Hide a teammate pane using the backend abstraction.
  * Only available for ant users (gated for dead code elimination in external builds)
  */
-async function hideTeammate(
+export async function hideTeammate(
   teammate: TeammateStatus,
   teamName: string,
 ): Promise<void> {
+  if (!teammate.backendType || !isPaneBackend(teammate.backendType)) {
+    return
+  }
+
+  await ensureBackendsRegistered()
+  const hidden = await getBackendByType(teammate.backendType).hidePane(
+    teammate.tmuxPaneId,
+    !isInsideTmuxSync(),
+  )
+  if (hidden) {
+    addHiddenPaneId(teamName, teammate.tmuxPaneId)
+    logForDebugging(
+      `[TeamsDialog] Hid teammate ${teammate.name} (${teammate.tmuxPaneId})`,
+    )
+  }
 }
 
 /**
  * Show a previously hidden teammate pane using the backend abstraction.
  * Only available for ant users (gated for dead code elimination in external builds)
  */
-async function showTeammate(
+export async function showTeammate(
   teammate: TeammateStatus,
   teamName: string,
 ): Promise<void> {
+  if (!teammate.backendType || !isPaneBackend(teammate.backendType)) {
+    return
+  }
+
+  await ensureBackendsRegistered()
+  const shown = await getBackendByType(teammate.backendType).showPane(
+    teammate.tmuxPaneId,
+    teammate.tmuxPaneId,
+    !isInsideTmuxSync(),
+  )
+  if (shown) {
+    removeHiddenPaneId(teamName, teammate.tmuxPaneId)
+    logForDebugging(
+      `[TeamsDialog] Showed teammate ${teammate.name} (${teammate.tmuxPaneId})`,
+    )
+  }
 }
 
 /**

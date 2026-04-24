@@ -1,4 +1,10 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
+
+const mockSendEventToRemoteSession = mock(async () => true)
+
+mock.module('../../utils/teleport/api.js', () => ({
+  sendEventToRemoteSession: mockSendEventToRemoteSession,
+}))
 
 import {
   buildPeerSessions,
@@ -117,6 +123,37 @@ describe('buildPeerSessions', () => {
     })
   })
 
+  test('marks a bridge peer as self when its bridge session id matches the current bridge identity', async () => {
+    const peers = await buildPeerSessions(
+      [
+        {
+          pid: 4001,
+          sessionId: 'session-remote-copy',
+          cwd: 'D:\\workspace\\remote',
+          updatedAt: 600,
+          startedAt: 100,
+          status: 'busy',
+          name: 'RemoteSelf',
+          bridgeSessionId: 'session_bridge_self',
+        },
+      ],
+      {
+        currentPid: 9999,
+        currentSessionId: 'session-local',
+        currentBridgeSessionId: 'session_bridge_self',
+        currentCwd: 'D:\\workspace\\local',
+        probeSocket: async () => false,
+      },
+    )
+
+    expect(peers).toHaveLength(1)
+    expect(peers[0]).toMatchObject({
+      preferredAddress: 'bridge:session_bridge_self',
+      transports: ['bridge'],
+      isSelf: true,
+    })
+  })
+
   test('routes bridge aliases to local uds peers when a live local socket exists', async () => {
     const sent: Array<{ socketPath: string; text: string }> = []
 
@@ -196,5 +233,19 @@ describe('buildPeerSessions', () => {
 
     expect(result.ok).toBe(false)
     expect(result.error).toContain('not connected to Remote Control')
+  })
+
+  test('rejects bridge delivery to the current bridge session before remote fallback', async () => {
+    const sendRemoteEvent = mock(async () => true)
+
+    const result = await postInterClaudeMessage('session_bridge_self', 'hello', {
+      listPeers: async () => [],
+      sendRemoteEvent,
+      getSelfBridgeSessionId: () => 'session_bridge_self',
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('current session')
+    expect(sendRemoteEvent).not.toHaveBeenCalled()
   })
 })

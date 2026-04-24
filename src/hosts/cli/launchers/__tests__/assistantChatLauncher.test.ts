@@ -120,6 +120,7 @@ mock.module('../../../../utils/auth.js', () => ({
 mock.module('../../../../utils/teleport/api.js', () => ({
   prepareApiRequest: mockPrepareApiRequest,
   fetchSession: mock(async (_sessionId: string) => ({})),
+  sendEventToRemoteSession: mock(async () => true),
 }))
 
 const { runAssistantChatLaunch } = await import('../assistantChatLauncher.js')
@@ -232,6 +233,19 @@ describe('runAssistantChatLaunch', () => {
     expect(mockLaunchRepl).toHaveBeenCalledTimes(0)
   })
 
+  test('treats a cancelled install flow as a user cancellation', async () => {
+    const options = createLaunchOptions()
+
+    mockDiscoverAssistantSessions.mockImplementationOnce(async () => [])
+    mockLaunchAssistantInstallWizard.mockImplementationOnce(async () => null)
+
+    await runAssistantChatLaunch(options)
+
+    expect(options.onCancelled).toHaveBeenCalledTimes(1)
+    expect(options.onInstalled).toHaveBeenCalledTimes(0)
+    expect(mockLaunchRepl).toHaveBeenCalledTimes(0)
+  })
+
   test('routes discovery failures through the provided error handler', async () => {
     const options = createLaunchOptions()
 
@@ -268,5 +282,61 @@ describe('runAssistantChatLaunch', () => {
       false,
       true,
     )
+  })
+
+  test('treats a cancelled session chooser as a user cancellation', async () => {
+    const options = createLaunchOptions()
+
+    mockDiscoverAssistantSessions.mockImplementationOnce(async () => [
+      { id: 'assistant-session-11111111' },
+      { id: 'assistant-session-22222222' },
+    ])
+    mockLaunchAssistantSessionChooser.mockImplementationOnce(async () => null)
+
+    await runAssistantChatLaunch(options)
+
+    expect(mockLaunchAssistantSessionChooser).toHaveBeenCalledTimes(1)
+    expect(options.onCancelled).toHaveBeenCalledTimes(1)
+    expect(mockLaunchRepl).toHaveBeenCalledTimes(0)
+  })
+
+  test('skips discovery when assistant session id is already provided', async () => {
+    const options = createLaunchOptions()
+    options.assistant = {
+      sessionId: 'assistant-session-explicit',
+      discover: false,
+    }
+
+    await runAssistantChatLaunch(options)
+
+    expect(mockDiscoverAssistantSessions).toHaveBeenCalledTimes(0)
+    expect(mockLaunchAssistantSessionChooser).toHaveBeenCalledTimes(0)
+    expect(mockCreateRemoteSessionConfig).toHaveBeenCalledWith(
+      'assistant-session-explicit',
+      expect.any(Function),
+      'org-123',
+      false,
+      true,
+    )
+    expect(mockLaunchRepl).toHaveBeenCalledTimes(1)
+  })
+
+  test('routes authentication preparation failures through the provided error handler', async () => {
+    const options = createLaunchOptions()
+    options.assistant = {
+      sessionId: 'assistant-session-explicit',
+      discover: false,
+    }
+
+    mockPrepareApiRequest.mockImplementationOnce(async () => {
+      throw new Error('oauth expired')
+    })
+
+    await runAssistantChatLaunch(options)
+
+    expect(options.onConnectionError).toHaveBeenCalledWith(
+      'Error: oauth expired',
+    )
+    expect(mockLaunchRepl).toHaveBeenCalledTimes(0)
   })
 })

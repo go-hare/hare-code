@@ -378,6 +378,76 @@ export const cliCommandGraph = [
     },
   ),
   command(
+    'autonomy',
+    ['autonomy'],
+    'Inspect and manage automatic autonomy runs and flows',
+    {
+      ownership: 'runtime-capability',
+      reuse: 'reuse-with-isolation',
+      capability: 'workflow',
+    },
+  ),
+  command(
+    'autonomy.status',
+    ['autonomy', 'status'],
+    'Print autonomy run and flow status',
+    {
+      ownership: 'runtime-capability',
+      reuse: 'reuse-with-isolation',
+      capability: 'workflow',
+    },
+  ),
+  command(
+    'autonomy.runs',
+    ['autonomy', 'runs'],
+    'List recent autonomy runs',
+    {
+      ownership: 'runtime-capability',
+      reuse: 'reuse-with-isolation',
+      capability: 'workflow',
+    },
+  ),
+  command(
+    'autonomy.flows',
+    ['autonomy', 'flows'],
+    'List recent autonomy flows',
+    {
+      ownership: 'runtime-capability',
+      reuse: 'reuse-with-isolation',
+      capability: 'workflow',
+    },
+  ),
+  command(
+    'autonomy.flow',
+    ['autonomy', 'flow'],
+    'Inspect a single autonomy flow',
+    {
+      ownership: 'runtime-capability',
+      reuse: 'reuse-with-isolation',
+      capability: 'workflow',
+    },
+  ),
+  command(
+    'autonomy.flow.cancel',
+    ['autonomy', 'flow', 'cancel'],
+    'Cancel a queued, waiting, or running autonomy flow',
+    {
+      ownership: 'runtime-capability',
+      reuse: 'reuse-with-isolation',
+      capability: 'workflow',
+    },
+  ),
+  command(
+    'autonomy.flow.resume',
+    ['autonomy', 'flow', 'resume'],
+    'Resume a waiting autonomy flow',
+    {
+      ownership: 'runtime-capability',
+      reuse: 'reuse-with-isolation',
+      capability: 'workflow',
+    },
+  ),
+  command(
     'remote-control',
     ['remote-control'],
     'Connect your local environment for remote-control sessions via claude.ai/code',

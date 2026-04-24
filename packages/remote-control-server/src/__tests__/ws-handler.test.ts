@@ -8,6 +8,7 @@ const mockConfig = {
   baseUrl: "http://localhost:3000",
   pollTimeout: 8,
   heartbeatInterval: 20,
+  wsKeepaliveInterval: 20,
   jwtExpiresIn: 3600,
   disconnectTimeout: 300,
 };
@@ -205,6 +206,26 @@ describe("ws-handler", () => {
       bus.publish({ id: "e1", sessionId: "s2", type: "user", payload: { content: "test" }, direction: "outbound" });
       expect(ws2.getSentData().length).toBeGreaterThanOrEqual(1);
     });
+
+    test("ignores late close from replaced socket", () => {
+      const ws1 = createMockWs();
+      const ws2 = createMockWs();
+      handleWebSocketOpen(ws1, "race-session");
+      handleWebSocketOpen(ws2, "race-session");
+
+      handleWebSocketClose(ws1, "race-session", 1000, "old socket closed late");
+
+      const bus = getEventBus("race-session");
+      bus.publish({
+        id: "e-race",
+        sessionId: "race-session",
+        type: "user",
+        payload: { content: "still connected" },
+        direction: "outbound",
+      });
+
+      expect(ws2.getSentData().length).toBeGreaterThanOrEqual(1);
+    });
   });
 
   describe("handleWebSocketMessage", () => {
@@ -228,6 +249,35 @@ describe("ws-handler", () => {
       const ws = createMockWs();
       handleWebSocketMessage(ws, "s1", "not json\n");
       expect(events).toHaveLength(0);
+    });
+
+    test("refreshes client activity so keepalive does not close an active connection", async () => {
+      const originalInterval = mockConfig.wsKeepaliveInterval;
+      mockConfig.wsKeepaliveInterval = 0.02;
+
+      try {
+        const sent: string[] = [];
+        const close = mock((_code?: number, _reason?: string) => {});
+        const ws = {
+          readyState: 1,
+          send: (data: string) => sent.push(data),
+          close,
+        } as any;
+
+        handleWebSocketOpen(ws, "active-session");
+
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        handleWebSocketMessage(ws, "active-session", '{"type":"keep_alive"}\n');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        handleWebSocketMessage(ws, "active-session", '{"type":"keep_alive"}\n');
+        await new Promise((resolve) => setTimeout(resolve, 15));
+
+        expect(close).not.toHaveBeenCalled();
+        expect(sent).toContain('{"type":"keep_alive"}\n');
+      } finally {
+        mockConfig.wsKeepaliveInterval = originalInterval;
+        closeAllConnections();
+      }
     });
   });
 
