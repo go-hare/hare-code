@@ -3,9 +3,9 @@ import { filterCommandsForRemoteMode } from '../../../commands.js'
 import { createRemoteSessionConfig } from '../../../remote/RemoteSessionManager.js'
 import { launchRepl } from '../../../replLauncher.js'
 import { createSystemMessage, createUserMessage } from '../../../utils/messages.js'
-import { prepareApiRequest } from '../../../utils/teleport/api.js'
+import { prepareApiRequest } from './teleportApiDeps.js'
 import { teleportToRemoteWithErrorHandling } from '../../../utils/teleport.js'
-import { getBranch } from '../../../utils/git.js'
+import { getBranch } from './remoteGitDeps.js'
 import type {
   CliLaunchAppProps,
   CliLaunchRenderAndRun,
@@ -35,7 +35,7 @@ export async function runRemoteLaunch(
 
   if (!options.isRemoteTuiEnabled && !hasInitialPrompt) {
     return options.onConnectionError(
-      'Error: --remote requires a description.\nUsage: claude --remote "your task description"',
+      'Error: --remote requires a description.\nUsage: hare --remote "your task description"',
     )
   }
 
@@ -69,7 +69,7 @@ export async function runRemoteLaunch(
   }
 
   const { getClaudeAIOAuthTokens: getTokensForRemote } = await import(
-    '../../../utils/auth.js'
+    './launchAuthDeps.js'
   )
   const getAccessTokenForRemote = (): string =>
     getTokensForRemote()?.accessToken ?? apiCreds.accessToken

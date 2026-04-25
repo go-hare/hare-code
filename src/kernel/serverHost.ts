@@ -5,16 +5,14 @@
  * `server/*` compatibility modules directly.
  */
 import {
-  createDirectConnectSession as createDirectConnectSessionCompat,
+  createDirectConnectSessionCompat,
+  createServerLogger,
+  DangerousBackend,
   DirectConnectError,
-} from '../server/createDirectConnectSession.js'
-import {
   runConnectHeadlessRuntime,
-} from '../runtime/capabilities/server/HostRuntime.js'
-import { startServer as startServerHost } from '../server/server.js'
-import { SessionManager } from '../server/sessionManager.js'
-import { DangerousBackend } from '../server/backends/dangerousBackend.js'
-import { createServerLogger } from '../server/serverLog.js'
+  SessionManager,
+  startServerHost,
+} from './serverHostDeps.js'
 import type { SessionLogger } from '../runtime/capabilities/server/contracts.js'
 import type { DirectConnectConfig, ServerConfig } from '../server/types.js'
 

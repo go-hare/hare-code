@@ -1,9 +1,11 @@
-import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base'
-import { LangfuseSpanProcessor } from '@langfuse/otel'
-import type { MaskFunction } from '@langfuse/otel'
-import { setLangfuseTracerProvider } from '@langfuse/tracing'
+import {
+  BasicTracerProvider,
+  LangfuseSpanProcessor,
+  setLangfuseTracerProvider,
+  type MaskFunction,
+} from './sdkDeps.js'
 import { sanitizeGlobal } from './sanitize.js'
-import { logForDebugging } from 'src/utils/debug.js'
+import { logForDebugging } from './runtimeDeps.js'
 
 declare const MACRO: { VERSION: string }
 

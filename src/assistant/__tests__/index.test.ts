@@ -27,31 +27,16 @@ const ensuredTaskDirs: string[] = []
 const resetTaskLists: string[] = []
 const leaderTeamNames: string[] = []
 
-mock.module('../../utils/agentId.js', () => ({
+mock.module('../deps.js', () => ({
   formatAgentId: (agentName: string, teamName: string) =>
     `${agentName}@${teamName}`,
-}))
-
-mock.module('../../utils/model/model.js', () => ({
   getDefaultMainLoopModel: () => 'default-model',
   parseUserSpecifiedModel: (model: string) => `parsed:${model}`,
-}))
-
-mock.module('../../utils/settings/settings.js', () => ({
   getInitialSettings: () => mockSettings,
-}))
-
-mock.module('../../utils/swarm/backends/teammateModeSnapshot.js', () => ({
   setCliTeammateModeOverride: (mode: string) => {
     teammateModeOverrides.push(mode)
   },
-}))
-
-mock.module('../../utils/swarm/constants.js', () => ({
   TEAM_LEAD_NAME: 'team-lead',
-}))
-
-mock.module('../../utils/swarm/teamHelpers.js', () => ({
   getTeamFilePath: (teamName: string) => `/teams/${teamName}.json`,
   sanitizeName: (value: string) =>
     value
@@ -62,13 +47,7 @@ mock.module('../../utils/swarm/teamHelpers.js', () => ({
   writeTeamFileAsync: async (teamName: string, teamFile: unknown) => {
     writeTeamFileCalls.push({ teamName, teamFile })
   },
-}))
-
-mock.module('../../utils/swarm/teammateLayoutManager.js', () => ({
   assignTeammateColor: () => 'cyan',
-}))
-
-mock.module('../../utils/tasks.js', () => ({
   ensureTasksDir: async (taskListId: string) => {
     ensuredTaskDirs.push(taskListId)
   },

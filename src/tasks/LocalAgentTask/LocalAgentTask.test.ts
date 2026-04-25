@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
+import { asAgentId } from '../../types/ids.js'
 import { getPendingNotificationsSnapshot, resetCommandQueue } from '../../utils/messageQueueManager.js'
 import {
   createTask,
@@ -63,8 +64,45 @@ test('enqueueAgentNotification includes linked task completion hint', async () =
   const notifications = getPendingNotificationsSnapshot()
   expect(notifications).toHaveLength(1)
   const message = notifications[0]?.value as string
+  expect(notifications[0]?.agentId).toBeUndefined()
+  expect(notifications[0]?.priority).toBe('later')
   expect(message).toContain('Background task for task #')
   expect(message).toContain('call TaskUpdate with status: "completed"')
+})
+
+test('enqueueAgentNotification scopes notifications to the parent agent when provided', async () => {
+  let state = {
+    speculation: { status: 'idle' as const },
+    tasks: {
+      child1: {
+        id: 'child1',
+        type: 'local_agent',
+        agentType: 'general-purpose',
+        notificationTargetAgentId: 'parent-agent',
+        status: 'completed',
+        description: 'worker',
+        outputFile: '/tmp/out.txt',
+        outputOffset: 0,
+        notified: false,
+      },
+    },
+  } as any
+  const setAppState = (updater: (prev: typeof state) => typeof state) => {
+    state = updater(state)
+  }
+
+  await enqueueAgentNotification({
+    taskId: 'child1',
+    description: 'worker',
+    status: 'completed',
+    setAppState,
+    finalMessage: 'done',
+  })
+
+  const notifications = getPendingNotificationsSnapshot()
+  expect(notifications).toHaveLength(1)
+  expect(notifications[0]?.agentId).toBe(asAgentId('parent-agent'))
+  expect(notifications[0]?.priority).toBe('next')
 })
 
 test('enqueueAgentNotification completes pending plan verification for verifier agents', async () => {

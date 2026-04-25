@@ -19,6 +19,7 @@ import { logForDebugging } from '../utils/debug.js'
 import {
   findInProcessTeammateTaskId,
   handlePlanApprovalResponse,
+  syncOutOfProcessTeammateIdleState,
 } from '../utils/inProcessTeammateHelpers.js'
 import { createAssistantMessage } from '../utils/messages.js'
 import {
@@ -58,6 +59,7 @@ import {
   isSandboxPermissionResponse,
   isShutdownApproved,
   isShutdownRequest,
+  isIdleNotification,
   isTeamPermissionUpdate,
   markMessagesAsRead,
   readUnreadMessages,
@@ -223,6 +225,7 @@ export function useInboxPoller({
       const teamPermUpdate = isTeamPermissionUpdate(m.text)
       const modeSetReq = isModeSetRequest(m.text)
       const planApprovalReq = isPlanApprovalRequest(m.text)
+      const idleNotification = isIdleNotification(m.text)
 
       if (permReq) {
         permissionRequests.push(m)
@@ -243,6 +246,13 @@ export function useInboxPoller({
       } else if (planApprovalReq) {
         planApprovalRequests.push(m)
       } else {
+        if (idleNotification && isTeamLead(currentAppState.teamContext)) {
+          void syncOutOfProcessTeammateIdleState(
+            m.from,
+            currentAppState,
+            setAppState,
+          )
+        }
         regularMessages.push(m)
       }
     }

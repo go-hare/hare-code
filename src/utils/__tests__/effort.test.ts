@@ -14,9 +14,6 @@ mock.module("src/utils/auth.js", () => ({
   isMaxSubscriber: () => false,
   isTeamSubscriber: () => false,
 }));
-mock.module("src/services/analytics/growthbook.js", () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => null,
-}));
 mock.module("src/utils/model/modelSupportOverrides.js", () => ({
   get3PModelCapabilityOverride: () => undefined,
 }));

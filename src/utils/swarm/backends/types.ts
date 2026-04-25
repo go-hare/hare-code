@@ -1,5 +1,4 @@
 import type { AgentColorName } from '@go-hare/builtin-tools/tools/AgentTool/agentColorManager.js'
-import type { ToolUseContext } from '../../../Tool.js'
 
 /**
  * Types of backends available for teammate execution.
@@ -41,7 +40,7 @@ export type CreatePaneResult = {
  */
 export type PaneBackend = {
   /** The type identifier for this backend */
-  readonly type: BackendType
+  readonly type: PaneBackendType
 
   /** Human-readable display name for this backend */
   readonly displayName: string
@@ -189,145 +188,6 @@ export type BackendDetectionResult = {
   isNative: boolean
   /** If iTerm2 is detected but it2 not installed, this will be true */
   needsIt2Setup?: boolean
-}
-
-// =============================================================================
-// In-Process Teammate Types
-// =============================================================================
-
-/**
- * Identity fields for a teammate.
- * This is a subset shared with TeammateContext (Task #4) to avoid circular deps.
- * lifecycle-specialist defines the full TeammateContext with additional fields.
- */
-export type TeammateIdentity = {
-  /** Agent name (e.g., "researcher", "tester") */
-  name: string
-  /** Team name this teammate belongs to */
-  teamName: string
-  /** Assigned color for UI differentiation */
-  color?: AgentColorName
-  /** Whether plan mode approval is required before implementation */
-  planModeRequired?: boolean
-}
-
-/**
- * Configuration for spawning a teammate (any execution mode).
- */
-export type TeammateSpawnConfig = TeammateIdentity & {
-  /** Initial prompt to send to the teammate */
-  prompt: string
-  /** Working directory for the teammate */
-  cwd: string
-  /** Model to use for this teammate */
-  model?: string
-  /** Optional custom agent type for process-based teammates. */
-  agentType?: string
-  /** System prompt for this teammate (resolved from workflow config) */
-  systemPrompt?: string
-  /** How to apply the system prompt: 'replace' or 'append' to default */
-  systemPromptMode?: 'default' | 'replace' | 'append'
-  /** Optional git worktree path */
-  worktreePath?: string
-  /** false preserves legacy separate-window spawning for pane-capable backends. */
-  useSplitPane?: boolean
-  /** Parent session ID (for context linking) */
-  parentSessionId: string
-  /** request_id of the API call that spawned this teammate. */
-  invokingRequestId?: string
-  /** Tool permissions to grant this teammate */
-  permissions?: string[]
-  /** Whether this teammate can show permission prompts for unlisted tools.
-   * When false (default), unlisted tools are auto-denied. */
-  allowPermissionPrompts?: boolean
-}
-
-/**
- * Result from spawning a teammate.
- */
-export type TeammateSpawnResult = {
-  /** Whether spawn was successful */
-  success: boolean
-  /** Unique agent ID (format: agentName@teamName) */
-  agentId: string
-  /** Error message if spawn failed */
-  error?: string
-
-  /**
-   * Abort controller for lifecycle management (in-process only).
-   * Leader uses this to cancel/kill the teammate.
-   * For pane-based teammates, use kill() method instead.
-   */
-  abortController?: AbortController
-
-  /**
-   * Task ID in AppState.tasks (in-process only).
-   * Used for UI rendering and progress tracking.
-   * agentId is the logical identifier; taskId is for AppState indexing.
-   */
-  taskId?: string
-
-  /** Pane ID (pane-based only) */
-  paneId?: PaneId
-  /** Backend used for the spawned teammate. */
-  backendType?: BackendType
-  /** Assigned color for display. */
-  color?: AgentColorName
-  /** Whether the pane was spawned inside the user's current tmux session. */
-  insideTmux?: boolean
-  /** Window/tab name when the backend created a separate window. */
-  windowName?: string
-  /** Whether the backend used split panes. */
-  isSplitPane?: boolean
-}
-
-/**
- * Message to send to a teammate.
- */
-export type TeammateMessage = {
-  /** Message content */
-  text: string
-  /** Sender agent ID */
-  from: string
-  /** Sender display color */
-  color?: string
-  /** Message timestamp (ISO string) */
-  timestamp?: string
-  /** 5-10 word summary shown as preview in the UI */
-  summary?: string
-}
-
-/**
- * Common interface for teammate execution backends.
- * Abstracts the differences between pane-based (tmux/iTerm2) and in-process execution.
- *
- * PaneBackend handles low-level pane operations; TeammateExecutor handles
- * high-level teammate lifecycle operations that work across all backends.
- */
-export type TeammateExecutor = {
-  /** Backend type identifier */
-  readonly type: BackendType
-
-  /** Provide AppState/tool context before lifecycle operations that need it. */
-  setContext?(context: ToolUseContext): void
-
-  /** Check if this executor is available on the system */
-  isAvailable(): Promise<boolean>
-
-  /** Spawn a new teammate with the given configuration */
-  spawn(config: TeammateSpawnConfig): Promise<TeammateSpawnResult>
-
-  /** Send a message to a teammate */
-  sendMessage(agentId: string, message: TeammateMessage): Promise<void>
-
-  /** Terminate a teammate (graceful shutdown request) */
-  terminate(agentId: string, reason?: string): Promise<boolean>
-
-  /** Force kill a teammate (immediate termination) */
-  kill(agentId: string): Promise<boolean>
-
-  /** Check if a teammate is still active */
-  isActive(agentId: string): Promise<boolean>
 }
 
 // =============================================================================

@@ -91,6 +91,7 @@ import {
 } from './sessionStoragePortable.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import { jsonParse, jsonStringify } from './slowOperations.js'
+import type { ActiveTaskExecutionContext } from './tasks.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
 import { validateUuid } from './uuid.js'
 
@@ -269,6 +270,8 @@ export type AgentMetadata = {
    * resumed agent's notification can show the original description instead
    * of a placeholder. Optional — older metadata files lack this field. */
   description?: string
+  /** Coordinator task lineage carried across resume. */
+  activeTaskExecutionContext?: ActiveTaskExecutionContext
   /** Coordinator-assigned write ownership carried across resume. */
   ownedFiles?: string[]
 }

@@ -1,16 +1,16 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterEach, describe, expect, mock, test } from 'bun:test'
 
 const mockRunHeadlessRuntime = mock(async () => {})
-
-mock.module('../../src/runtime/capabilities/execution/HeadlessRuntime.js', () => ({
-  runHeadlessRuntime: mockRunHeadlessRuntime,
-}))
 
 const {
   createDefaultKernelHeadlessEnvironment,
   createKernelHeadlessSession,
   runKernelHeadless,
-} = await import('../../src/kernel/index.js')
+} = await import('../../src/kernel/headless.js')
+
+afterEach(() => {
+  mock.restore()
+})
 
 describe('kernel headless smoke', () => {
   test('supports creating a default environment and running a session from the kernel surface', async () => {
@@ -61,7 +61,11 @@ describe('kernel headless smoke', () => {
       activeAgents: [{ agentType: 'default', source: 'builtin' }],
     })
 
-    const session = createKernelHeadlessSession(environment)
+    const deps = {
+      runHeadlessRuntime: mockRunHeadlessRuntime as typeof mockRunHeadlessRuntime,
+    }
+
+    const session = createKernelHeadlessSession(environment, deps)
     await session.run('hello from kernel', {
       continue: false,
       resume: undefined,
@@ -95,33 +99,38 @@ describe('kernel headless smoke', () => {
     expect(mockRunHeadlessRuntime.mock.calls[0]?.[3]).toEqual(environment.commands)
     expect(session.getState()).toBe(environment.store.getState())
 
-    await runKernelHeadless('second run', environment, {
-      continue: false,
-      resume: undefined,
-      resumeSessionAt: undefined,
-      verbose: false,
-      outputFormat: undefined,
-      jsonSchema: undefined,
-      permissionPromptToolName: undefined,
-      allowedTools: undefined,
-      thinkingConfig: undefined,
-      maxTurns: undefined,
-      maxBudgetUsd: undefined,
-      taskBudget: undefined,
-      systemPrompt: undefined,
-      appendSystemPrompt: undefined,
-      userSpecifiedModel: undefined,
-      fallbackModel: undefined,
-      teleport: undefined,
-      sdkUrl: undefined,
-      replayUserMessages: undefined,
-      includePartialMessages: undefined,
-      forkSession: false,
-      rewindFiles: undefined,
-      enableAuthStatus: undefined,
-      agent: undefined,
-      workload: undefined,
-    })
+    await runKernelHeadless(
+      'second run',
+      environment,
+      {
+        continue: false,
+        resume: undefined,
+        resumeSessionAt: undefined,
+        verbose: false,
+        outputFormat: undefined,
+        jsonSchema: undefined,
+        permissionPromptToolName: undefined,
+        allowedTools: undefined,
+        thinkingConfig: undefined,
+        maxTurns: undefined,
+        maxBudgetUsd: undefined,
+        taskBudget: undefined,
+        systemPrompt: undefined,
+        appendSystemPrompt: undefined,
+        userSpecifiedModel: undefined,
+        fallbackModel: undefined,
+        teleport: undefined,
+        sdkUrl: undefined,
+        replayUserMessages: undefined,
+        includePartialMessages: undefined,
+        forkSession: false,
+        rewindFiles: undefined,
+        enableAuthStatus: undefined,
+        agent: undefined,
+        workload: undefined,
+      },
+      deps,
+    )
 
     expect(mockRunHeadlessRuntime).toHaveBeenCalledTimes(2)
   })

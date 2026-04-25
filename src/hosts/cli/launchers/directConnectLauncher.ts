@@ -1,7 +1,7 @@
 import {
   connectDirectHostSession,
   getDirectConnectErrorMessage,
-} from '../../../kernel/index.js'
+} from './directConnectKernelDeps.js'
 import { launchRepl } from '../../../replLauncher.js'
 import { createSystemMessage } from '../../../utils/messages.js'
 import type {

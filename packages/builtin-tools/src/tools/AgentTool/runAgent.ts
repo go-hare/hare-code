@@ -276,6 +276,7 @@ export async function* runAgent({
   worktreePath,
   description,
   ownedFiles,
+  activeTaskExecutionContext,
   transcriptSubdir,
   onQueryProgress,
 }: {
@@ -331,6 +332,8 @@ export async function* runAgent({
   description?: string
   /** Coordinator-assigned write ownership carried across resume. */
   ownedFiles?: string[]
+  /** Active coordinator task context to expose inside nested tool calls. */
+  activeTaskExecutionContext?: ToolUseContext['activeTaskExecutionContext']
   /** Optional subdirectory under subagents/ to group this agent's transcript
    * with related ones (e.g. workflows/<runId> for workflow subagents). */
   transcriptSubdir?: string
@@ -717,6 +720,7 @@ export async function* runAgent({
     messages: initialMessages,
     readFileState: agentReadFileState,
     abortController: agentAbortController,
+    activeTaskExecutionContext,
     getAppState: agentGetAppState,
     // Sync agents share these callbacks with parent
     shareSetAppState: !isAsync,
@@ -752,6 +756,7 @@ export async function* runAgent({
     agentType: agentDefinition.agentType,
     ...(worktreePath && { worktreePath }),
     ...(description && { description }),
+    ...(activeTaskExecutionContext && { activeTaskExecutionContext }),
     ...(ownedFiles && ownedFiles.length > 0 && { ownedFiles }),
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
 

@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react'
 import { useAppStateStore, useSetAppState } from '../state/AppState.js'
 import { isTerminalTaskStatus } from '../Task.js'
 import {
+  deliverUserMessageToTeammate,
   findTeammateTaskByAgentId,
-  injectUserMessageToTeammate,
 } from '../tasks/InProcessTeammateTask/InProcessTeammateTask.js'
 import { isKairosCronEnabled } from '@go-hare/builtin-tools/tools/ScheduleCronTool/prompt.js'
 import type { Message } from '../types/message.js'
@@ -112,8 +112,8 @@ export function useScheduledTasks({
               if (!command) {
                 return
               }
-              const injected = injectUserMessageToTeammate(
-                teammate.id,
+              const injected = await deliverUserMessageToTeammate(
+                teammate,
                 command.value as string,
                 {
                   autonomyRunId: command.autonomy?.runId,

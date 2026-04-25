@@ -101,6 +101,10 @@ export type KernelHeadlessRunOptions = {
   setSDKStatus?: (status: unknown) => void
 }
 
+type KernelHeadlessDeps = {
+  runHeadlessRuntime: (...args: unknown[]) => Promise<void>
+}
+
 export type KernelHeadlessSession = {
   run(
     inputPrompt: KernelHeadlessInput,
@@ -245,6 +249,7 @@ export declare function createDefaultKernelHeadlessEnvironment(
 
 export declare function createKernelHeadlessSession(
   environment: KernelHeadlessEnvironment,
+  deps?: KernelHeadlessDeps,
 ): KernelHeadlessSession
 
 export declare function createKernelHeadlessStore(
@@ -255,6 +260,7 @@ export declare function runKernelHeadless(
   inputPrompt: KernelHeadlessInput,
   environment: KernelHeadlessEnvironment,
   options: KernelHeadlessRunOptions,
+  deps?: KernelHeadlessDeps,
 ): Promise<void>
 
 export declare function connectDefaultKernelHeadlessMcp(

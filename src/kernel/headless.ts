@@ -4,7 +4,7 @@ import {
   runHeadlessRuntime,
   type HeadlessRuntimeInput,
   type HeadlessRuntimeOptions,
-} from '../runtime/capabilities/execution/HeadlessRuntime.js'
+} from './headlessDeps.js'
 import type {
   MCPServerConnection,
   McpSdkServerConfig,
@@ -57,6 +57,14 @@ export type DefaultKernelHeadlessEnvironmentOptions = {
 }
 
 export type KernelHeadlessRunOptions = HeadlessRuntimeOptions
+
+type KernelHeadlessDeps = {
+  runHeadlessRuntime: typeof runHeadlessRuntime
+}
+
+const defaultKernelHeadlessDeps: KernelHeadlessDeps = {
+  runHeadlessRuntime,
+}
 
 export type KernelHeadlessSession = {
   run(
@@ -172,8 +180,9 @@ export async function runKernelHeadless(
   inputPrompt: KernelHeadlessInput,
   environment: KernelHeadlessEnvironment,
   options: KernelHeadlessRunOptions,
+  deps: KernelHeadlessDeps = defaultKernelHeadlessDeps,
 ): Promise<void> {
-  return runHeadlessRuntime(
+  return deps.runHeadlessRuntime(
     inputPrompt,
     () => environment.store.getState(),
     environment.store.setState,
@@ -187,10 +196,11 @@ export async function runKernelHeadless(
 
 export function createKernelHeadlessSession(
   environment: KernelHeadlessEnvironment,
+  deps: KernelHeadlessDeps = defaultKernelHeadlessDeps,
 ): KernelHeadlessSession {
   return {
     run(inputPrompt, options) {
-      return runKernelHeadless(inputPrompt, environment, options)
+      return runKernelHeadless(inputPrompt, environment, options, deps)
     },
     getState() {
       return environment.store.getState()

@@ -1,21 +1,53 @@
 import { readdir } from 'fs/promises'
-import { join } from 'path'
-import { listLiveSessions } from '../cli/bg.js'
 import { queryDaemonStatus } from '../daemon/state.js'
-import { formatAutonomyFlowsStatus, type AutonomyFlowRecord } from './autonomyFlows.js'
-import { formatAutonomyRunsStatus, type AutonomyRunRecord } from './autonomyRuns.js'
+import { listLiveSessions } from '../cli/bg.js'
+import {
+  type AutonomyFlowRecord,
+  formatAutonomyFlowsStatus,
+} from './autonomyFlows.js'
+import {
+  type AutonomyRunRecord,
+  formatAutonomyRunsStatus,
+} from './autonomyRuns.js'
 import { cronToHuman } from './cron.js'
 import { listAllCronTasks, nextCronRunMs } from './cronTasks.js'
 import { getTeamsDir } from './envUtils.js'
-import { isAutoModeGateEnabled, getAutoModeUnavailableReason } from './permissions/permissionSetup.js'
-import { getAliveSubs, isMainAlive, readRegistry } from './pipeRegistry.js'
+import {
+  isAutoModeGateEnabled,
+  getAutoModeUnavailableReason,
+} from './permissions/permissionSetup.js'
+import {
+  formatRemoteTriggerAuditStatus,
+  listRemoteTriggerAuditRecords,
+} from './remoteTriggerAudit.js'
 import { getTeammateStatuses } from './teamDiscovery.js'
 import { listTasks } from './tasks.js'
+import { formatWorkflowRunsStatus, listWorkflowRuns } from './workflowRuns.js'
+import { formatPipeRegistryStatus } from './pipeStatus.js'
+import { formatRemoteControlLocalStatus } from './remoteControlStatus.js'
 
 type DeepStatusParams = {
   runs: AutonomyRunRecord[]
   flows: AutonomyFlowRecord[]
   nowMs?: number
+}
+
+export type AutonomyDeepStatusSectionId =
+  | 'auto-mode'
+  | 'runs'
+  | 'flows'
+  | 'cron'
+  | 'workflow-runs'
+  | 'teams'
+  | 'pipes'
+  | 'runtime'
+  | 'remote-control'
+  | 'remote-trigger'
+
+export type AutonomyDeepStatusSection = {
+  id: AutonomyDeepStatusSectionId
+  title: string
+  content: string
 }
 
 async function listTeamNames(): Promise<string[]> {
@@ -28,40 +60,6 @@ async function listTeamNames(): Promise<string[]> {
   } catch {
     return []
   }
-}
-
-function formatAutoModeSection(): string {
-  try {
-    const available = isAutoModeGateEnabled()
-    return [
-      `Auto mode: ${available ? 'available' : 'unavailable'}`,
-      `  reason=${getAutoModeUnavailableReason() ?? 'none'}`,
-    ].join('\n')
-  } catch (error) {
-    return [
-      'Auto mode: unknown',
-      `  reason=${error instanceof Error ? error.message : String(error)}`,
-    ].join('\n')
-  }
-}
-
-async function formatCronSection(nowMs: number): Promise<string> {
-  const jobs = await listAllCronTasks()
-  if (jobs.length === 0) {
-    return ['Cron jobs: 0', '  none'].join('\n')
-  }
-
-  const lines = [`Cron jobs: ${jobs.length}`]
-  for (const job of jobs.slice(0, 10)) {
-    const next = nextCronRunMs(job.cron, nowMs)
-    lines.push(
-      `  ${job.id}: ${cronToHuman(job.cron)} ${job.recurring ? 'recurring' : 'one-shot'} ${job.durable === false ? 'session-only' : 'durable'} next=${next ? new Date(next).toLocaleString() : 'none'}`,
-    )
-  }
-  if (jobs.length > 10) {
-    lines.push(`  ... ${jobs.length - 10} more job(s)`)
-  }
-  return lines.join('\n')
 }
 
 async function formatTeamsSection(): Promise<string> {
@@ -80,30 +78,39 @@ async function formatTeamsSection(): Promise<string> {
     lines.push(
       `  ${teamName}: teammates=${teammates.length} running=${running} idle=${idle} open_tasks=${openTasks.length}`,
     )
+    for (const teammate of teammates.slice(0, 5)) {
+      const ownerTasks = openTasks.filter(
+        task => task.owner === teammate.name || task.owner === teammate.agentId,
+      )
+      lines.push(
+        `    @${teammate.name}: ${teammate.status} backend=${teammate.backendType ?? 'unknown'} mode=${teammate.mode ?? 'default'} tasks=${ownerTasks.length}`,
+      )
+    }
+    if (teammates.length > 5) {
+      lines.push(`    ... ${teammates.length - 5} more teammate(s)`)
+    }
   }
 
   return lines.join('\n')
 }
 
-async function formatPipesSection(): Promise<string> {
-  const [registry, mainAlive, aliveSubs] = await Promise.all([
-    readRegistry(),
-    isMainAlive(),
-    getAliveSubs(),
-  ])
+async function formatCronSection(nowMs: number): Promise<string> {
+  const jobs = await listAllCronTasks()
+  if (jobs.length === 0) {
+    return ['Cron jobs: 0', '  none'].join('\n')
+  }
 
-  const lines = [
-    `Pipes: main=${registry.main ? (mainAlive ? 'alive' : 'stale') : 'none'} subs=${aliveSubs.length}/${registry.subs.length}`,
-  ]
-  if (registry.main) {
-    lines.push(`  main=${registry.main.hostname} pid=${registry.main.pid}`)
+  const lines = [`Cron jobs: ${jobs.length}`]
+  for (const job of jobs.slice(0, 10)) {
+    const next = nextCronRunMs(job.cron, nowMs)
+    lines.push(
+      `  ${job.id}: ${cronToHuman(job.cron)} ${job.recurring ? 'recurring' : 'one-shot'} ${job.durable === false ? 'session-only' : 'durable'} next=${next ? new Date(next).toLocaleString() : 'none'}`,
+    )
   }
-  for (const sub of aliveSubs.slice(0, 8)) {
-    lines.push(`  sub#${sub.subIndex}=${sub.hostname} pid=${sub.pid}`)
+  if (jobs.length > 10) {
+    lines.push(`  ... ${jobs.length - 10} more job(s)`)
   }
-  if (aliveSubs.length > 8) {
-    lines.push(`  ... ${aliveSubs.length - 8} more sub(s)`)
-  }
+
   return lines.join('\n')
 }
 
@@ -125,27 +132,93 @@ async function formatRuntimeSection(): Promise<string> {
   return lines.join('\n')
 }
 
-function formatRemoteControlSection(): string {
-  const daemon = queryDaemonStatus('remote-control')
-  if (daemon.status !== 'running' || !daemon.state) {
-    return `Remote Control: ${daemon.status}`
+function formatAutoModeSection(): string {
+  let available = false
+  let reason: string | null = null
+  try {
+    available = isAutoModeGateEnabled()
+    reason = getAutoModeUnavailableReason()
+  } catch (error) {
+    return [
+      'Auto mode: unknown',
+      `  reason=${error instanceof Error ? error.message : String(error)}`,
+    ].join('\n')
   }
-  return `Remote Control: running pid=${daemon.state.pid} cwd=${daemon.state.cwd}`
+  return [
+    `Auto mode: ${available ? 'available' : 'unavailable'}`,
+    `  reason=${reason ?? 'none'}`,
+  ].join('\n')
+}
+
+export async function formatAutonomyDeepStatusSections({
+  runs,
+  flows,
+  nowMs = Date.now(),
+}: DeepStatusParams): Promise<AutonomyDeepStatusSection[]> {
+  return Promise.all([
+    Promise.resolve({
+      id: 'auto-mode' as const,
+      title: 'Auto Mode',
+      content: formatAutoModeSection(),
+    }),
+    Promise.resolve({
+      id: 'runs' as const,
+      title: 'Runs',
+      content: formatAutonomyRunsStatus(runs),
+    }),
+    Promise.resolve({
+      id: 'flows' as const,
+      title: 'Flows',
+      content: formatAutonomyFlowsStatus(flows),
+    }),
+    formatCronSection(nowMs).then(content => ({
+      id: 'cron' as const,
+      title: 'Cron',
+      content,
+    })),
+    listWorkflowRuns().then(workflowRuns => ({
+      id: 'workflow-runs' as const,
+      title: 'Workflow Runs',
+      content: formatWorkflowRunsStatus(workflowRuns),
+    })),
+    formatTeamsSection().then(content => ({
+      id: 'teams' as const,
+      title: 'Teams',
+      content,
+    })),
+    formatPipeRegistryStatus().then(content => ({
+      id: 'pipes' as const,
+      title: 'Pipes',
+      content,
+    })),
+    formatRuntimeSection().then(content => ({
+      id: 'runtime' as const,
+      title: 'Runtime',
+      content,
+    })),
+    Promise.resolve({
+      id: 'remote-control' as const,
+      title: 'Remote Control',
+      content: formatRemoteControlLocalStatus(),
+    }),
+    listRemoteTriggerAuditRecords().then(records => ({
+      id: 'remote-trigger' as const,
+      title: 'RemoteTrigger',
+      content: formatRemoteTriggerAuditStatus(records),
+    })),
+  ])
 }
 
 export async function formatAutonomyDeepStatus(
   params: DeepStatusParams,
 ): Promise<string> {
-  const sections = await Promise.all([
-    Promise.resolve(['# Autonomy Deep Status', formatAutoModeSection()].join('\n')),
-    Promise.resolve(['## Runs', formatAutonomyRunsStatus(params.runs)].join('\n')),
-    Promise.resolve(['## Flows', formatAutonomyFlowsStatus(params.flows)].join('\n')),
-    formatCronSection(params.nowMs ?? Date.now()).then(content => ['## Cron', content].join('\n')),
-    formatTeamsSection().then(content => ['## Teams', content].join('\n')),
-    formatPipesSection().then(content => ['## Pipes', content].join('\n')),
-    formatRuntimeSection().then(content => ['## Runtime', content].join('\n')),
-    Promise.resolve(['## Remote Control', formatRemoteControlSection()].join('\n')),
-  ])
-
-  return sections.join('\n\n')
+  const sections = await formatAutonomyDeepStatusSections(params)
+  return sections
+    .map((section, index) =>
+      [
+        index === 0 ? '# Autonomy Deep Status' : `## ${section.title}`,
+        section.content,
+      ].join('\n'),
+    )
+    .join('\n\n')
 }

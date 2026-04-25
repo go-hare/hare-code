@@ -2,7 +2,7 @@
 import { isUltrathinkEnabled } from './thinking.js'
 import { getInitialSettings } from './settings/settings.js'
 import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import * as growthBook from 'src/services/analytics/growthbook.js'
 import { getAPIProvider } from './model/providers.js'
 import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
 import { isEnvTruthy } from './envUtils.js'
@@ -298,7 +298,7 @@ const OPUS_DEFAULT_EFFORT_CONFIG_DEFAULT: OpusDefaultEffortConfig = {
 }
 
 export function getOpusDefaultEffortConfig(): OpusDefaultEffortConfig {
-  const config = getFeatureValue_CACHED_MAY_BE_STALE(
+  const config = growthBook.getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_grey_step2',
     OPUS_DEFAULT_EFFORT_CONFIG_DEFAULT,
   )

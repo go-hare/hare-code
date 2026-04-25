@@ -52,6 +52,7 @@ function getClipboardCommands() {
       checkImage: string
       saveImage: string
       getPath: string
+      getText: string
       deleteFile: string
     }
   > = {
@@ -59,6 +60,7 @@ function getClipboardCommands() {
       checkImage: `osascript -e 'the clipboard as «class PNGf»'`,
       saveImage: `osascript -e 'set png_data to (the clipboard as «class PNGf»)' -e 'set fp to open for access POSIX file "${screenshotPath}" with write permission' -e 'write png_data to fp' -e 'close access fp'`,
       getPath: `osascript -e 'get POSIX path of (the clipboard as «class furl»)'`,
+      getText: 'pbpaste',
       deleteFile: `rm -f "${screenshotPath}"`,
     },
     linux: {
@@ -67,6 +69,8 @@ function getClipboardCommands() {
       saveImage: `xclip -selection clipboard -t image/png -o > "${screenshotPath}" 2>/dev/null || wl-paste --type image/png > "${screenshotPath}" 2>/dev/null || xclip -selection clipboard -t image/bmp -o > "${screenshotPath}" 2>/dev/null || wl-paste --type image/bmp > "${screenshotPath}"`,
       getPath:
         'xclip -selection clipboard -t text/plain -o 2>/dev/null || wl-paste 2>/dev/null',
+      getText:
+        'xclip -selection clipboard -t text/plain -o 2>/dev/null || wl-paste 2>/dev/null',
       deleteFile: `rm -f "${screenshotPath}"`,
     },
     win32: {
@@ -74,6 +78,7 @@ function getClipboardCommands() {
         'powershell -NoProfile -Command "(Get-Clipboard -Format Image) -ne $null"',
       saveImage: `powershell -NoProfile -Command "$img = Get-Clipboard -Format Image; if ($img) { $img.Save('${screenshotPath.replace(/\\/g, '\\\\')}', [System.Drawing.Imaging.ImageFormat]::Png) }"`,
       getPath: 'powershell -NoProfile -Command "Get-Clipboard"',
+      getText: 'powershell -NoProfile -Command "Get-Clipboard"',
       deleteFile: `del /f "${screenshotPath}"`,
     },
   }
@@ -258,6 +263,24 @@ export async function getImagePathFromClipboard(): Promise<string | null> {
       return null
     }
     return result.stdout.trim()
+  } catch (e) {
+    logError(e as Error)
+    return null
+  }
+}
+
+export async function getTextFromClipboard(): Promise<string | null> {
+  const { commands } = getClipboardCommands()
+
+  try {
+    const result = await execa(commands.getText, {
+      shell: true,
+      reject: false,
+    })
+    if (result.exitCode !== 0) {
+      return null
+    }
+    return result.stdout
   } catch (e) {
     logError(e as Error)
     return null

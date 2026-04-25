@@ -27,7 +27,7 @@ mock.module('../../../../interactiveHelpers.js', () => ({
   exitWithError: mockExitWithError,
 }))
 
-mock.module('../../../../services/analytics/index.js', () => ({
+mock.module('../launchAnalyticsDeps.js', () => ({
   logEvent: mockLogEvent,
 }))
 

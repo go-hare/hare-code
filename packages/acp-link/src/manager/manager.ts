@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { basename } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AcpInstance, InstanceSummary, LogEntry } from "./types.js";
 
 function log(tag: string, msg: string) {
@@ -7,6 +10,32 @@ function log(tag: string, msg: string) {
 
 const MAX_LOG_LINES = 2000;
 const SHUTDOWN_TIMEOUT_MS = 5000;
+
+type LaunchResolverOptions = {
+  execPath?: string;
+  moduleUrl?: string;
+  fileExists?: (path: string) => boolean;
+};
+
+export function resolveSelfLaunchCommand(
+  options: LaunchResolverOptions = {},
+): string[] {
+  const execPath = options.execPath ?? process.execPath;
+  const moduleUrl = options.moduleUrl ?? import.meta.url;
+  const fileExists = options.fileExists ?? existsSync;
+  const isBun = basename(execPath).toLowerCase().includes("bun");
+
+  const sourceEntry = fileURLToPath(new URL("../cli/bin.ts", moduleUrl));
+  const distEntry = fileURLToPath(new URL("../cli/bin.js", moduleUrl));
+  const entryCandidates = isBun ? [sourceEntry, distEntry] : [distEntry];
+  const entrypoint = entryCandidates.find((path) => fileExists(path));
+
+  if (!entrypoint) {
+    return ["acp-link"];
+  }
+
+  return isBun ? [execPath, "run", entrypoint] : [execPath, entrypoint];
+}
 
 export class ProcessManager {
   private instances = new Map<string, AcpInstance>();
@@ -29,8 +58,9 @@ export class ProcessManager {
 
     const args = this.parseCommand(command);
     const fullArgs = ["--group", group, ...args];
+    const launchCommand = [...resolveSelfLaunchCommand(), ...fullArgs];
 
-    const proc = Bun.spawn(["acp-link", ...fullArgs], {
+    const proc = Bun.spawn(launchCommand, {
       stdout: "pipe",
       stderr: "pipe",
       env: { ...Bun.env, ACP_CHILD: "1" },
@@ -39,7 +69,10 @@ export class ProcessManager {
     instance.pid = proc.pid;
     this.instances.set(id, instance);
     this.processes.set(id, proc);
-    log("manager", `created instance ${id.slice(0, 8)} group=${group} pid=${proc.pid} cmd="acp-link ${fullArgs.join(" ")}"`);
+    log(
+      "manager",
+      `created instance ${id.slice(0, 8)} group=${group} pid=${proc.pid} cmd="${launchCommand.join(" ")}"`,
+    );
 
     this.pipeStream(proc.stdout, id, "stdout");
     this.pipeStream(proc.stderr, id, "stderr");

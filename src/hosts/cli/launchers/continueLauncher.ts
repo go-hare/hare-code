@@ -1,5 +1,5 @@
 import { exitWithError } from '../../../interactiveHelpers.js'
-import { logEvent } from '../../../services/analytics/index.js'
+import { logEvent } from './launchAnalyticsDeps.js'
 import { launchRepl } from '../../../replLauncher.js'
 import { loadConversationForResume } from '../../../utils/conversationRecovery.js'
 import { logError } from '../../../utils/log.js'

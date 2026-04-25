@@ -101,6 +101,8 @@ import {
   extractQuotaStatusFromHeaders,
 } from '../claudeAiLimits.js'
 import { getAPIContextManagement } from '../compact/apiMicrocompact.js'
+import { bedrockAdapter } from '../providerUsage/adapters/bedrock.js'
+import { updateProviderBuckets } from '../providerUsage/store.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
@@ -2446,6 +2448,12 @@ async function* queryModel(
       const resp = streamResponse as unknown as Response | undefined
       if (resp) {
         extractQuotaStatusFromHeaders(resp.headers)
+        if (getAPIProvider() === 'bedrock') {
+          updateProviderBuckets(
+            'bedrock',
+            bedrockAdapter.parseHeaders(resp.headers),
+          )
+        }
         // Store headers for gateway detection
         responseHeaders = resp.headers
       }

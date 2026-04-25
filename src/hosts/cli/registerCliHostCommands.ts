@@ -216,7 +216,7 @@ export function registerCliHostCommands(
       )
       .action(async () => {
         process.stderr.write(
-          'Usage: claude ssh <user@host | ssh-config-alias> [dir]\n\n' +
+          'Usage: hare ssh <user@host | ssh-config-alias> [dir]\n\n' +
             'Runs Claude Code on a remote Linux host. You do not need to install\n' +
             'anything on the remote or run `claude auth login` there - the binary is\n' +
             'deployed over SSH and API auth tunnels back through your local machine.\n',
@@ -685,7 +685,7 @@ export function registerCliHostCommands(
       .description(describe(['assistant']))
       .action(() => {
         process.stderr.write(
-          'Usage: claude assistant [sessionId]\n\n' +
+          'Usage: hare assistant [sessionId]\n\n' +
             'Attach the REPL as a viewer client to a running bridge session.\n' +
             'Omit sessionId to discover and pick from available sessions.\n',
         )

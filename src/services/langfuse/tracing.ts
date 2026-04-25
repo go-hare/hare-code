@@ -1,9 +1,13 @@
-import { startObservation, LangfuseOtelSpanAttributes } from '@langfuse/tracing'
-import type { LangfuseSpan, LangfuseGeneration, LangfuseAgent } from '@langfuse/tracing'
 import { isLangfuseEnabled } from './client.js'
+import { getCoreUserData, logForDebugging } from './runtimeDeps.js'
+import {
+  LangfuseOtelSpanAttributes,
+  startObservation,
+  type LangfuseAgent,
+  type LangfuseGeneration,
+  type LangfuseSpan,
+} from './sdkDeps.js'
 import { sanitizeToolInput, sanitizeToolOutput } from './sanitize.js'
-import { logForDebugging } from 'src/utils/debug.js'
-import { getCoreUserData } from 'src/utils/user.js'
 
 export type { LangfuseSpan }
 

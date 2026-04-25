@@ -3,10 +3,6 @@ import { describe, expect, mock, test } from 'bun:test'
 const mockRunHeadlessRuntime = mock(async () => {})
 const mockSetState = mock((_updater: unknown) => {})
 
-mock.module('../../runtime/capabilities/execution/HeadlessRuntime.js', () => ({
-  runHeadlessRuntime: mockRunHeadlessRuntime,
-}))
-
 const { runKernelHeadless } = await import('../headless.js')
 
 describe('runKernelHeadless', () => {
@@ -56,6 +52,9 @@ describe('runKernelHeadless', () => {
       'hello',
       environment as never,
       options,
+      {
+        runHeadlessRuntime: mockRunHeadlessRuntime as typeof mockRunHeadlessRuntime,
+      },
     )
 
     expect(mockRunHeadlessRuntime).toHaveBeenCalledTimes(1)

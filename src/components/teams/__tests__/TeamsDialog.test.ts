@@ -1,104 +1,115 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from 'bun:test'
+import * as execFileUtils from '../../../utils/execFileNoThrow.js'
+import * as tasks from '../../../utils/tasks.js'
+import * as backendDetection from '../../../utils/swarm/backends/detection.js'
+import * as backendRegistry from '../../../utils/swarm/backends/registry.js'
+import * as teamHelpers from '../../../utils/swarm/teamHelpers.js'
+import * as teammateLifecycle from '../../../utils/swarm/teammateLifecycle.js'
 
 const hidePaneMock = mock(async () => true)
 const showPaneMock = mock(async () => true)
-const execFileNoThrowMock = mock(async () => ({ code: 0, stdout: '', stderr: '' }))
-const execFileNoThrowWithCwdMock = mock(async () => ({
-  code: 0,
-  stdout: '',
-  stderr: '',
-}))
-const addHiddenPaneIdMock = mock(() => true)
-const removeHiddenPaneIdMock = mock(() => true)
-const ensureBackendsRegisteredMock = mock(async () => {})
-const isInsideTmuxSyncMock = mock(() => false)
 
-mock.module('../../../utils/swarm/backends/registry.js', () => ({
-  ensureBackendsRegistered: ensureBackendsRegisteredMock,
-  getBackendByType: () => ({
-    hidePane: hidePaneMock,
-    showPane: showPaneMock,
-  }),
-  getCachedBackend: () => null,
-  detectAndGetBackend: mock(async () => ({
-    backend: {
-      hidePane: hidePaneMock,
-      showPane: showPaneMock,
-      supportsHideShow: true,
-    },
-    isNative: false,
-    needsIt2Setup: false,
-  })),
-  getCachedDetectionResult: mock(() => null),
-  markInProcessFallback: mock(() => {}),
-  isInProcessEnabled: mock(() => false),
-  getResolvedTeammateMode: mock(() => 'tmux'),
-  getInProcessBackend: mock(() => null),
-  getTeammateExecutor: mock(async () => null),
-  resetBackendDetection: mock(() => {}),
-}))
+const execFileNoThrowSpy = spyOn(execFileUtils, 'execFileNoThrow')
+const ensureBackendsRegisteredSpy = spyOn(
+  backendRegistry,
+  'ensureBackendsRegistered',
+)
+const getBackendByTypeSpy = spyOn(backendRegistry, 'getBackendByType')
+const isInsideTmuxSyncSpy = spyOn(backendDetection, 'isInsideTmuxSync')
+const addHiddenPaneIdSpy = spyOn(teamHelpers, 'addHiddenPaneId')
+const removeHiddenPaneIdSpy = spyOn(teamHelpers, 'removeHiddenPaneId')
+const removeMemberFromTeamSpy = spyOn(teamHelpers, 'removeMemberFromTeam')
+const removeMemberByAgentIdSpy = spyOn(teamHelpers, 'removeMemberByAgentId')
+const listTasksSpy = spyOn(tasks, 'listTasks')
+const unassignTeammateTasksSpy = spyOn(tasks, 'unassignTeammateTasks')
+const terminateTeammateSpy = spyOn(teammateLifecycle, 'terminateTeammate')
 
-mock.module('../../../utils/swarm/backends/detection.js', () => ({
-  IT2_COMMAND: 'it2',
-  TMUX_COMMAND: 'tmux',
-  isInsideTmuxSync: isInsideTmuxSyncMock,
-  isInsideTmux: mock(async () => false),
-  isInITerm2: mock(() => false),
-  isInWindowsTerminal: mock(() => false),
-  isIt2CliAvailable: mock(async () => false),
-  isWindowsTerminalAvailable: mock(async () => true),
-  isTmuxAvailable: mock(async () => true),
-}))
+const {
+  hideTeammate,
+  killTeammate,
+  removeTerminatedTeammateFromTeamConfig,
+  showTeammate,
+  viewTeammateOutput,
+} = await import('../TeamsDialog.js')
 
-mock.module('../../../utils/execFileNoThrow.js', () => ({
-  execFileNoThrow: execFileNoThrowMock,
-  execFileNoThrowWithCwd: execFileNoThrowWithCwdMock,
-  execSyncWithDefaults_DEPRECATED: mock(() => ({ stdout: '', stderr: '', code: 0 })),
-}))
+beforeEach(() => {
+  hidePaneMock.mockImplementation(async () => true)
+  showPaneMock.mockImplementation(async () => true)
+  execFileNoThrowSpy.mockImplementation(
+    async () => ({ code: 0, stdout: '', stderr: '' }) as any,
+  )
+  ensureBackendsRegisteredSpy.mockImplementation(async () => {})
+  getBackendByTypeSpy.mockImplementation(
+    () =>
+      ({
+        hidePane: hidePaneMock,
+        showPane: showPaneMock,
+      }) as any,
+  )
+  isInsideTmuxSyncSpy.mockImplementation(() => false)
+  addHiddenPaneIdSpy.mockImplementation(() => true)
+  removeHiddenPaneIdSpy.mockImplementation(() => true)
+  removeMemberFromTeamSpy.mockImplementation(() => true)
+  removeMemberByAgentIdSpy.mockImplementation(() => true)
+  listTasksSpy.mockImplementation(async () => [])
+  unassignTeammateTasksSpy.mockImplementation(
+    async () =>
+      ({
+        unassignedTasks: [],
+        notificationMessage: 'worker terminated',
+      }) as any,
+  )
+  terminateTeammateSpy.mockImplementation(async () => true)
+})
 
-mock.module('../../../utils/swarm/teamHelpers.js', () => ({
-  addHiddenPaneId: addHiddenPaneIdMock,
-  removeHiddenPaneId: removeHiddenPaneIdMock,
-  removeMemberFromTeam: mock(() => true),
-  removeMemberByAgentId: mock(() => true),
-  removeTeammateFromTeamFile: mock(() => true),
-  setMemberMode: mock(() => true),
-  setMultipleMemberModes: mock(() => true),
-  syncTeammateMode: mock(() => {}),
-  readTeamFile: mock(() => null),
-  readTeamFileAsync: mock(async () => null),
-  writeTeamFileAsync: mock(async () => {}),
-  getTeamDir: mock(() => '/tmp/team'),
-  getTeamFilePath: mock(() => '/tmp/team/config.json'),
-  sanitizeName: mock((value: string) => value),
-  sanitizeAgentName: mock((value: string) => value),
-}))
+afterEach(() => {
+  hidePaneMock.mockReset()
+  showPaneMock.mockReset()
+  execFileNoThrowSpy.mockReset()
+  ensureBackendsRegisteredSpy.mockReset()
+  getBackendByTypeSpy.mockReset()
+  isInsideTmuxSyncSpy.mockReset()
+  addHiddenPaneIdSpy.mockReset()
+  removeHiddenPaneIdSpy.mockReset()
+  removeMemberFromTeamSpy.mockReset()
+  removeMemberByAgentIdSpy.mockReset()
+  listTasksSpy.mockReset()
+  unassignTeammateTasksSpy.mockReset()
+  terminateTeammateSpy.mockReset()
+})
+
+afterAll(() => {
+  execFileNoThrowSpy.mockRestore()
+  ensureBackendsRegisteredSpy.mockRestore()
+  getBackendByTypeSpy.mockRestore()
+  isInsideTmuxSyncSpy.mockRestore()
+  addHiddenPaneIdSpy.mockRestore()
+  removeHiddenPaneIdSpy.mockRestore()
+  removeMemberFromTeamSpy.mockRestore()
+  removeMemberByAgentIdSpy.mockRestore()
+  listTasksSpy.mockRestore()
+  unassignTeammateTasksSpy.mockRestore()
+  terminateTeammateSpy.mockRestore()
+})
 
 describe('TeamsDialog helpers', () => {
-  afterEach(() => {
-    hidePaneMock.mockClear()
-    showPaneMock.mockClear()
-    execFileNoThrowMock.mockClear()
-    execFileNoThrowWithCwdMock.mockClear()
-    addHiddenPaneIdMock.mockClear()
-    removeHiddenPaneIdMock.mockClear()
-    ensureBackendsRegisteredMock.mockClear()
-    isInsideTmuxSyncMock.mockReset()
-    isInsideTmuxSyncMock.mockImplementation(() => false)
-  })
-
   test('viewTeammateOutput returns a user-visible notice for Windows Terminal', async () => {
-    const { viewTeammateOutput } = await import('../TeamsDialog.js')
-
     await expect(
       viewTeammateOutput('pane-1', 'windows-terminal'),
     ).resolves.toContain('Windows Terminal cannot focus teammate output automatically yet')
-    expect(execFileNoThrowMock).not.toHaveBeenCalled()
+    expect(execFileNoThrowSpy).not.toHaveBeenCalled()
   })
 
   test('hideTeammate uses the backend and records the pane as hidden', async () => {
-    const { hideTeammate } = await import('../TeamsDialog.js')
-
     await hideTeammate(
       {
         name: 'alice',
@@ -107,18 +118,16 @@ describe('TeamsDialog helpers', () => {
         tmuxPaneId: '%12',
         cwd: '/tmp',
         backendType: 'tmux',
-      },
+      } as any,
       'team-a',
     )
 
-    expect(ensureBackendsRegisteredMock).toHaveBeenCalled()
+    expect(ensureBackendsRegisteredSpy).toHaveBeenCalled()
     expect(hidePaneMock).toHaveBeenCalledWith('%12', true)
-    expect(addHiddenPaneIdMock).toHaveBeenCalledWith('team-a', '%12')
+    expect(addHiddenPaneIdSpy).toHaveBeenCalledWith('team-a', '%12')
   })
 
   test('showTeammate uses the backend and removes the hidden marker', async () => {
-    const { showTeammate } = await import('../TeamsDialog.js')
-
     await showTeammate(
       {
         name: 'alice',
@@ -127,12 +136,96 @@ describe('TeamsDialog helpers', () => {
         tmuxPaneId: '%12',
         cwd: '/tmp',
         backendType: 'tmux',
-      },
+      } as any,
       'team-a',
     )
 
-    expect(ensureBackendsRegisteredMock).toHaveBeenCalled()
+    expect(ensureBackendsRegisteredSpy).toHaveBeenCalled()
     expect(showPaneMock).toHaveBeenCalledWith('%12', '%12', true)
-    expect(removeHiddenPaneIdMock).toHaveBeenCalledWith('team-a', '%12')
+    expect(removeHiddenPaneIdSpy).toHaveBeenCalledWith('team-a', '%12')
+  })
+
+  test('removeTerminatedTeammateFromTeamConfig removes in-process teammates by agent id', () => {
+    expect(
+      removeTerminatedTeammateFromTeamConfig(
+        'team-a',
+        'in-process',
+        'agent-2@team-a',
+      ),
+    ).toBe(true)
+
+    expect(removeMemberByAgentIdSpy).toHaveBeenCalledWith(
+      'team-a',
+      'agent-2@team-a',
+    )
+    expect(removeMemberFromTeamSpy).not.toHaveBeenCalled()
+  })
+
+  test('removeTerminatedTeammateFromTeamConfig removes pane teammates by pane id', () => {
+    expect(
+      removeTerminatedTeammateFromTeamConfig('team-a', '%12', 'agent-2@team-a'),
+    ).toBe(true)
+
+    expect(removeMemberFromTeamSpy).toHaveBeenCalledWith('team-a', '%12')
+    expect(removeMemberByAgentIdSpy).not.toHaveBeenCalled()
+  })
+
+  test('killTeammate updates team state after lifecycle termination', async () => {
+    let appState = {
+      teamContext: {
+        teammates: {
+          'agent-2@team-a': {
+            name: 'worker',
+          },
+        },
+      },
+      inbox: {
+        messages: [],
+      },
+    } as any
+
+    const setAppState = (updater: (prev: any) => any): void => {
+      appState = updater(appState)
+    }
+
+    await killTeammate(
+      {
+        name: 'worker',
+        agentId: 'agent-2@team-a',
+        tmuxPaneId: 'in-process',
+        backendType: 'in-process',
+      },
+      'team-a',
+      {
+        getAppState: () => ({ tasks: {} }),
+        setAppState,
+      },
+    )
+
+    expect(terminateTeammateSpy).toHaveBeenCalledWith(
+      'team-a',
+      {
+        name: 'worker',
+        agentId: 'agent-2@team-a',
+        tmuxPaneId: 'in-process',
+        backendType: 'in-process',
+      },
+      {
+        getAppState: expect.any(Function),
+        setAppState,
+      },
+    )
+    expect(removeMemberByAgentIdSpy).toHaveBeenCalledWith(
+      'team-a',
+      'agent-2@team-a',
+    )
+    expect(unassignTeammateTasksSpy).toHaveBeenCalledWith(
+      'team-a',
+      'agent-2@team-a',
+      'worker',
+      'terminated',
+    )
+    expect(appState.teamContext.teammates['agent-2@team-a']).toBeUndefined()
+    expect(appState.inbox.messages).toHaveLength(1)
   })
 })

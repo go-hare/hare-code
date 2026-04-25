@@ -21,6 +21,7 @@ import type { AgentToolResult } from '@go-hare/builtin-tools/tools/AgentTool/age
 import { VERIFICATION_AGENT_TYPE } from '@go-hare/builtin-tools/tools/AgentTool/constants.js'
 import type { AgentDefinition } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@go-hare/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
+import type { AgentId } from '../../types/ids.js'
 import { asAgentId } from '../../types/ids.js'
 import type { Message } from '../../types/message.js'
 import {
@@ -179,6 +180,7 @@ export function createActivityDescriptionResolver(
 export type LocalAgentTaskState = TaskStateBase & {
   type: 'local_agent'
   agentId: string
+  notificationTargetAgentId?: AgentId
   prompt: string
   selectedAgent?: AgentDefinition
   agentType: string
@@ -339,12 +341,14 @@ export async function enqueueAgentNotification({
   // enqueueing to avoid sending redundant messages to the model.
   let shouldEnqueue = false
   let shouldCompletePlanVerification = false
+  let notificationTargetAgentId: AgentId | undefined
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     if (task.notified) {
       return task
     }
     shouldEnqueue = true
     shouldCompletePlanVerification = task.agentType === VERIFICATION_AGENT_TYPE
+    notificationTargetAgentId = task.notificationTargetAgentId
     return {
       ...task,
       notified: true,
@@ -416,7 +420,11 @@ export async function enqueueAgentNotification({
 <${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>${resultSection}${usageSection}${worktreeSection}
 </${TASK_NOTIFICATION_TAG}>`
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' })
+  enqueuePendingNotification({
+    value: message,
+    mode: 'task-notification',
+    agentId: notificationTargetAgentId,
+  })
 }
 
 /**
@@ -652,6 +660,7 @@ export function registerAsyncAgent({
   selectedAgent,
   setAppState,
   parentAbortController,
+  notificationTargetAgentId,
   toolUseId,
 }: {
   agentId: string
@@ -660,6 +669,7 @@ export function registerAsyncAgent({
   selectedAgent: AgentDefinition
   setAppState: SetAppState
   parentAbortController?: AbortController
+  notificationTargetAgentId?: AgentId
   toolUseId?: string
 }): LocalAgentTaskState {
   void initTaskOutputAsSymlink(
@@ -677,6 +687,7 @@ export function registerAsyncAgent({
     type: 'local_agent',
     status: 'running',
     agentId,
+    notificationTargetAgentId,
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
@@ -719,6 +730,7 @@ export function registerAgentForeground({
   selectedAgent,
   setAppState,
   autoBackgroundMs,
+  notificationTargetAgentId,
   toolUseId,
 }: {
   agentId: string
@@ -727,6 +739,7 @@ export function registerAgentForeground({
   selectedAgent: AgentDefinition
   setAppState: SetAppState
   autoBackgroundMs?: number
+  notificationTargetAgentId?: AgentId
   toolUseId?: string
 }): {
   taskId: string
@@ -749,6 +762,7 @@ export function registerAgentForeground({
     type: 'local_agent',
     status: 'running',
     agentId,
+    notificationTargetAgentId,
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',

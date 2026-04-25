@@ -1,4 +1,4 @@
-import { logEvent } from '../../../services/analytics/index.js'
+import { logEvent } from './launchAnalyticsDeps.js'
 import { launchRepl } from '../../../replLauncher.js'
 import { createSystemMessage } from '../../../utils/messages.js'
 import { buildDeepLinkBanner } from '../../../utils/deepLink/banner.js'

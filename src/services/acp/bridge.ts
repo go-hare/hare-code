@@ -46,6 +46,8 @@ export type SessionUsage = {
   cachedWriteTokens: number
 }
 
+type StreamedAssistantContentKind = 'image' | 'text' | 'thinking'
+
 // ── Tool info conversion ──────────────────────────────────────────
 
 interface ToolInfo {
@@ -567,6 +569,11 @@ export async function forwardSessionUpdates(
   let lastAssistantTotalUsage: number | null = null
   let lastAssistantModel: string | null = null
   let lastContextWindowSize = 200000
+  const streamedContentKindsByMessageId = new Map<
+    string,
+    Set<StreamedAssistantContentKind>
+  >()
+  const scopeToStreamedMessageId = new Map<string, string>()
 
   try {
     while (!abortSignal.aborted) {
@@ -717,6 +724,16 @@ export async function forwardSessionUpdates(
 
         // ── Stream events ──────────────────────────────────────────
         case 'stream_event': {
+          const streamEvent = (msg as unknown as { event?: Record<string, unknown> }).event
+          const parentToolUseId =
+            msg.parent_tool_use_id as string | null | undefined
+          const streamScope = `${sessionId}:${parentToolUseId ?? ''}`
+          if (streamEvent?.type === 'message_start') {
+            const messageId = (streamEvent.message as { id?: string } | undefined)?.id
+            if (messageId) {
+              scopeToStreamedMessageId.set(streamScope, messageId)
+            }
+          }
           const notifications = streamEventToAcpNotifications(
             msg,
             sessionId,
@@ -727,6 +744,14 @@ export async function forwardSessionUpdates(
               cwd,
             },
           )
+          const streamedMessageId = scopeToStreamedMessageId.get(streamScope)
+          if (streamedMessageId) {
+            recordStreamedAssistantContentKinds(
+              notifications,
+              streamedMessageId,
+              streamedContentKindsByMessageId,
+            )
+          }
           for (const notification of notifications) {
             await conn.sessionUpdate(notification)
           }
@@ -756,6 +781,12 @@ export async function forwardSessionUpdates(
             lastAssistantModel = assistantMsg.model as string
           }
 
+          const assistantMessageId = assistantMsg?.id as string | undefined
+          const assistantScope = `${sessionId}:${parentToolUseId ?? ''}`
+          const streamedContentKinds =
+            assistantMessageId != null
+              ? streamedContentKindsByMessageId.get(assistantMessageId)
+              : undefined
           const notifications = assistantMessageToAcpNotifications(
             msg,
             sessionId,
@@ -764,8 +795,21 @@ export async function forwardSessionUpdates(
             {
               clientCapabilities,
               cwd,
+              contentOverride: filterAssistantContentForStreamedKinds(
+                assistantMsg?.content as
+                  | string
+                  | Array<Record<string, unknown>>
+                  | undefined,
+                streamedContentKinds,
+              ),
             },
           )
+          if (assistantMessageId) {
+            streamedContentKindsByMessageId.delete(assistantMessageId)
+            if (scopeToStreamedMessageId.get(assistantScope) === assistantMessageId) {
+              scopeToStreamedMessageId.delete(assistantScope)
+            }
+          }
           for (const notification of notifications) {
             await conn.sessionUpdate(notification)
           }
@@ -875,16 +919,17 @@ function assistantMessageToAcpNotifications(
   options?: {
     clientCapabilities?: ClientCapabilities
     parentToolUseId?: string | null
+    contentOverride?: string | Array<Record<string, unknown>>
     cwd?: string
   },
 ): SessionNotification[] {
   const message = msg.message as Record<string, unknown> | undefined
   if (!message) return []
 
-  const content = message.content as
-    | string
-    | Array<Record<string, unknown>>
-    | undefined
+  const content =
+    options && 'contentOverride' in options
+      ? options.contentOverride
+      : (message.content as string | Array<Record<string, unknown>> | undefined)
   if (!content) return []
 
   // If content is a string, treat as text
@@ -922,6 +967,9 @@ function streamEventToAcpNotifications(
     case 'content_block_start': {
       const contentBlock = event.content_block as Record<string, unknown> | undefined
       if (!contentBlock) return []
+      if (contentBlock.type === 'text' || contentBlock.type === 'thinking') {
+        return []
+      }
       return toAcpNotifications(
         [contentBlock],
         'assistant',
@@ -991,6 +1039,7 @@ function toAcpNotifications(
       case 'text':
       case 'text_delta': {
         const text = (chunk.text as string) ?? ''
+        if (text.length === 0) break
         update = {
           sessionUpdate:
             role === 'assistant' ? 'agent_message_chunk' : 'user_message_chunk',
@@ -1002,6 +1051,7 @@ function toAcpNotifications(
       case 'thinking':
       case 'thinking_delta': {
         const thinking = (chunk.thinking as string) ?? ''
+        if (thinking.length === 0) break
         update = {
           sessionUpdate: 'agent_thought_chunk',
           content: { type: 'text', text: thinking },
@@ -1161,6 +1211,67 @@ function toAcpNotifications(
   }
 
   return output
+}
+
+function recordStreamedAssistantContentKinds(
+  notifications: SessionNotification[],
+  messageId: string,
+  streamedContentKindsByMessageId: Map<
+    string,
+    Set<StreamedAssistantContentKind>
+  >,
+): void {
+  let streamedContentKinds = streamedContentKindsByMessageId.get(messageId)
+  for (const notification of notifications) {
+    const update = notification.update
+    if (update.sessionUpdate === 'agent_message_chunk') {
+      const contentType = update.content.type
+      if (contentType !== 'text' && contentType !== 'image') {
+        continue
+      }
+      if (!streamedContentKinds) {
+        streamedContentKinds = new Set<StreamedAssistantContentKind>()
+        streamedContentKindsByMessageId.set(messageId, streamedContentKinds)
+      }
+      streamedContentKinds.add(contentType)
+      continue
+    }
+    if (update.sessionUpdate === 'agent_thought_chunk') {
+      if (!streamedContentKinds) {
+        streamedContentKinds = new Set<StreamedAssistantContentKind>()
+        streamedContentKindsByMessageId.set(messageId, streamedContentKinds)
+      }
+      streamedContentKinds.add('thinking')
+    }
+  }
+}
+
+function filterAssistantContentForStreamedKinds(
+  content: string | Array<Record<string, unknown>> | undefined,
+  streamedContentKinds?: Set<StreamedAssistantContentKind>,
+): string | Array<Record<string, unknown>> | undefined {
+  if (!content || !streamedContentKinds || streamedContentKinds.size === 0) {
+    return content
+  }
+
+  if (typeof content === 'string') {
+    return streamedContentKinds.has('text') ? undefined : content
+  }
+
+  const filtered = content.filter((block) => {
+    switch (block.type) {
+      case 'text':
+        return !streamedContentKinds.has('text')
+      case 'thinking':
+        return !streamedContentKinds.has('thinking')
+      case 'image':
+        return !streamedContentKinds.has('image')
+      default:
+        return true
+    }
+  })
+
+  return filtered.length > 0 ? filtered : undefined
 }
 
 function normalizePlanStatus(

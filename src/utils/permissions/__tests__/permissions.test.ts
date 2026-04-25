@@ -113,6 +113,36 @@ describe('Langfuse trace propagation', () => {
     const subagentContext = createSubagentContext(parentContext)
     expect(subagentContext.langfuseRootTrace).toBe(parentTrace)
   })
+
+  test('subagent context can override active task execution context', () => {
+    const childTaskContext = {
+      taskListId: 'tasks',
+      taskId: 'child-task',
+      ownedFiles: ['src/child.ts'],
+    }
+    const parentContext = {
+      ...getEmptyToolPermissionContext(),
+      messages: [],
+      abortController: new AbortController(),
+      readFileState: createFileStateCacheWithSizeLimit(1),
+      getAppState: () => ({ toolPermissionContext: getEmptyToolPermissionContext() }),
+      setAppState: () => {},
+      updateFileHistoryState: () => {},
+      updateAttributionState: () => {},
+      setInProgressToolUseIDs: () => {},
+      setResponseLength: () => {},
+      activeTaskExecutionContext: {
+        taskListId: 'tasks',
+        taskId: 'parent-task',
+      },
+    } as never
+
+    const subagentContext = createSubagentContext(parentContext, {
+      activeTaskExecutionContext: childTaskContext,
+    })
+
+    expect(subagentContext.activeTaskExecutionContext).toEqual(childTaskContext)
+  })
 })
 
 describe('filterDeniedAgents', () => {

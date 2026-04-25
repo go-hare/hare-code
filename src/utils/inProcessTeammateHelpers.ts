@@ -9,11 +9,25 @@
  * - Detect permission-related messages
  */
 
+import type { Tools } from '../Tool.js'
 import type { AppState } from '../state/AppState.js'
 import {
+  createActivityDescriptionResolver,
+  createProgressTracker,
+  getProgressUpdate,
+  type AgentProgress,
+  updateProgressFromMessage,
+} from '../tasks/LocalAgentTask/LocalAgentTask.js'
+import {
+  TEAMMATE_MESSAGES_UI_CAP,
+  getTeammateExecutionBackend,
   type InProcessTeammateTaskState,
   isInProcessTeammateTask,
 } from '../tasks/InProcessTeammateTask/types.js'
+import type { Message } from '../types/message.js'
+import { asAgentId } from '../types/ids.js'
+import { getAllBaseTools } from '../tools.js'
+import { getAgentTranscript } from './sessionStorage.js'
 import { updateTaskState } from './task/framework.js'
 import {
   isPermissionResponse,
@@ -80,6 +94,115 @@ export function handlePlanApprovalResponse(
   setAppState: SetAppState,
 ): void {
   setAwaitingPlanApproval(taskId, setAppState, false)
+}
+
+function hasRecordedProgress(progress: AgentProgress): boolean {
+  return (
+    progress.toolUseCount > 0 ||
+    progress.tokenCount > 0 ||
+    progress.lastActivity !== undefined ||
+    (progress.recentActivities?.length ?? 0) > 0 ||
+    !!progress.summary
+  )
+}
+
+function mergeRecentMessages(
+  transcriptMessages: readonly Message[],
+  currentMessages: readonly Message[] | undefined,
+): Message[] {
+  if (currentMessages === undefined || currentMessages.length === 0) {
+    return transcriptMessages.slice(-TEAMMATE_MESSAGES_UI_CAP)
+  }
+
+  const merged = [...transcriptMessages]
+  const knownUuids = new Set(transcriptMessages.map(message => message.uuid))
+
+  for (const message of currentMessages) {
+    if (!knownUuids.has(message.uuid)) {
+      merged.push(message)
+    }
+  }
+
+  return merged.slice(-TEAMMATE_MESSAGES_UI_CAP)
+}
+
+export function deriveTeammateProgress(
+  messages: readonly Message[],
+  tools: Tools = getAllBaseTools(),
+): AgentProgress | undefined {
+  const tracker = createProgressTracker()
+  const resolveActivityDescription = createActivityDescriptionResolver(tools)
+
+  for (const message of messages) {
+    updateProgressFromMessage(
+      tracker,
+      message,
+      resolveActivityDescription,
+      tools,
+    )
+  }
+
+  const progress = getProgressUpdate(tracker)
+  return hasRecordedProgress(progress) ? progress : undefined
+}
+
+export function applyOutOfProcessTeammateIdleSnapshot(
+  taskId: string,
+  transcriptMessages: readonly Message[] | undefined,
+  setAppState: SetAppState,
+  tools: Tools = getAllBaseTools(),
+): void {
+  const progress =
+    transcriptMessages !== undefined
+      ? deriveTeammateProgress(transcriptMessages, tools)
+      : undefined
+
+  updateTaskState<InProcessTeammateTaskState>(taskId, setAppState, task => {
+    if (
+      task.status !== 'running' ||
+      getTeammateExecutionBackend(task) === 'in-process'
+    ) {
+      return task
+    }
+
+    return {
+      ...task,
+      isIdle: true,
+      progress: progress ?? task.progress,
+      messages:
+        transcriptMessages !== undefined
+          ? mergeRecentMessages(transcriptMessages, task.messages)
+          : task.messages,
+      lastReportedToolCount: progress?.toolUseCount ?? task.lastReportedToolCount,
+      lastReportedTokenCount: progress?.tokenCount ?? task.lastReportedTokenCount,
+    }
+  })
+}
+
+export async function syncOutOfProcessTeammateIdleState(
+  agentName: string,
+  appState: AppState,
+  setAppState: SetAppState,
+): Promise<void> {
+  const taskId = findInProcessTeammateTaskId(agentName, appState)
+  if (!taskId) {
+    return
+  }
+
+  const task = appState.tasks[taskId]
+  if (
+    !isInProcessTeammateTask(task) ||
+    getTeammateExecutionBackend(task) === 'in-process'
+  ) {
+    return
+  }
+
+  const transcript = await getAgentTranscript(asAgentId(task.identity.agentId))
+  applyOutOfProcessTeammateIdleSnapshot(
+    taskId,
+    transcript?.messages,
+    setAppState,
+  )
 }
 
 // ============ Permission Delegation Helpers ============

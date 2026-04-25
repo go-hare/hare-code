@@ -6,10 +6,10 @@ import {
   launchTeleportResumeWrapper,
 } from '../../../dialogLaunchers.js'
 import { exitWithError } from '../../../interactiveHelpers.js'
-import { logEvent } from '../../../services/analytics/index.js'
+import { logEvent } from './launchAnalyticsDeps.js'
 import { waitForPolicyLimitsToLoad, isPolicyAllowed } from '../../../services/policyLimits/index.js'
 import type { Message as MessageType } from '../../../types/message.js'
-import { errorMessage, TeleportOperationError } from '../../../utils/errors.js'
+import { errorMessage, TeleportOperationError } from './resumeErrorDeps.js'
 import {
   filterExistingPaths,
   getKnownPathsForRepo,
@@ -21,7 +21,7 @@ import {
   validateGitState,
   validateSessionRepository,
 } from '../../../utils/teleport.js'
-import { fetchSession } from '../../../utils/teleport/api.js'
+import { fetchSession } from './teleportApiDeps.js'
 import { runRemoteLaunch } from './remoteLauncher.js'
 import type { ResumeLikeLaunchOptions } from './resumeLauncherShared.js'
 

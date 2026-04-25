@@ -16,7 +16,7 @@ type AutonomyAction = {
   run: () => Promise<string>
 }
 
-const BASE_AUTONOMY_PANEL_ACTION_COUNT = 12
+const BASE_AUTONOMY_PANEL_ACTION_COUNT = 14
 const ACTION_LABEL_COLUMN_WIDTH = 24
 
 export function getAutonomyPanelBaseActionCountForTests(): number {
@@ -85,13 +85,18 @@ function AutonomyPanel({
         run: () => getAutonomyDeepSectionText('cron'),
       },
       {
+        label: 'Workflow runs',
+        description: 'Show persisted WorkflowTool runs and their current workflow step',
+        run: () => getAutonomyDeepSectionText('workflow-runs'),
+      },
+      {
         label: 'Teams',
         description: 'Show Agent Teams, teammate backends, activity, and open tasks',
         run: () => getAutonomyDeepSectionText('teams'),
       },
       {
         label: 'Pipes',
-        description: 'Show pipe registry for terminal messaging',
+        description: 'Show UDS/named-pipe and LAN registry for terminal messaging',
         run: () => getAutonomyDeepSectionText('pipes'),
       },
       {
@@ -101,8 +106,13 @@ function AutonomyPanel({
       },
       {
         label: 'Remote Control',
-        description: 'Show local remote-control runtime status',
+        description: 'Show bridge mode, base URL, token presence, and entitlement note',
         run: () => getAutonomyDeepSectionText('remote-control'),
+      },
+      {
+        label: 'RemoteTrigger',
+        description: 'Show recent remote trigger audit records, failures, and latest call',
+        run: () => getAutonomyDeepSectionText('remote-trigger'),
       },
     ]
 

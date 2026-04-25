@@ -1,6 +1,43 @@
 import { describe, expect, test } from 'bun:test'
+import { asAgentId } from '../../types/ids.js'
 
-import { isSlashCommand } from '../messageQueueManager.js'
+import {
+  enqueuePendingNotification,
+  getCommandsByMaxPriority,
+  isSlashCommand,
+  resetCommandQueue,
+} from '../messageQueueManager.js'
+
+describe('messageQueueManager.enqueuePendingNotification', () => {
+  test('defaults main-thread task notifications to later priority', () => {
+    resetCommandQueue()
+
+    enqueuePendingNotification({
+      mode: 'task-notification',
+      value: 'main-thread notification',
+    } as any)
+
+    expect(getCommandsByMaxPriority('next')).toHaveLength(0)
+    const queued = getCommandsByMaxPriority('later')
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.priority).toBe('later')
+  })
+
+  test('defaults agent-targeted task notifications to next priority', () => {
+    resetCommandQueue()
+
+    enqueuePendingNotification({
+      mode: 'task-notification',
+      value: 'child notification',
+      agentId: asAgentId('parent-agent'),
+    } as any)
+
+    const queued = getCommandsByMaxPriority('next')
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.priority).toBe('next')
+    expect(queued[0]?.agentId).toBe(asAgentId('parent-agent'))
+  })
+})
 
 describe('messageQueueManager.isSlashCommand', () => {
   test('treats normal slash commands as slash commands', () => {

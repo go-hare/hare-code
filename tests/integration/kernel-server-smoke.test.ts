@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 const mockCreateDirectConnectSession = mock(async () => ({
   config: {
@@ -16,6 +16,7 @@ const mockCreateServerLogger = mock(() => ({
   warn: mock(() => {}),
 }))
 const mockDangerousBackendInstance = { kind: 'backend' }
+const mockRunConnectHeadlessRuntime = mock(async () => {})
 
 const MockSessionManager = mock(function MockSessionManager(
   this: Record<string, unknown>,
@@ -34,38 +35,32 @@ class MockDirectConnectError extends Error {
   }
 }
 
-mock.module('../../src/server/createDirectConnectSession.js', () => ({
-  createDirectConnectSession: mockCreateDirectConnectSession,
+mock.module('../../src/kernel/serverHostDeps.js', () => ({
+  createDirectConnectSessionCompat: mockCreateDirectConnectSession,
   DirectConnectError: MockDirectConnectError,
-}))
-
-mock.module('../../src/server/server.js', () => ({
-  startServer: mockStartServer,
-}))
-
-mock.module('../../src/server/sessionManager.js', () => ({
+  startServerHost: mockStartServer,
   SessionManager: MockSessionManager,
-}))
-
-mock.module('../../src/server/backends/dangerousBackend.js', () => ({
   DangerousBackend: mock(() => mockDangerousBackendInstance),
-}))
-
-mock.module('../../src/server/serverLog.js', () => ({
   createServerLogger: mockCreateServerLogger,
+  runConnectHeadlessRuntime: mockRunConnectHeadlessRuntime,
 }))
 
 const {
   assembleServerHost,
   connectDirectHostSession,
   createDirectConnectSession,
-} = await import('../../src/kernel/index.js')
+} = await import('../../src/kernel/serverHost.js')
+
+afterEach(() => {
+  mock.restore()
+})
 
 describe('kernel server smoke', () => {
   beforeEach(() => {
     mockCreateDirectConnectSession.mockClear()
     mockStartServer.mockClear()
     mockCreateServerLogger.mockClear()
+    mockRunConnectHeadlessRuntime.mockClear()
     MockSessionManager.mockClear()
   })
 

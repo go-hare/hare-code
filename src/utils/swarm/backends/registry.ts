@@ -1,6 +1,5 @@
 import { getIsNonInteractiveSession } from '../../../bootstrap/state.js'
 import { logForDebugging } from '../../../utils/debug.js'
-import { errorMessage } from '../../../utils/errors.js'
 import { getPlatform } from '../../../utils/platform.js'
 import {
   isInITerm2,
@@ -11,22 +10,17 @@ import {
   isTmuxAvailable,
   isWindowsTerminalAvailable,
 } from './detection.js'
-import { createInProcessBackend } from './InProcessBackend.js'
 import { getPreferTmuxOverIterm2 } from './it2Setup.js'
-import { createPaneBackendExecutor } from './PaneBackendExecutor.js'
 import { getTeammateModeFromSnapshot } from './teammateModeSnapshot.js'
 import type {
   BackendDetectionResult,
   PaneBackend,
   PaneBackendType,
-  TeammateExecutor,
 } from './types.js'
 
 let cachedBackend: PaneBackend | null = null
 let cachedDetectionResult: BackendDetectionResult | null = null
 let backendsRegistered = false
-let cachedInProcessBackend: TeammateExecutor | null = null
-let cachedPaneBackendExecutor: TeammateExecutor | null = null
 let inProcessFallbackActive = false
 
 let TmuxBackendClass: (new () => PaneBackend) | null = null
@@ -349,69 +343,9 @@ export function getResolvedTeammateMode():
   return 'tmux'
 }
 
-export function getInProcessBackend(): TeammateExecutor {
-  if (!cachedInProcessBackend) {
-    cachedInProcessBackend = createInProcessBackend()
-  }
-  return cachedInProcessBackend
-}
-
-export async function getTeammateExecutor(
-  preferInProcess: boolean = false,
-  options?: {
-    onNeedsIt2Setup?: (
-      tmuxAvailable: boolean,
-    ) => Promise<'installed' | 'use-tmux' | 'cancelled'>
-  },
-): Promise<TeammateExecutor> {
-  if (preferInProcess && isInProcessEnabled()) {
-    logForDebugging('[BackendRegistry] Using in-process executor')
-    return getInProcessBackend()
-  }
-
-  try {
-    logForDebugging('[BackendRegistry] Using pane backend executor')
-    return await getPaneBackendExecutor(options)
-  } catch (error) {
-    if (getTeammateModeFromSnapshot() !== 'auto') {
-      throw error
-    }
-    logForDebugging(
-      `[BackendRegistry] No pane backend available, falling back to in-process: ${errorMessage(error)}`,
-    )
-    markInProcessFallback()
-    return getInProcessBackend()
-  }
-}
-
-async function getPaneBackendExecutor(options?: {
-  onNeedsIt2Setup?: (
-    tmuxAvailable: boolean,
-  ) => Promise<'installed' | 'use-tmux' | 'cancelled'>
-}): Promise<TeammateExecutor> {
-  if (!cachedPaneBackendExecutor) {
-    const detection = await detectAndGetBackend()
-    if (detection.needsIt2Setup && options?.onNeedsIt2Setup) {
-      const setupResult = await options.onNeedsIt2Setup(await isTmuxAvailable())
-      if (setupResult === 'cancelled') {
-        throw new Error('iTerm2 setup cancelled')
-      }
-      resetBackendDetection()
-      return getPaneBackendExecutor()
-    }
-    cachedPaneBackendExecutor = createPaneBackendExecutor(detection.backend)
-    logForDebugging(
-      `[BackendRegistry] Created PaneBackendExecutor wrapping ${detection.backend.type}`,
-    )
-  }
-  return cachedPaneBackendExecutor
-}
-
 export function resetBackendDetection(): void {
   cachedBackend = null
   cachedDetectionResult = null
-  cachedInProcessBackend = null
-  cachedPaneBackendExecutor = null
   backendsRegistered = false
   inProcessFallbackActive = false
 }

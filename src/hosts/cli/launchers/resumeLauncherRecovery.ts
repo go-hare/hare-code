@@ -2,9 +2,9 @@ import type { AgentColorName } from '@go-hare/builtin-tools/tools/AgentTool/agen
 import chalk from 'chalk'
 import { resolve } from 'path'
 import { exitWithError } from '../../../interactiveHelpers.js'
-import { count } from '../../../utils/array.js'
+import { count } from './resumeArrayDeps.js'
 import { loadConversationForResume } from '../../../utils/conversationRecovery.js'
-import { errorMessage, isENOENT } from '../../../utils/errors.js'
+import { errorMessage, isENOENT } from './resumeErrorDeps.js'
 import { logError } from '../../../utils/log.js'
 import type { LogOption } from '../../../types/logs.js'
 import type { Message as MessageType } from '../../../types/message.js'
@@ -12,13 +12,13 @@ import {
   getSessionIdFromLog,
   loadTranscriptFromFile,
   searchSessionsByCustomTitle,
-} from '../../../utils/sessionStorage.js'
+} from './resumeSessionStorageDeps.js'
 import {
   processResumedConversation,
   type ProcessedResume,
 } from '../../../utils/sessionRestore.js'
 import { validateUuid } from '../../../utils/uuid.js'
-import { logEvent } from '../../../services/analytics/index.js'
+import { logEvent } from './launchAnalyticsDeps.js'
 import type {
   ResumeLikeLaunchOptions,
   ResumeProcessingResult,

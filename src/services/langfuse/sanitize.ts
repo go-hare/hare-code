@@ -1,18 +1,39 @@
+import { homedir } from 'node:os'
+
 const MAX_OUTPUT_LENGTH = 500
 const REDACTED_FILE_TOOLS = new Set(['FileReadTool', 'FileWriteTool', 'FileEditTool'])
 const REDACTED_SHELL_TOOLS = new Set(['BashTool', 'PowerShellTool'])
 const SENSITIVE_OUTPUT_TOOLS = new Set(['ConfigTool', 'MCPTool'])
 
-const HOME_DIR_PATTERN = new RegExp(
-  (process.env.HOME ?? '/Users/[^/]+').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-  'g',
-)
-
 const SENSITIVE_KEY_PATTERN = /(?:api_?key|token|secret|password|credential|auth_header)/i
+
+function getHomeDirPattern(): RegExp | null {
+  const patterns = new Set<string>()
+  const home =
+    process.env.HOME ??
+    process.env.USERPROFILE ??
+    homedir()
+
+  if (home) {
+    patterns.add(home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  }
+
+  // Keep common synthetic home prefixes sanitized across platforms.
+  patterns.add('/Users/[^/]+')
+  patterns.add('/home/[^/]+')
+  patterns.add('[A-Za-z]:\\\\Users\\\\[^\\\\]+')
+
+  return new RegExp(Array.from(patterns).join('|'), 'g')
+}
+
+function replaceHomeDir(value: string): string {
+  const pattern = getHomeDirPattern()
+  return pattern ? value.replace(pattern, '~') : value
+}
 
 export function sanitizeGlobal(data: unknown): unknown {
   if (typeof data === 'string') {
-    return data.replace(HOME_DIR_PATTERN, '~')
+    return replaceHomeDir(data)
   }
   if (typeof data === 'object' && data !== null) {
     return sanitizeObject(data as Record<string, unknown>)
@@ -26,7 +47,7 @@ function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
     if (SENSITIVE_KEY_PATTERN.test(key)) {
       result[key] = '[REDACTED]'
     } else if (typeof value === 'string') {
-      result[key] = value.replace(HOME_DIR_PATTERN, '~')
+      result[key] = replaceHomeDir(value)
     } else if (typeof value === 'object' && value !== null) {
       result[key] = sanitizeObject(value as Record<string, unknown>)
     } else {
@@ -48,7 +69,7 @@ export function sanitizeToolInput(toolName: string, input: unknown): unknown {
 
   for (const key of ['file_path', 'path', 'directory'] as const) {
     if (key in obj && typeof obj[key] === 'string') {
-      obj[key] = (obj[key] as string).replace(HOME_DIR_PATTERN, '~')
+      obj[key] = replaceHomeDir(obj[key] as string)
     }
   }
   return obj

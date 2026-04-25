@@ -1,4 +1,3 @@
-import { formatAutonomyDeepStatus } from '../../utils/autonomyStatus.js'
 import {
   formatAutonomyFlowDetail,
   formatAutonomyFlowsList,
@@ -15,24 +14,20 @@ import {
   resumeManagedAutonomyFlowPrompt,
 } from '../../utils/autonomyRuns.js'
 import {
+  formatAutonomyDeepStatus,
+  formatAutonomyDeepStatusSections,
+  type AutonomyDeepStatusSectionId,
+} from '../../utils/autonomyStatus.js'
+import {
+  AUTONOMY_USAGE,
+  parseAutonomyArgs,
+} from '../../utils/autonomyCommandSpec.js'
+import {
   enqueuePendingNotification,
   removeByFilter,
 } from '../../utils/messageQueueManager.js'
 
-const AUTONOMY_USAGE =
-  'Usage: /autonomy [status [--deep]|runs [limit]|flows [limit]|flow <id>|flow cancel <id>|flow resume <id>]'
-
-type DeepSectionId =
-  | 'auto-mode'
-  | 'runs'
-  | 'flows'
-  | 'cron'
-  | 'teams'
-  | 'pipes'
-  | 'runtime'
-  | 'remote-control'
-
-function parseAutonomyLimit(raw?: string | number): number {
+export function parseAutonomyLimit(raw?: string | number): number {
   const parsed = typeof raw === 'number' ? raw : Number.parseInt(raw ?? '', 10)
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return 10
@@ -59,47 +54,21 @@ export async function getAutonomyStatusText(options?: {
 }
 
 export async function getAutonomyDeepSectionText(
-  sectionId: DeepSectionId,
+  sectionId: AutonomyDeepStatusSectionId,
 ): Promise<string> {
-  const [runs, flows, full] = await Promise.all([
+  const [runs, flows] = await Promise.all([
     listAutonomyRuns(),
     listAutonomyFlows(),
-    getAutonomyStatusText({ deep: true }),
   ])
-
-  switch (sectionId) {
-    case 'runs':
-      return ['# Runs', formatAutonomyRunsStatus(runs)].join('\n')
-    case 'flows':
-      return ['# Flows', formatAutonomyFlowsStatus(flows)].join('\n')
-    case 'auto-mode':
-      return full.includes('Auto mode:')
-        ? ['# Auto Mode', full.split('## Runs')[0]!.replace('# Autonomy Deep Status\n', '').trim()].join('\n')
-        : 'Auto mode section unavailable.'
-    case 'cron':
-      return extractDeepSection(full, '## Cron')
-    case 'teams':
-      return extractDeepSection(full, '## Teams')
-    case 'pipes':
-      return extractDeepSection(full, '## Pipes')
-    case 'runtime':
-      return extractDeepSection(full, '## Runtime')
-    case 'remote-control':
-      return extractDeepSection(full, '## Remote Control')
+  const sections = await formatAutonomyDeepStatusSections({ runs, flows })
+  const section = sections.find(item => item.id === sectionId)
+  if (!section) {
+    return `Autonomy deep status section not found: ${sectionId}`
   }
+  return [`# ${section.title}`, section.content].join('\n')
 }
 
-function extractDeepSection(full: string, heading: string): string {
-  const start = full.indexOf(heading)
-  if (start === -1) {
-    return `${heading.replace(/^## /, '')} section unavailable.`
-  }
-  const rest = full.slice(start)
-  const nextHeading = rest.indexOf('\n## ', heading.length)
-  return nextHeading === -1 ? rest : rest.slice(0, nextHeading)
-}
-
-async function cancelAutonomyFlowText(
+export async function cancelAutonomyFlowText(
   flowId: string,
   options?: {
     removeQueuedInMemory?: boolean
@@ -134,7 +103,7 @@ async function cancelAutonomyFlowText(
     : `Cancelled flow ${flowId}. Removed ${removedCount} queued step(s).`
 }
 
-async function resumeAutonomyFlowText(
+export async function resumeAutonomyFlowText(
   flowId: string,
   options?: {
     enqueueInMemory?: boolean
@@ -160,6 +129,28 @@ async function resumeAutonomyFlowText(
   ].join('\n')
 }
 
+export async function getAutonomyRunsText(
+  limit?: string | number,
+): Promise<string> {
+  return formatAutonomyRunsList(
+    await listAutonomyRuns(),
+    parseAutonomyLimit(limit),
+  )
+}
+
+export async function getAutonomyFlowsText(
+  limit?: string | number,
+): Promise<string> {
+  return formatAutonomyFlowsList(
+    await listAutonomyFlows(),
+    parseAutonomyLimit(limit),
+  )
+}
+
+export async function getAutonomyFlowText(flowId: string): Promise<string> {
+  return formatAutonomyFlowDetail(await getAutonomyFlowById(flowId))
+}
+
 export async function getAutonomyCommandText(
   args: string,
   options?: {
@@ -167,76 +158,58 @@ export async function getAutonomyCommandText(
     removeQueuedInMemory?: boolean
   },
 ): Promise<string> {
-  const [subcommand = 'status', arg1, arg2] = args.trim().split(/\s+/, 3)
+  const parsed = parseAutonomyArgs(args)
 
-  if (subcommand === '' || subcommand === 'status') {
-    return getAutonomyStatusText({ deep: arg1 === '--deep' })
-  }
-
-  if (subcommand === 'runs') {
-    return formatAutonomyRunsList(
-      await listAutonomyRuns(),
-      parseAutonomyLimit(arg1),
-    )
-  }
-
-  if (subcommand === 'flows') {
-    return formatAutonomyFlowsList(
-      await listAutonomyFlows(),
-      parseAutonomyLimit(arg1),
-    )
-  }
-
-  if (subcommand === 'flow') {
-    if (arg1 === 'cancel') {
-      return cancelAutonomyFlowText(arg2 ?? '', {
+  switch (parsed.type) {
+    case 'status':
+      return getAutonomyStatusText({ deep: parsed.deep })
+    case 'runs':
+      return getAutonomyRunsText(parsed.limit)
+    case 'flows':
+      return getAutonomyFlowsText(parsed.limit)
+    case 'flow-detail':
+      return getAutonomyFlowText(parsed.flowId)
+    case 'flow-cancel':
+      return cancelAutonomyFlowText(parsed.flowId, {
         removeQueuedInMemory: options?.removeQueuedInMemory,
       })
-    }
-    if (arg1 === 'resume') {
-      return resumeAutonomyFlowText(arg2 ?? '', {
+    case 'flow-resume':
+      return resumeAutonomyFlowText(parsed.flowId, {
         enqueueInMemory: options?.enqueueInMemory,
       })
-    }
-    if (arg1) {
-      return formatAutonomyFlowDetail(await getAutonomyFlowById(arg1))
-    }
+    case 'usage':
+      return AUTONOMY_USAGE
   }
-
-  return AUTONOMY_USAGE
 }
 
 export async function autonomyStatusHandler(
   options?: { deep?: boolean },
 ): Promise<void> {
-  const args = options?.deep ? 'status --deep' : 'status'
-  process.stdout.write(`${await getAutonomyCommandText(args)}\n`)
+  process.stdout.write(`${await getAutonomyStatusText(options)}\n`)
 }
 
-export async function autonomyRunsHandler(limit?: string): Promise<void> {
-  const args = limit ? `runs ${limit}` : 'runs'
-  process.stdout.write(`${await getAutonomyCommandText(args)}\n`)
+export async function autonomyRunsHandler(
+  limit?: string | number,
+): Promise<void> {
+  process.stdout.write(`${await getAutonomyRunsText(limit)}\n`)
 }
 
-export async function autonomyFlowsHandler(limit?: string): Promise<void> {
-  const args = limit ? `flows ${limit}` : 'flows'
-  process.stdout.write(`${await getAutonomyCommandText(args)}\n`)
+export async function autonomyFlowsHandler(
+  limit?: string | number,
+): Promise<void> {
+  process.stdout.write(`${await getAutonomyFlowsText(limit)}\n`)
 }
 
 export async function autonomyFlowHandler(flowId: string): Promise<void> {
-  process.stdout.write(`${await getAutonomyCommandText(`flow ${flowId}`)}\n`)
+  process.stdout.write(`${await getAutonomyFlowText(flowId)}\n`)
 }
 
 export async function autonomyFlowCancelHandler(flowId: string): Promise<void> {
-  process.stdout.write(
-    `${await getAutonomyCommandText(`flow cancel ${flowId}`)}\n`,
-  )
+  process.stdout.write(`${await cancelAutonomyFlowText(flowId)}\n`)
 }
 
 export async function autonomyFlowResumeHandler(flowId: string): Promise<void> {
-  process.stdout.write(
-    `${await getAutonomyCommandText(`flow resume ${flowId}`)}\n`,
-  )
+  process.stdout.write(`${await resumeAutonomyFlowText(flowId)}\n`)
 }
 
 export async function autonomyUsageHandler(): Promise<void> {

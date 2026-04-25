@@ -1,5 +1,4 @@
 import { z } from 'zod/v4'
-import { logEvent } from 'src/services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/metadata.js'
 import type { Tool } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
@@ -9,19 +8,14 @@ import { jsonStringify } from 'src/utils/slowOperations.js'
 import { TEAM_LEAD_NAME } from 'src/utils/swarm/constants.js'
 import {
   cleanupTeamDirectories,
+  clearLeaderTeamName,
+  clearTeammateColors,
+  logEvent,
   readTeamFile,
+  requestTeammateShutdown,
+  sleep,
   unregisterTeamForSessionCleanup,
-} from 'src/utils/swarm/teamHelpers.js'
-import { clearTeammateColors } from 'src/utils/swarm/teammateLayoutManager.js'
-import { clearLeaderTeamName } from 'src/utils/tasks.js'
-import {
-  ensureBackendsRegistered,
-  getBackendByType,
-  getInProcessBackend,
-} from 'src/utils/swarm/backends/registry.js'
-import { createPaneBackendExecutor } from 'src/utils/swarm/backends/PaneBackendExecutor.js'
-import { isPaneBackend } from 'src/utils/swarm/backends/types.js'
-import { sleep } from 'src/utils/sleep.js'
+} from './teamDeleteDeps.js'
 import { TEAM_DELETE_TOOL_NAME } from './constants.js'
 import { getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
@@ -108,25 +102,12 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
         if (activeMembers.length > 0) {
           const requested: string[] = []
           for (const member of activeMembers) {
-            let sent = false
-            if (member.backendType === 'in-process') {
-              const executor = getInProcessBackend()
-              executor.setContext?.(context)
-              sent = await executor.terminate(
-                member.agentId,
-                'Team cleanup requested by team lead',
-              )
-            } else if (member.backendType && isPaneBackend(member.backendType)) {
-              await ensureBackendsRegistered()
-              const executor = createPaneBackendExecutor(
-                getBackendByType(member.backendType),
-              )
-              executor.setContext?.(context)
-              sent = await executor.terminate(
-                member.agentId,
-                'Team cleanup requested by team lead',
-              )
-            }
+            const sent = await requestTeammateShutdown(
+              teamName,
+              member,
+              context,
+              'Team cleanup requested by team lead',
+            )
             if (sent) {
               requested.push(member.name)
             }

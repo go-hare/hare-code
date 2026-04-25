@@ -83,10 +83,8 @@ export async function runAssistantChatLaunch(
   const {
     checkAndRefreshOAuthTokenIfNeeded,
     getClaudeAIOAuthTokens,
-  } = await import('../../../utils/auth.js')
-  const { prepareApiRequest } = await import(
-    '../../../utils/teleport/api.js'
-  )
+  } = await import('./launchAuthDeps.js')
+  const { prepareApiRequest } = await import('./teleportApiDeps.js')
 
   await checkAndRefreshOAuthTokenIfNeeded()
 

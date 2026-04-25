@@ -41,6 +41,7 @@ import {
   type ContentReplacementState,
   cloneContentReplacementState,
 } from './toolResultStorage.js'
+import type { ActiveTaskExecutionContext } from './tasks.js'
 import { createAgentId } from './uuid.js'
 
 /**
@@ -272,6 +273,8 @@ export type SubagentContextOverrides = {
   abortController?: AbortController
   /** Override the getAppState function */
   getAppState?: ToolUseContext['getAppState']
+  /** Override the active task execution context */
+  activeTaskExecutionContext?: ActiveTaskExecutionContext
 
   /**
    * Explicit opt-in to share parent's setAppState callback.
@@ -383,7 +386,9 @@ export function createSubagentContext(
     readFileState: cloneFileStateCache(
       overrides?.readFileState ?? parentContext.readFileState,
     ),
-    activeTaskExecutionContext: parentContext.activeTaskExecutionContext,
+    activeTaskExecutionContext:
+      overrides?.activeTaskExecutionContext ??
+      parentContext.activeTaskExecutionContext,
     nestedMemoryAttachmentTriggers: new Set<string>(),
     loadedNestedMemoryPaths: new Set<string>(),
     dynamicSkillDirTriggers: new Set<string>(),

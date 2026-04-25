@@ -37,9 +37,8 @@ mock.module("src/services/api/dumpPrompts.js", () => ({
   clearDumpState: noop,
 }));
 
-mock.module("src/Tool.js", () => ({
+mock.module("../toolMatcher.js", () => ({
   toolMatchesName: () => false,
-  findToolByName: noop,
 }));
 
 // messages.ts is complex - provide stubs for all named exports
@@ -306,5 +305,21 @@ describe("resolveAgentTools", () => {
 
     expect(mainThread.resolvedTools.map((tool: any) => tool.name)).toEqual(["Safe"]);
     expect(mainThread.invalidTools).toContain("CustomOnlyDanger");
+  });
+
+  test("keeps Agent for subagents when it survives filtering", () => {
+    const definition = {
+      tools: ["Agent(worker)"],
+      disallowedTools: [],
+      source: "built-in",
+      permissionMode: "default",
+    } as any;
+    const availableTools = [{ name: "Agent" }] as any;
+
+    const subAgent = resolveAgentTools(definition, availableTools, false, false);
+
+    expect(subAgent.resolvedTools.map((tool: any) => tool.name)).toEqual(["Agent"]);
+    expect(subAgent.allowedAgentTypes).toEqual(["worker"]);
+    expect(subAgent.invalidTools).toEqual([]);
   });
 });

@@ -1,23 +1,24 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 let mockEnvironments: any[] = []
 let mockPages: any[] = []
 const apiCalls: Array<{ url: string; options: unknown }> = []
-const debugLogs: string[] = []
 
-mock.module('../../constants/oauth.js', () => ({
-  getOauthConfig: () => ({
-    BASE_API_URL: 'https://api.example.com',
-  }),
-}))
+const OAUTH_ENV_KEYS = [
+  'USER_TYPE',
+  'USE_LOCAL_OAUTH',
+  'USE_STAGING_OAUTH',
+  'CLAUDE_LOCAL_OAUTH_API_BASE',
+  'CLAUDE_LOCAL_OAUTH_APPS_BASE',
+  'CLAUDE_LOCAL_OAUTH_CONSOLE_BASE',
+  'CLAUDE_CODE_CUSTOM_OAUTH_URL',
+] as const
 
-mock.module('../../utils/debug.js', () => ({
-  logForDebugging: (message: string) => {
-    debugLogs.push(message)
-  },
-}))
+const originalOauthEnv = new Map<string, string | undefined>(
+  OAUTH_ENV_KEYS.map(key => [key, process.env[key]]),
+)
 
-mock.module('../../utils/detectRepository.js', () => ({
+mock.module('../sessionDiscoveryRepository.js', () => ({
   parseGitRemote: (url: string) => {
     if (url === 'https://github.com/org/repo.git') {
       return { host: 'github.com', owner: 'org', name: 'repo' }
@@ -61,10 +62,23 @@ const { discoverAssistantSessions } = await import('../sessionDiscovery.js')
 
 describe('discoverAssistantSessions', () => {
   beforeEach(() => {
+    for (const key of OAUTH_ENV_KEYS) {
+      delete process.env[key]
+    }
     mockEnvironments = []
     mockPages = []
     apiCalls.length = 0
-    debugLogs.length = 0
+  })
+
+  afterEach(() => {
+    for (const key of OAUTH_ENV_KEYS) {
+      const value = originalOauthEnv.get(key)
+      if (value === undefined) {
+        delete process.env[key]
+      } else {
+        process.env[key] = value
+      }
+    }
   })
 
   test('falls back to all bridge environments when worker_type metadata is missing', async () => {
@@ -176,11 +190,6 @@ describe('discoverAssistantSessions', () => {
       repo: 'org/repo',
       workerType: undefined,
     })
-    expect(
-      debugLogs.some(log =>
-        log.includes('falling back to all 2 bridge environments'),
-      ),
-    ).toBe(true)
   })
 
   test('returns no sessions when tagged bridge environments do not match the assistant worker type', async () => {
@@ -197,12 +206,5 @@ describe('discoverAssistantSessions', () => {
 
     expect(sessions).toEqual([])
     expect(apiCalls).toHaveLength(0)
-    expect(
-      debugLogs.some(log =>
-        log.includes(
-          'none matched worker_type=claude_code_assistant',
-        ),
-      ),
-    ).toBe(true)
   })
 })

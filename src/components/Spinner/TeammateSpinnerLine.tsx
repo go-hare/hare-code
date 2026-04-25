@@ -163,6 +163,7 @@ export function TeammateSpinnerLine({
   const fullNameWidth = stringWidth(fullAgentName)
 
   // Get stats from progress
+  const hasProgress = teammate.progress !== undefined
   const toolUseCount = teammate.progress?.toolUseCount ?? 0
   const tokenCount = teammate.progress?.tokenCount ?? 0
   const statsText = ` · ${toolUseCount} tool ${toolUseCount === 1 ? 'use' : 'uses'} · ${formatNumber(tokenCount)} tokens`
@@ -185,7 +186,7 @@ export function TeammateSpinnerLine({
   const availableForActivity = columns - basePrefix - nameWidth
 
   // Progressive hiding: view hint → select hint → stats
-  // Stats always visible (dimmed when not selected); hints only when highlighted/selected
+  // Stats are shown only after we have a real progress snapshot.
   const showViewHint =
     isSelected &&
     !isForegrounded &&
@@ -198,7 +199,7 @@ export function TeammateSpinnerLine({
         statsWidth +
         minActivityWidth +
         5
-  const showStats = availableForActivity > statsWidth + minActivityWidth + 5
+  const showStats = hasProgress && availableForActivity > statsWidth + minActivityWidth + 5
 
   // Activity text gets remaining space
   const extrasCost =

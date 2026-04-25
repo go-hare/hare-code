@@ -1,4 +1,4 @@
-import { assembleServerHost } from '../../../kernel/index.js'
+import { assembleServerHost } from './serverKernelDeps.js'
 import type {
   KernelServerHostAssembly,
   KernelServerHostConfigInput,

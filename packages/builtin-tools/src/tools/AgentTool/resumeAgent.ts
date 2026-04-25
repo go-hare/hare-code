@@ -77,6 +77,9 @@ export async function resumeAgentBackground({
     resumedMessages,
     transcript.contentReplacements,
   )
+  const resumedTaskExecutionContext = meta?.activeTaskExecutionContext
+  const resumedOwnedFiles =
+    meta?.ownedFiles ?? resumedTaskExecutionContext?.ownedFiles
   // Best-effort: if the original worktree was removed externally, fall back
   // to parent cwd rather than crashing on chdir later.
   const resumedWorktreePath = meta?.worktreePath
@@ -191,7 +194,8 @@ export async function resumeAgentBackground({
     // Re-persist so metadata survives runAgent's writeAgentMetadata overwrite
     worktreePath: resumedWorktreePath,
     description: meta?.description,
-    ownedFiles: meta?.ownedFiles,
+    ownedFiles: resumedOwnedFiles,
+    activeTaskExecutionContext: resumedTaskExecutionContext,
     contentReplacementState: resumedReplacementState,
   }
 
@@ -223,7 +227,7 @@ export async function resumeAgentBackground({
     invokingRequestId,
     invocationKind: 'resume' as const,
     invocationEmitted: false,
-    ownedFiles: meta?.ownedFiles,
+    ownedFiles: resumedOwnedFiles,
   }
 
   const wrapWithCwd = <T>(fn: () => T): T =>

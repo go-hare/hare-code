@@ -85,7 +85,7 @@ const mockStatsStore = {
   },
 } as never
 
-mock.module('../../../../utils/git.js', () => ({
+mock.module('../remoteGitDeps.js', () => ({
   getBranch: mockGetBranch,
 }))
 
@@ -100,12 +100,12 @@ mock.module('../../../../utils/teleport.js', () => ({
   validateSessionRepository: mock(async () => ({ status: 'match' })),
 }))
 
-mock.module('../../../../utils/teleport/api.js', () => ({
+mock.module('../teleportApiDeps.js', () => ({
   prepareApiRequest: mockPrepareApiRequest,
   fetchSession: mock(async (_sessionId: string) => ({})),
 }))
 
-mock.module('../../../../utils/auth.js', () => ({
+mock.module('../launchAuthDeps.js', () => ({
   getClaudeAIOAuthTokens: mockGetClaudeAIOAuthTokens,
 }))
 
@@ -232,7 +232,7 @@ describe('runRemoteLaunch', () => {
     await runRemoteLaunch(options)
 
     expect(options.onConnectionError).toHaveBeenCalledWith(
-      'Error: --remote requires a description.\nUsage: claude --remote "your task description"',
+      'Error: --remote requires a description.\nUsage: hare --remote "your task description"',
     )
     expect(mockTeleportToRemoteWithErrorHandling).toHaveBeenCalledTimes(0)
   })

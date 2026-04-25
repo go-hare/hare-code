@@ -73,7 +73,7 @@ mock.module('../../../../interactiveHelpers.js', () => ({
   exitWithError: mockExitWithError,
 }))
 
-mock.module('../../../../services/analytics/index.js', () => ({
+mock.module('../launchAnalyticsDeps.js', () => ({
   logEvent: mockLogEvent,
 }))
 
@@ -81,7 +81,7 @@ mock.module('../../../../replLauncher.js', () => ({
   launchRepl: mockLaunchRepl,
 }))
 
-mock.module('../../../../utils/array.js', () => ({
+mock.module('../resumeArrayDeps.js', () => ({
   count: <T>(items: T[], predicate: (item: T) => boolean) =>
     items.filter(predicate).length,
 }))
@@ -90,7 +90,7 @@ mock.module('../../../../utils/conversationRecovery.js', () => ({
   loadConversationForResume: mockLoadConversationForResume,
 }))
 
-mock.module('../../../../utils/errors.js', () => ({
+mock.module('../resumeErrorDeps.js', () => ({
   errorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
   isENOENT: (error: unknown) =>
@@ -116,7 +116,7 @@ mock.module('../../../../utils/log.js', () => ({
   logError: mockLogError,
 }))
 
-mock.module('../../../../utils/sessionStorage.js', () => ({
+mock.module('../resumeSessionStorageDeps.js', () => ({
   searchSessionsByCustomTitle: mockSearchSessionsByCustomTitle,
   getSessionIdFromLog: mockGetSessionIdFromLog,
   loadTranscriptFromFile: mockLoadTranscriptFromFile,
@@ -133,7 +133,7 @@ mock.module('../../../../utils/teleport.js', () => ({
   validateSessionRepository: mockValidateSessionRepository,
 }))
 
-mock.module('../../../../utils/teleport/api.js', () => ({
+mock.module('../teleportApiDeps.js', () => ({
   fetchSession: mockFetchSession,
 }))
 

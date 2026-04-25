@@ -538,6 +538,181 @@ describe('forwardSessionUpdates', () => {
     expect(result.stopReason).toBe('end_turn')
   })
 
+  test('does not duplicate assistant text already emitted by stream_event', async () => {
+    const conn = makeConn()
+    const msgs: SDKMessage[] = [
+      {
+        type: 'stream_event',
+        event: {
+          type: 'message_start',
+          message: { id: 'msg-streamed' },
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'text', text: 'Hello!' },
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: 'Hello!' },
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg-streamed',
+          content: [{ type: 'text', text: 'Hello!' }],
+          role: 'assistant',
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+    ]
+
+    await forwardSessionUpdates('s1', makeStream(msgs), conn, new AbortController().signal, {})
+
+    const chunkCalls = (conn.sessionUpdate as ReturnType<typeof mock>).mock.calls.filter(
+      (call: unknown[]) =>
+        ((call[0] as { update?: { sessionUpdate?: string } }).update?.sessionUpdate) ===
+        'agent_message_chunk',
+    )
+
+    expect(chunkCalls).toHaveLength(1)
+    expect(chunkCalls[0]?.[0]).toMatchObject({
+      sessionId: 's1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello!' } },
+    })
+  })
+
+  test('still forwards tool_use completion details after stream_event start', async () => {
+    const conn = makeConn()
+    const msgs: SDKMessage[] = [
+      {
+        type: 'stream_event',
+        event: {
+          type: 'message_start',
+          message: { id: 'msg-tool' },
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_start',
+          index: 0,
+          content_block: {
+            type: 'tool_use',
+            id: 'tu_1',
+            name: 'Bash',
+            input: {},
+          },
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg-tool',
+          content: [{
+            type: 'tool_use',
+            id: 'tu_1',
+            name: 'Bash',
+            input: { command: 'ls' },
+          }],
+          role: 'assistant',
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+    ]
+
+    await forwardSessionUpdates('s1', makeStream(msgs), conn, new AbortController().signal, {})
+
+    const toolCalls = (conn.sessionUpdate as ReturnType<typeof mock>).mock.calls.filter(
+      (call: unknown[]) => {
+        const update = (call[0] as { update?: { sessionUpdate?: string } }).update
+        return update?.sessionUpdate === 'tool_call' || update?.sessionUpdate === 'tool_call_update'
+      },
+    )
+
+    expect(toolCalls).toHaveLength(2)
+    expect(toolCalls[0]?.[0]).toMatchObject({
+      update: { sessionUpdate: 'tool_call', toolCallId: 'tu_1' },
+    })
+    expect(toolCalls[1]?.[0]).toMatchObject({
+      update: {
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tu_1',
+        rawInput: { command: 'ls' },
+      },
+    })
+  })
+
+  test('still forwards a later assistant message with a different message id', async () => {
+    const conn = makeConn()
+    const msgs: SDKMessage[] = [
+      {
+        type: 'stream_event',
+        event: {
+          type: 'message_start',
+          message: { id: 'msg-streamed' },
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+      {
+        type: 'stream_event',
+        event: {
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'text_delta', text: 'Hello!' },
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg-streamed',
+          content: [{ type: 'text', text: 'Hello!' }],
+          role: 'assistant',
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg-final',
+          content: [{ type: 'text', text: 'World!' }],
+          role: 'assistant',
+        },
+        parent_tool_use_id: null,
+      } as unknown as SDKMessage,
+    ]
+
+    await forwardSessionUpdates('s1', makeStream(msgs), conn, new AbortController().signal, {})
+
+    const chunkCalls = (conn.sessionUpdate as ReturnType<typeof mock>).mock.calls.filter(
+      (call: unknown[]) =>
+        ((call[0] as { update?: { sessionUpdate?: string } }).update?.sessionUpdate) ===
+        'agent_message_chunk',
+    )
+
+    expect(chunkCalls).toHaveLength(2)
+    expect(chunkCalls[0]?.[0]).toMatchObject({
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello!' } },
+    })
+    expect(chunkCalls[1]?.[0]).toMatchObject({
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'World!' } },
+    })
+  })
+
   test('forwards thinking block as agent_thought_chunk', async () => {
     const conn = makeConn()
     const msgs: SDKMessage[] = [

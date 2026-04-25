@@ -23,7 +23,7 @@ const mockBuildDeepLinkBanner = mock((_options: unknown) => {
   return 'deep-link-banner'
 })
 
-mock.module('../../../../services/analytics/index.js', () => ({
+mock.module('../launchAnalyticsDeps.js', () => ({
   logEvent: mockLogEvent,
 }))
 

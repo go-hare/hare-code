@@ -16,6 +16,8 @@ import {
   processRateLimitHeaders,
   shouldProcessRateLimits,
 } from './rateLimitMocking.js'
+import { anthropicAdapter } from './providerUsage/adapters/anthropic.js'
+import { updateProviderBuckets } from './providerUsage/store.js'
 
 // Re-export message functions from centralized location
 export {
@@ -474,6 +476,7 @@ export function extractQuotaStatusFromHeaders(
   // Process headers (applies mocks from /mock-limits command if active)
   const headersToUse = processRateLimitHeaders(headers)
   rawUtilization = extractRawUtilization(headersToUse)
+  updateProviderBuckets('anthropic', anthropicAdapter.parseHeaders(headersToUse))
   const newLimits = computeNewLimitsFromHeaders(headersToUse)
 
   // Cache extra usage status (persists across sessions)

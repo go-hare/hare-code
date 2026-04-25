@@ -5,12 +5,13 @@ import { useDebounceCallback } from 'usehooks-ts'
 import type { InputEvent, Key } from '@anthropic/ink'
 import {
   getImageFromClipboard,
+  getTextFromClipboard,
   isImageFilePath,
   PASTE_THRESHOLD,
   tryReadImageFromPath,
 } from '../utils/imagePaste.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
-import { getPlatform } from '../utils/platform.js'
+import { getPlatform, type Platform } from '../utils/platform.js'
 
 const CLIPBOARD_CHECK_DEBOUNCE_MS = 50
 const PASTE_COMPLETION_TIMEOUT_MS = 100
@@ -25,6 +26,38 @@ type PasteHandlerProps = {
     dimensions?: ImageDimensions,
     sourcePath?: string,
   ) => void
+}
+
+const EMPTY_KEY: Key = {
+  upArrow: false,
+  downArrow: false,
+  leftArrow: false,
+  rightArrow: false,
+  pageDown: false,
+  pageUp: false,
+  wheelUp: false,
+  wheelDown: false,
+  home: false,
+  end: false,
+  return: false,
+  escape: false,
+  ctrl: false,
+  shift: false,
+  fn: false,
+  tab: false,
+  backspace: false,
+  delete: false,
+  meta: false,
+  super: false,
+}
+
+export function shouldUseWindowsClipboardPasteFallback(
+  input: string,
+  key: Key,
+  isFromPaste: boolean,
+  platform: Platform,
+): boolean {
+  return platform === 'windows' && key.ctrl && input === 'v' && !isFromPaste
 }
 
 export function usePasteHandler({
@@ -52,7 +85,8 @@ export function usePasteHandler({
   // that key is Enter, it submits the old input and the paste is lost.
   const pastePendingRef = React.useRef(false)
 
-  const isMacOS = React.useMemo(() => getPlatform() === 'macos', [])
+  const platform = React.useMemo(() => getPlatform(), [])
+  const isMacOS = platform === 'macos'
 
   React.useEffect(() => {
     return () => {
@@ -246,6 +280,34 @@ export function usePasteHandler({
       checkClipboardForImage()
       // Reset isPasting since there's no text content to process
       setIsPasting(false)
+      return
+    }
+
+    if (
+      shouldUseWindowsClipboardPasteFallback(input, key, isFromPaste, platform)
+    ) {
+      setIsPasting(true)
+      void getTextFromClipboard()
+        .then(clipboardText => {
+          if (!isMountedRef.current || clipboardText === null) {
+            return
+          }
+          if (onPaste) {
+            onPaste(clipboardText)
+            return
+          }
+          onInput(clipboardText, EMPTY_KEY)
+        })
+        .catch(error => {
+          if (isMountedRef.current) {
+            logError(error as Error)
+          }
+        })
+        .finally(() => {
+          if (isMountedRef.current) {
+            setIsPasting(false)
+          }
+        })
       return
     }
 

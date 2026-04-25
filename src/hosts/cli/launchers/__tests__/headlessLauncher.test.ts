@@ -28,7 +28,7 @@ const mockRunKernelHeadless = mock(
   },
 )
 
-mock.module('../../../../kernel/index.js', () => ({
+mock.module('../headlessKernelDeps.js', () => ({
   connectDefaultKernelHeadlessMcp: mockConnectDefaultKernelHeadlessMcp,
   createDefaultKernelHeadlessEnvironment:
     mockCreateDefaultKernelHeadlessEnvironment,

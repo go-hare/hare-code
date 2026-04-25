@@ -44,7 +44,7 @@ const mockStatsStore = {
   },
 } as never
 
-mock.module('../../../../kernel/index.js', () => ({
+mock.module('../directConnectKernelDeps.js', () => ({
   connectDirectHostSession: mockConnectDirectHostSession,
   getDirectConnectErrorMessage: mockGetDirectConnectErrorMessage,
 }))

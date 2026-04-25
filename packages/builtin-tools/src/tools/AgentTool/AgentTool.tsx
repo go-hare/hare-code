@@ -964,6 +964,7 @@ export const AgentTool = buildTool({
       worktreePath: worktreeInfo?.worktreePath,
       description,
       ownedFiles: workerOwnedFiles,
+      activeTaskExecutionContext: taskExecutionContext,
     }
 
     // Helper to wrap execution with a cwd override: explicit cwd arg (KAIROS)
@@ -998,6 +999,9 @@ export const AgentTool = buildTool({
           void writeAgentMetadata(asAgentId(earlyAgentId), {
             agentType: selectedAgent.agentType,
             description,
+            ...(taskExecutionContext && {
+              activeTaskExecutionContext: taskExecutionContext,
+            }),
             ...(workerOwnedFiles && workerOwnedFiles.length > 0 && {
               ownedFiles: workerOwnedFiles,
             }),
@@ -1019,6 +1023,7 @@ export const AgentTool = buildTool({
         prompt,
         selectedAgent,
         setAppState: rootSetAppState,
+        notificationTargetAgentId: toolUseContext.agentId,
         // Don't link to parent's abort controller -- background agents should
         // survive when the user presses ESC to cancel the main thread.
         // They are killed explicitly via chat:killAgents.
@@ -1184,6 +1189,7 @@ export const AgentTool = buildTool({
               prompt,
               selectedAgent,
               setAppState: rootSetAppState,
+              notificationTargetAgentId: toolUseContext.agentId,
               toolUseId: toolUseContext.toolUseId,
               autoBackgroundMs: getAutoBackgroundMs() || undefined,
             })

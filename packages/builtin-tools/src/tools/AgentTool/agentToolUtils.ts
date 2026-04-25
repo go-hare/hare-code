@@ -21,7 +21,7 @@ import type {
   Tools,
   ToolUseContext,
 } from 'src/Tool.js'
-import { toolMatchesName } from 'src/Tool.js'
+import { toolMatchesName } from './toolMatcher.js'
 import {
   completeAgentTask as completeAsyncAgent,
   createActivityDescriptionResolver,
@@ -189,14 +189,10 @@ export function resolveAgentTools(
         // Parse comma-separated agent types: "worker, researcher" → ["worker", "researcher"]
         allowedAgentTypes = ruleContent.split(',').map(s => s.trim())
       }
-      // For sub-agents, Agent is excluded by filterToolsForAgent — mark the spec
-      // valid for allowedAgentTypes tracking but skip tool resolution.
-      if (!isMainThread) {
-        validTools.push(toolSpec)
-        continue
-      }
-      // For main thread, filtering was skipped so Agent is in availableToolMap —
-      // fall through to normal resolution below.
+      // Agent availability is decided by filterToolsForAgent. If the current
+      // environment allows nested Agent use (for example ant sync subagents),
+      // availableToolMap will still contain Agent and we should resolve it
+      // normally instead of dropping it here.
     }
 
     const tool = availableToolMap.get(toolName)

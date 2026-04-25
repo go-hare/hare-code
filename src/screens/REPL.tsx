@@ -95,7 +95,7 @@ import { registerSandboxPermissionCallback } from '../hooks/useSwarmPermissionPo
 import { getTeamName, getAgentName } from '../utils/teammate.js';
 import { WorkerPendingPermission } from '../components/permissions/WorkerPendingPermission.js';
 import {
-  injectUserMessageToTeammate,
+  deliverUserMessageToTeammate,
   getAllInProcessTeammateTasks,
 } from '../tasks/InProcessTeammateTask/InProcessTeammateTask.js';
 import {
@@ -3873,7 +3873,7 @@ export function REPL({
           });
         }
       } else {
-        injectUserMessageToTeammate(task.id, input, undefined, setAppState);
+        await deliverUserMessageToTeammate(task, input, undefined, setAppState);
       }
       setInputValue('');
       helpers.setCursorOffset(0);

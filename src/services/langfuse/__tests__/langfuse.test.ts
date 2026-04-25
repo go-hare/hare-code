@@ -1,26 +1,8 @@
 import { mock, describe, test, expect, beforeEach } from 'bun:test'
 
-// Mock @langfuse/otel before any imports
 const mockForceFlush = mock(() => Promise.resolve())
 const mockShutdown = mock(() => Promise.resolve())
 
-mock.module('@langfuse/otel', () => ({
-  LangfuseSpanProcessor: class MockLangfuseSpanProcessor {
-    forceFlush = mockForceFlush
-    shutdown = mockShutdown
-    onStart = mock(() => {})
-    onEnd = mock(() => {})
-  },
-}))
-
-// Mock @opentelemetry/sdk-trace-base
-mock.module('@opentelemetry/sdk-trace-base', () => ({
-  BasicTracerProvider: class MockBasicTracerProvider {
-    constructor(_opts?: unknown) {}
-  },
-}))
-
-// Mock @langfuse/tracing
 const mockChildUpdate = mock(() => {})
 const mockChildEnd = mock(() => {})
 const mockRootUpdate = mock(() => {})
@@ -63,20 +45,23 @@ const mockStartObservation = mock(() => ({
 }))
 const mockSetLangfuseTracerProvider = mock(() => {})
 
-mock.module('@langfuse/tracing', () => ({
+mock.module('../sdkDeps.js', () => ({
+  LangfuseSpanProcessor: class MockLangfuseSpanProcessor {
+    forceFlush = mockForceFlush
+    shutdown = mockShutdown
+    onStart = mock(() => {})
+    onEnd = mock(() => {})
+  },
+  BasicTracerProvider: class MockBasicTracerProvider {
+    constructor(_opts?: unknown) {}
+  },
   startObservation: mockStartObservation,
   LangfuseOtelSpanAttributes: mockLangfuseOtelSpanAttributes,
-  propagateAttributes: mock((_params: unknown, fn?: () => void) => fn?.()),
   setLangfuseTracerProvider: mockSetLangfuseTracerProvider,
 }))
 
-// Mock debug logger
-mock.module('src/utils/debug.ts', () => ({
+mock.module('../runtimeDeps.js', () => ({
   logForDebugging: mock(() => {}),
-}))
-
-// Mock user data — resolveLangfuseUserId uses getCoreUserData().email and .deviceId
-mock.module('src/utils/user.js', () => ({
   getCoreUserData: mock(() => ({
     email: 'test-device-id',
     deviceId: 'test-device-id',

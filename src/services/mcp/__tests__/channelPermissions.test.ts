@@ -1,8 +1,4 @@
-import { mock, describe, expect, test } from "bun:test";
-
-mock.module("src/services/analytics/growthbook.js", () => ({
-  getFeatureValue_CACHED_MAY_BE_STALE: () => false,
-}));
+import { describe, expect, test } from "bun:test";
 
 const {
   filterPermissionRelayClients,

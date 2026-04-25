@@ -8,7 +8,7 @@ import {
   type KernelHeadlessRunOptions,
   type PrepareKernelHeadlessStartupDeps,
   type PrepareKernelHeadlessStartupOptions,
-} from '../../../kernel/index.js'
+} from './headlessKernelDeps.js'
 import type { ScopedMcpServerConfig } from '../../../services/mcp/types.js'
 
 export type HeadlessLaunchOptions = {

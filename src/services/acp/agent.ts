@@ -41,33 +41,36 @@ import type {
 } from '@agentclientprotocol/sdk'
 import { randomUUID, type UUID } from 'node:crypto'
 import type { Message } from '../../types/message.js'
-import { deserializeMessages } from '../../utils/conversationRecovery.js'
-import { getLastSessionLog, sessionIdExists } from '../../utils/sessionStorage.js'
-import { QueryEngine } from '../../QueryEngine.js'
-import type { QueryEngineConfig } from '../../QueryEngine.js'
-import type { Tools } from '../../Tool.js'
-import { getTools } from '../../tools.js'
-import { getEmptyToolPermissionContext } from '../../Tool.js'
 import type { PermissionMode } from '../../types/permissions.js'
 import type { Command } from '../../types/command.js'
-import { getCommands } from '../../commands.js'
-import { setOriginalCwd } from '../../bootstrap/state.js'
-import { enableConfigs } from '../../utils/config.js'
-import { FileStateCache } from '../../utils/fileStateCache.js'
-import { getDefaultAppState } from '../../state/AppStateStore.js'
-import type { AppState } from '../../state/AppStateStore.js'
+import { setOriginalCwd } from './bootstrapState.js'
+import { getCommands } from './commandSource.js'
+import { enableConfigs } from './configBootstrap.js'
 import { createAcpCanUseTool } from './permissions.js'
-import { forwardSessionUpdates, replayHistoryMessages, type ToolUseCache } from './bridge.js'
+import { getEmptyToolPermissionContext } from './toolContext.js'
+import {
+  forwardSessionUpdates,
+  replayHistoryMessages,
+  type ToolUseCache,
+} from './agentBridgeDeps.js'
 import {
   resolvePermissionMode,
   computeSessionFingerprint,
   sanitizeTitle,
-} from './utils.js'
+} from './sessionUtils.js'
 import {
   listSessionsImpl,
-} from '../../utils/listSessionsImpl.js'
-import { getMainLoopModel } from '../../utils/model/model.js'
-import { getModelOptions } from '../../utils/model/modelOptions.js'
+  deserializeMessages,
+  getDefaultAppState,
+  FileStateCache,
+  getLastSessionLog,
+  getMainLoopModel,
+  getModelOptions,
+  getTools,
+  QueryEngine,
+  sessionIdExists,
+} from './runtimeDeps.js'
+import type { AppState, QueryEngineConfig, Tools } from './runtimeDeps.js'
 
 // ── Session state ─────────────────────────────────────────────────
 

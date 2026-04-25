@@ -19,7 +19,7 @@ import { z } from 'zod/v4'
 import { BUILTIN_MARKETPLACE_NAME } from '../../plugins/builtinPlugins.js'
 import { lazySchema } from '../../utils/lazySchema.js'
 import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import * as growthBook from '../analytics/growthbook.js'
 
 export type ChannelAllowlistEntry = {
   marketplace: string
@@ -36,7 +36,7 @@ const ChannelAllowlistSchema = lazySchema(() =>
 )
 
 export function getChannelAllowlist(): ChannelAllowlistEntry[] {
-  const raw = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
+  const raw = growthBook.getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
     'tengu_harbor_ledger',
     [],
   )

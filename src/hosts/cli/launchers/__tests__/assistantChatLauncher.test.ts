@@ -112,12 +112,12 @@ mock.module('../../../../dialogLaunchers.js', () => ({
   launchTeleportResumeWrapper: mock(async () => null),
 }))
 
-mock.module('../../../../utils/auth.js', () => ({
+mock.module('../launchAuthDeps.js', () => ({
   checkAndRefreshOAuthTokenIfNeeded: mockCheckAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens: mockGetClaudeAIOAuthTokens,
 }))
 
-mock.module('../../../../utils/teleport/api.js', () => ({
+mock.module('../teleportApiDeps.js', () => ({
   prepareApiRequest: mockPrepareApiRequest,
   fetchSession: mock(async (_sessionId: string) => ({})),
   sendEventToRemoteSession: mock(async () => true),

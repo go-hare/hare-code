@@ -16,8 +16,6 @@ import type { AgentColorName } from '@go-hare/builtin-tools/tools/AgentTool/agen
 import {
   type AgentDefinition,
   type AgentDefinitionsResult,
-  getActiveAgentsFromList,
-  getAgentDefinitionsWithOverrides,
 } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { TODO_WRITE_TOOL_NAME } from '@go-hare/builtin-tools/tools/TodoWriteTool/constants.js'
 import { asSessionId } from '../types/ids.js'
@@ -38,6 +36,7 @@ import {
 import { updateSessionName } from './concurrentSessions.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
+import { refreshAgentDefinitionsFromCurrentState } from './agentDefinitionsRefresh.js'
 import type { FileHistorySnapshot } from './fileHistory.js'
 import { fileHistoryRestoreStateFromLog } from './fileHistory.js'
 import { createSystemMessage } from './messages.js'
@@ -252,23 +251,17 @@ export function restoreAgentFromSession(
 export async function refreshAgentDefinitionsForModeSwitch(
   modeWasSwitched: boolean,
   currentCwd: string,
-  cliAgents: AgentDefinition[],
+  _cliAgents: AgentDefinition[],
   currentAgentDefinitions: AgentDefinitionsResult,
 ): Promise<AgentDefinitionsResult> {
   if (!feature('COORDINATOR_MODE') || !modeWasSwitched) {
     return currentAgentDefinitions
   }
 
-  // Re-derive agent definitions after mode switch so built-in agents
-  // reflect the new coordinator/normal mode
-  getAgentDefinitionsWithOverrides.cache.clear?.()
-  const freshAgentDefs = await getAgentDefinitionsWithOverrides(currentCwd)
-  const freshAllAgents = [...freshAgentDefs.allAgents, ...cliAgents]
-  return {
-    ...freshAgentDefs,
-    allAgents: freshAllAgents,
-    activeAgents: getActiveAgentsFromList(freshAllAgents),
-  }
+  return refreshAgentDefinitionsFromCurrentState(
+    currentCwd,
+    currentAgentDefinitions,
+  )
 }
 
 /**

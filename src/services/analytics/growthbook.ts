@@ -466,6 +466,7 @@ const LOCAL_GATE_DEFAULTS: Record<string, unknown> = {
   tengu_birch_trellis: true, // Tree-sitter bash security analysis
   tengu_collage_kaleidoscope: true, // macOS clipboard image reading
   tengu_compact_cache_prefix: true, // Reuse prompt cache during compaction
+  tengu_kairos: true, // KAIROS assistant mode activation (current gate key)
   tengu_kairos_assistant: true, // KAIROS assistant mode activation
   tengu_kairos_cron_durable: true, // Persistent cron tasks
   tengu_attribution_header: true, // API request attribution header

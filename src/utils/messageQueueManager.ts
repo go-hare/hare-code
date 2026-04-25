@@ -136,11 +136,17 @@ export function enqueue(command: QueuedCommand): void {
 
 /**
  * Add a task notification to the queue.
- * Convenience wrapper that defaults priority to 'later' so user input
- * is never starved by system messages.
+ * Main-thread notifications default to 'later' so user input is never starved
+ * by system messages. Agent-targeted notifications default to 'next' so
+ * subagents see background task completions on their next turn even when they
+ * waited via non-Sleep tools.
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
-  commandQueue.push({ ...command, priority: command.priority ?? 'later' })
+  const defaultPriority = command.agentId ? 'next' : 'later'
+  commandQueue.push({
+    ...command,
+    priority: command.priority ?? defaultPriority,
+  })
   notifySubscribers()
   logOperation(
     'enqueue',

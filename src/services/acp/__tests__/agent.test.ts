@@ -4,33 +4,15 @@ import { describe, expect, test, mock, beforeEach } from 'bun:test'
 
 const mockSetModel = mock(() => {})
 
-mock.module('../../../QueryEngine.js', () => ({
-  QueryEngine: class MockQueryEngine {
-    submitMessage = mock(async function* () {})
-    interrupt = mock(() => {})
-    resetAbortController = mock(() => {})
-    getAbortSignal = mock(() => new AbortController().signal)
-    setModel = mockSetModel
-  },
-}))
-
-mock.module('../../../tools.js', () => ({
-  getTools: mock(() => []),
-}))
-
-mock.module('../../../Tool.js', () => ({
+mock.module('../toolContext.js', () => ({
   getEmptyToolPermissionContext: mock(() => ({})),
-  toolMatchesName: mock(() => false),
-  findToolByName: mock(() => undefined),
-  filterToolProgressMessages: mock(() => []),
-  buildTool: mock((def: any) => def),
 }))
 
-mock.module('src/utils/config.ts', () => ({
+mock.module('../configBootstrap.js', () => ({
   enableConfigs: mock(() => {}),
 }))
 
-mock.module('../../../bootstrap/state.js', () => ({
+mock.module('../bootstrapState.js', () => ({
   setOriginalCwd: mock(() => {}),
   addSlowOperation: mock(() => {}),
 }))
@@ -52,60 +34,43 @@ const mockGetDefaultAppState = mock(() => ({
   mainLoopModelForSession: null,
 }))
 
-mock.module('../../../state/AppStateStore.js', () => ({
-  getDefaultAppState: mockGetDefaultAppState,
-}))
-
-mock.module('../../../utils/fileStateCache.js', () => ({
-  FileStateCache: class MockFileStateCache {
-    constructor() {}
-  },
-}))
-
 mock.module('../permissions.js', () => ({
   createAcpCanUseTool: mock(() => mock(async () => ({ behavior: 'allow', updatedInput: {} }))),
 }))
 
-mock.module('../bridge.js', () => ({
+mock.module('../agentBridgeDeps.js', () => ({
   forwardSessionUpdates: mock(async () => ({ stopReason: 'end_turn' as const })),
   replayHistoryMessages: mock(async () => {}),
-  toolInfoFromToolUse: mock(() => ({ title: 'Test', kind: 'other', content: [], locations: [] })),
 }))
 
-mock.module('../utils.js', () => ({
+mock.module('../sessionUtils.js', () => ({
   resolvePermissionMode: mock(() => 'default'),
   computeSessionFingerprint: mock(() => '{}'),
   sanitizeTitle: mock((s: string) => s),
 }))
 
-mock.module('../../../utils/listSessionsImpl.js', () => ({
-  listSessionsImpl: mock(async () => []),
-}))
-
 const mockGetMainLoopModel = mock(() => 'claude-sonnet-4-6')
-
-mock.module('../../../utils/model/model.js', () => ({
-  getMainLoopModel: mockGetMainLoopModel,
-}))
-
-mock.module('../../../utils/model/modelOptions.ts', () => ({
-  getModelOptions: mock(() => []),
-}))
-
-const mockApplySafeEnvVars = mock(() => {})
-mock.module('../../../utils/managedEnv.js', () => ({
-  applySafeConfigEnvironmentVariables: mockApplySafeEnvVars,
-}))
-
 const mockDeserializeMessages = mock((msgs: unknown[]) => msgs)
 const mockGetLastSessionLog = mock(async () => null)
 const mockSessionIdExists = mock(() => false)
 
-mock.module('../../../utils/conversationRecovery.js', () => ({
+mock.module('../runtimeDeps.js', () => ({
+  QueryEngine: class MockQueryEngine {
+    submitMessage = mock(async function* () {})
+    interrupt = mock(() => {})
+    resetAbortController = mock(() => {})
+    getAbortSignal = mock(() => new AbortController().signal)
+    setModel = mockSetModel
+  },
+  getTools: mock(() => []),
+  FileStateCache: class MockFileStateCache {
+    constructor() {}
+  },
+  getDefaultAppState: mockGetDefaultAppState,
+  listSessionsImpl: mock(async () => []),
+  getMainLoopModel: mockGetMainLoopModel,
+  getModelOptions: mock(() => []),
   deserializeMessages: mockDeserializeMessages,
-}))
-
-mock.module('../../../utils/sessionStorage.js', () => ({
   getLastSessionLog: mockGetLastSessionLog,
   sessionIdExists: mockSessionIdExists,
 }))
@@ -135,14 +100,14 @@ const mockGetCommands = mock(async () => [
   },
 ])
 
-mock.module('../../../commands.js', () => ({
+mock.module('../commandSource.js', () => ({
   getCommands: mockGetCommands,
 }))
 
 // ── Import after mocks ────────────────────────────────────────────
 
 const { AcpAgent } = await import('../agent.js')
-const { forwardSessionUpdates } = await import('../bridge.js')
+const { forwardSessionUpdates } = await import('../agentBridgeDeps.js')
 
 // ── Helpers ───────────────────────────────────────────────────────
 

@@ -7,7 +7,7 @@ import {
   realpathSync,
   writeFileSync,
 } from 'fs'
-import { basename, join, resolve } from 'path'
+import { basename, dirname, join, relative, resolve } from 'path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import type {
   ProjectContextSource,
@@ -106,7 +106,7 @@ function resolveContext(cwd: string): SkillLearningProjectContext {
       scope: 'project',
       cwd,
       projectRoot: projectRoot
-        ? normalizePath(projectRoot)
+        ? resolveGitProjectRoot(cwd, projectRoot)
         : normalizePath(cwd),
       gitRemote: normalizedRemote,
       identity: `git-remote:${normalizedRemote}`,
@@ -116,7 +116,7 @@ function resolveContext(cwd: string): SkillLearningProjectContext {
 
   const gitRoot = git(['rev-parse', '--show-toplevel'], cwd)
   if (gitRoot) {
-    const projectRoot = normalizePath(gitRoot)
+    const projectRoot = resolveGitProjectRoot(cwd, gitRoot)
     return buildContext({
       source: 'git_root',
       scope: 'project',
@@ -238,6 +238,41 @@ function git(args: string[], cwd: string): string | null {
 }
 
 function normalizePath(path: string): string {
+  const resolved = resolve(path)
+  try {
+    return realpathSync(resolved).normalize('NFC')
+  } catch {
+    return resolved.normalize('NFC')
+  }
+}
+
+function resolveGitProjectRoot(cwd: string, gitRoot: string): string {
+  const styledRoot = reanchorGitRootToCwd(cwd, gitRoot)
+  return styledRoot ?? normalizePath(gitRoot)
+}
+
+function reanchorGitRootToCwd(cwd: string, gitRoot: string): string | null {
+  const resolvedCwd = resolve(cwd).normalize('NFC')
+  const canonicalCwd = canonicalPath(cwd)
+  const canonicalGitRoot = canonicalPath(gitRoot)
+  const rel = relative(canonicalGitRoot, canonicalCwd)
+
+  if (
+    rel.startsWith('..') ||
+    rel.includes(':')
+  ) {
+    return null
+  }
+
+  const segments = rel.split(/[\\/]/).filter(Boolean)
+  let candidate = resolvedCwd
+  for (let i = 0; i < segments.length; i += 1) {
+    candidate = dirname(candidate)
+  }
+  return candidate
+}
+
+function canonicalPath(path: string): string {
   const resolved = resolve(path)
   try {
     return realpathSync.native(resolved).normalize('NFC')
