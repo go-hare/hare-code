@@ -77,7 +77,7 @@ hare bridge
 如果你要把 ACP agent 也接到同一台自托管 RCS，可在运行 `acp-link` 的环境中设置：
 
 ```bash
-ACP_RCS_URL=http://localhost:3000 ACP_RCS_TOKEN=sk-rcs-change-me acp-link hare --acp
+ACP_RCS_URL=http://localhost:3000 ACP_RCS_TOKEN=sk-rcs-change-me acp-link hare-bun -- --acp
 ```
 
 常用 ACP 侧变量：
