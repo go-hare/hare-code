@@ -1,39 +1,72 @@
-const MAX_URL_LENGTH = 2048
+import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-/**
- * Check for a pending URL event from environment variables or CLI arguments.
- *
- * This is a synchronous snapshot check, not an event listener. The optional
- * timeout parameter is retained for API compatibility but has no practical
- * effect because process.env and process.argv do not change at runtime.
- */
-export async function waitForUrlEvent(
-  timeoutMs?: number,
-): Promise<string | null> {
-  void timeoutMs
-  return findUrlEvent()
+const nodeRequire = createRequire(import.meta.url)
+
+type UrlHandlerNapi = {
+  waitForUrlEvent(timeoutMs: number): string | null
 }
 
-function findUrlEvent(): string | null {
-  for (const key of [
-    'CLAUDE_CODE_URL_EVENT',
-    'CLAUDE_CODE_DEEP_LINK_URL',
-    'CLAUDE_CODE_URL',
-  ]) {
-    const value = process.env[key]
-    if (isClaudeUrl(value)) {
-      return value
+let cachedModule: UrlHandlerNapi | null = null
+let loadAttempted = false
+
+export async function waitForUrlEvent(
+  timeoutMs: number,
+): Promise<string | null> {
+  const mod = loadModule()
+  return mod?.waitForUrlEvent(timeoutMs) ?? null
+}
+
+function loadModule(): UrlHandlerNapi | null {
+  if (loadAttempted) {
+    return cachedModule
+  }
+  loadAttempted = true
+
+  if (process.platform !== 'darwin') {
+    return null
+  }
+
+  const platformDir = `${process.arch}-darwin`
+  const explicitPath = process.env.URL_HANDLER_NODE_PATH
+  const sourceDir = dirname(fileURLToPath(import.meta.url))
+  const candidates = explicitPath
+    ? [explicitPath]
+    : [
+        `./vendor/url-handler/${platformDir}/url-handler.node`,
+        `../vendor/url-handler/${platformDir}/url-handler.node`,
+        join(
+          sourceDir,
+          '..',
+          '..',
+          '..',
+          'vendor',
+          'url-handler',
+          platformDir,
+          'url-handler.node',
+        ),
+        join(
+          process.cwd(),
+          'vendor',
+          'url-handler',
+          platformDir,
+          'url-handler.node',
+        ),
+      ]
+
+  for (const candidate of candidates) {
+    try {
+      if (!explicitPath && candidate.startsWith('/') && !existsSync(candidate)) {
+        continue
+      }
+      cachedModule = nodeRequire(candidate) as UrlHandlerNapi
+      return cachedModule
+    } catch {
+      // Try the next source/bundled/package layout.
     }
   }
 
-  const arg = process.argv.find(isClaudeUrl)
-  return arg ?? null
-}
-
-function isClaudeUrl(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length <= MAX_URL_LENGTH &&
-    (value.startsWith('claude-cli://') || value.startsWith('claude://'))
-  )
+  return null
 }

@@ -1,15 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { execFileSync } from 'child_process'
+import { existsSync } from 'fs'
 import { join } from 'path'
 
 const packageRoot = join(import.meta.dir, '../..')
 const runScript = `
 import { waitForUrlEvent } from './src/index.ts'
-const value = await waitForUrlEvent(
-  process.env.URL_HANDLER_TEST_TIMEOUT
-    ? Number(process.env.URL_HANDLER_TEST_TIMEOUT)
-    : undefined,
-)
+const value = await waitForUrlEvent(Number(process.env.URL_HANDLER_TEST_TIMEOUT ?? '1'))
 process.stdout.write(value === null ? 'null' : value)
 `
 
@@ -39,37 +36,41 @@ function runWaitForUrlEvent(options?: {
 }
 
 describe('waitForUrlEvent', () => {
-  test('resolves to null without a timeout', () => {
-    expect(runWaitForUrlEvent()).toBe('null')
-  })
-
   test('resolves to null with an explicit timeout', () => {
     expect(
       runWaitForUrlEvent({ env: { URL_HANDLER_TEST_TIMEOUT: '1' } }),
     ).toBe('null')
   })
 
-  test('returns a Claude URL from environment variables', () => {
+  test('uses the native URL handler path on supported macOS builds', () => {
+    if (process.platform !== 'darwin') {
+      return
+    }
+
+    const nativePath = join(
+      packageRoot,
+      '..',
+      '..',
+      'vendor',
+      'url-handler',
+      `${process.arch}-darwin`,
+      'url-handler.node',
+    )
+
+    expect(existsSync(nativePath)).toBe(true)
+  })
+
+  test('does not read compatibility environment URLs', () => {
     expect(
       runWaitForUrlEvent({
         env: { CLAUDE_CODE_URL_EVENT: 'claude-cli://prompt?q=hello' },
       }),
-    ).toBe('claude-cli://prompt?q=hello')
+    ).toBe('null')
   })
 
-  test('returns a Claude URL from argv', () => {
+  test('does not read compatibility argv URLs', () => {
     expect(
       runWaitForUrlEvent({ args: ['claude://prompt?q=hello'] }),
-    ).toBe('claude://prompt?q=hello')
-  })
-
-  test('rejects URLs exceeding the maximum length', () => {
-    expect(
-      runWaitForUrlEvent({
-        env: {
-          CLAUDE_CODE_URL_EVENT: `claude-cli://${'x'.repeat(2048)}`,
-        },
-      }),
     ).toBe('null')
   })
 })

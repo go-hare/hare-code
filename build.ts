@@ -75,10 +75,18 @@ console.log(
   `Bundled ${result.outputs.length} files to ${outdir}/ (patched ${patched} for import.meta.require, ${bunPatched} for Bun destructure)`,
 )
 
-// Step 4: Copy native .node addon files (audio-capture)
-const vendorDir = join(outdir, 'vendor', 'audio-capture')
-await cp('vendor/audio-capture', vendorDir, { recursive: true })
-console.log(`Copied vendor/audio-capture/ → ${vendorDir}/`)
+// Step 4: Copy native .node addon files
+for (const nativeVendor of [
+  'audio-capture',
+  'computer-use-input',
+  'computer-use-swift',
+  'image-processor',
+  'url-handler',
+]) {
+  const vendorDir = join(outdir, 'vendor', nativeVendor)
+  await cp(join('vendor', nativeVendor), vendorDir, { recursive: true })
+  console.log(`Copied vendor/${nativeVendor}/ → ${vendorDir}/`)
+}
 
 // Step 5: Generate cli-bun and cli-node executable entry points
 const cliBun = join(outdir, 'cli-bun.js')

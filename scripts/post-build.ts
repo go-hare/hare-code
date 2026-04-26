@@ -36,9 +36,19 @@ async function postBuild() {
   }
 
   // Step 2: Copy native addon files
-  const vendorDir = join(outdir, "vendor", "audio-capture");
-  await cp("vendor/audio-capture", vendorDir, { recursive: true } as never);
-  console.log(`Copied vendor/audio-capture/ → ${vendorDir}/`);
+  for (const nativeVendor of [
+    "audio-capture",
+    "computer-use-input",
+    "computer-use-swift",
+    "image-processor",
+    "url-handler",
+  ]) {
+    const vendorDir = join(outdir, "vendor", nativeVendor);
+    await cp(join("vendor", nativeVendor), vendorDir, {
+      recursive: true,
+    } as never);
+    console.log(`Copied vendor/${nativeVendor}/ → ${vendorDir}/`);
+  }
 
   // Step 3: Generate dual entry points
   const cliBun = join(outdir, "cli-bun.js");
