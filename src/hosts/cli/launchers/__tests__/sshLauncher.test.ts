@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { SSHLaunchOptions } from '../sshLauncher.js'
 
 const callOrder: string[] = []
@@ -33,8 +33,16 @@ const mockLaunchRepl = mock(
   },
 )
 const mockCreateSystemMessage = mock((_message: string, _variant: string) => {
-  callOrder.push('message')
+  callOrder.push('system-message')
   return sshInfoMessage
+})
+const mockCreateUserMessage = mock((_options: { content: string }) => {
+  callOrder.push('user-message')
+  return {
+    uuid: 'msg-user',
+    type: 'user',
+    content: _options.content,
+  }
 })
 const mockStatsStore = {
   increment() {},
@@ -58,9 +66,14 @@ mock.module('../../../../replLauncher.js', () => ({
 
 mock.module('../../../../utils/messages.js', () => ({
   createSystemMessage: mockCreateSystemMessage,
+  createUserMessage: mockCreateUserMessage,
 }))
 
 const { runSshRemoteLaunch } = await import('../sshLauncher.js')
+
+afterAll(() => {
+  mock.restore()
+})
 
 function createLaunchOptions(): SSHLaunchOptions {
   return {
@@ -113,6 +126,7 @@ describe('runSshRemoteLaunch', () => {
     mockCreateLocalSSHSession.mockClear()
     mockLaunchRepl.mockClear()
     mockCreateSystemMessage.mockClear()
+    mockCreateUserMessage.mockClear()
   })
 
   test('creates a remote SSH session and launches the REPL', async () => {

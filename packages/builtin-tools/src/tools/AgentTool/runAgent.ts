@@ -27,6 +27,7 @@ import type {
 import {
   dedupeToolsByName,
   type Tool,
+  type ToolPermissionContext,
   type Tools,
   type ToolUseContext,
 } from 'src/Tool.js'
@@ -91,6 +92,23 @@ import type { ContentReplacementState } from 'src/utils/toolResultStorage.js'
 import { createAgentId } from 'src/utils/uuid.js'
 import { resolveAgentTools } from './agentToolUtils.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
+
+export function getSpawnedAgentToolPermissionContext(
+  context: ToolPermissionContext,
+): ToolPermissionContext {
+  const cliArgDenyRules = context.spawnedAgentCliArgDenyRules
+  if (cliArgDenyRules === undefined) {
+    return context
+  }
+
+  return {
+    ...context,
+    alwaysDenyRules: {
+      ...context.alwaysDenyRules,
+      cliArg: [...cliArgDenyRules],
+    },
+  }
+}
 
 /**
  * Initialize agent-specific MCP servers
@@ -431,7 +449,9 @@ export async function* runAgent({
   const agentPermissionMode = agentDefinition.permissionMode
   const agentGetAppState = () => {
     const state = toolUseContext.getAppState()
-    let toolPermissionContext = state.toolPermissionContext
+    let toolPermissionContext = getSpawnedAgentToolPermissionContext(
+      state.toolPermissionContext,
+    )
 
     // Override permission mode if agent defines one (unless parent is bypassPermissions, acceptEdits, or auto)
     if (
@@ -478,17 +498,14 @@ export async function* runAgent({
       }
     }
 
-    // Scope tool permissions: when allowedTools is provided, use them as session rules.
-    // IMPORTANT: Preserve cliArg rules (from SDK's --allowedTools) since those are
-    // explicit permissions from the SDK consumer that should apply to all agents.
-    // Only clear session-level rules from the parent to prevent unintended leakage.
+    // Scope tool permissions: when allowedTools is provided, use them as session
+    // rules. Preserve explicit CLI allow rules, but use the spawned-agent deny
+    // view above so parent --tools does not starve worker tools.
     if (allowedTools !== undefined) {
       toolPermissionContext = {
         ...toolPermissionContext,
         alwaysAllowRules: {
-          // Preserve SDK-level permissions from --allowedTools
-          cliArg: state.toolPermissionContext.alwaysAllowRules.cliArg,
-          // Use the provided allowedTools as session-level permissions
+          cliArg: toolPermissionContext.alwaysAllowRules.cliArg,
           session: [...allowedTools],
         },
       }

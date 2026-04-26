@@ -63,6 +63,7 @@
     "format": "biome format --write src/",
     "prepare": "node scripts/prepare.cjs",
     "test": "bun test",
+    "check:bundle": "bun run scripts/check-bundle-integrity.ts",
     "check:unused": "knip-bun",
     "health": "bun run scripts/health-check.ts",
     "postinstall": "node scripts/run-parallel.mjs scripts/postinstall.cjs scripts/setup-chrome-mcp.mjs",
@@ -73,6 +74,8 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.19.0",
     "@go-hare/mcp-chrome-bridge": "^2.0.8",
+    "highlight.js": "^11.11.1",
+    "node-fetch": "^3.3.2",
     "ws": "^8.20.0"
   },
   "devDependencies": {
@@ -167,7 +170,6 @@
     "get-east-asian-width": "^1.5.0",
     "google-auth-library": "^10.6.2",
     "he": "^1.2.0",
-    "highlight.js": "^11.11.1",
     "https-proxy-agent": "^8.0.0",
     "ignore": "^7.0.5",
     "image-processor-napi": "workspace:*",

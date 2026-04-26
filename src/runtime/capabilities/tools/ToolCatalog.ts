@@ -65,6 +65,7 @@ import { ExitPlanModeV2Tool } from '@go-hare/builtin-tools/tools/ExitPlanModeToo
 import { TestingPermissionTool } from '@go-hare/builtin-tools/tools/testing/TestingPermissionTool.js'
 import { GrepTool } from '@go-hare/builtin-tools/tools/GrepTool/GrepTool.js'
 import { TungstenTool } from '@go-hare/builtin-tools/tools/TungstenTool/TungstenTool.js'
+import { SendMessageTool } from '@go-hare/builtin-tools/tools/SendMessageTool/SendMessageTool.js'
 // Lazy require to break circular dependency: tools.ts -> TeamCreateTool/TeamDeleteTool -> ... -> tools.ts
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getTeamCreateTool = () =>
@@ -73,9 +74,6 @@ const getTeamCreateTool = () =>
 const getTeamDeleteTool = () =>
   require('@go-hare/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js')
     .TeamDeleteTool as typeof import('@go-hare/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js').TeamDeleteTool
-const getSendMessageTool = () =>
-  require('@go-hare/builtin-tools/tools/SendMessageTool/SendMessageTool.js')
-    .SendMessageTool as typeof import('@go-hare/builtin-tools/tools/SendMessageTool/SendMessageTool.js').SendMessageTool
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { AskUserQuestionTool } from '@go-hare/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js'
 import { LSPTool } from '@go-hare/builtin-tools/tools/LSPTool/LSPTool.js'
@@ -92,6 +90,7 @@ import { TaskUpdateTool } from '@go-hare/builtin-tools/tools/TaskUpdateTool/Task
 import { TaskListTool } from '@go-hare/builtin-tools/tools/TaskListTool/TaskListTool.js'
 import { isToolSearchEnabledOptimistic } from '../../../utils/toolSearch.js'
 import { isTodoV2Enabled } from '../../../utils/tasks.js'
+import { isCoordinatorMode } from '../../../coordinator/coordinatorMode.js'
 // Dead code elimination: conditional import for CLAUDE_CODE_VERIFY_PLAN
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const VerifyPlanExecutionTool =
@@ -118,9 +117,6 @@ const TerminalCaptureTool = feature('TERMINAL_PANEL')
 const WebBrowserTool = feature('WEB_BROWSER_TOOL')
   ? require('@go-hare/builtin-tools/tools/WebBrowserTool/WebBrowserTool.js')
       .WebBrowserTool
-  : null
-const coordinatorModeModule = feature('COORDINATOR_MODE')
-  ? (require('../../../coordinator/coordinatorMode.js') as typeof import('../../../coordinator/coordinatorMode.js'))
   : null
 const SnipTool = feature('HISTORY_SNIP')
   ? require('@go-hare/builtin-tools/tools/SnipTool/SnipTool.js').SnipTool
@@ -160,24 +156,38 @@ const getPowerShellTool = () => {
 }
 /* eslint-enable @typescript-eslint/no-require-imports */
 
+function getCoordinatorTaskTools(): Tool[] {
+  return isTodoV2Enabled()
+    ? [TaskCreateTool, TaskGetTool, TaskListTool, TaskUpdateTool]
+    : []
+}
+
+function isCoordinatorSimpleModeActive(): boolean {
+  return isCoordinatorMode()
+}
+
+export function addCoordinatorSimpleModeTools(
+  tools: Tool[],
+  options: { includeAgent: boolean },
+): void {
+  if (options.includeAgent) {
+    tools.push(AgentTool)
+  }
+  tools.push(TaskStopTool, SendMessageTool, ...getCoordinatorTaskTools())
+}
+
 export function getSimpleModeTools(): Tool[] {
   if (isReplModeEnabled() && REPLTool) {
     const replSimple: Tool[] = [REPLTool]
-    if (
-      feature('COORDINATOR_MODE') &&
-      coordinatorModeModule?.isCoordinatorMode()
-    ) {
-      replSimple.push(TaskStopTool, getSendMessageTool())
+    if (isCoordinatorSimpleModeActive()) {
+      addCoordinatorSimpleModeTools(replSimple, { includeAgent: false })
     }
     return replSimple
   }
 
   const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
-  if (
-    feature('COORDINATOR_MODE') &&
-    coordinatorModeModule?.isCoordinatorMode()
-  ) {
-    simpleTools.push(AgentTool, TaskStopTool, getSendMessageTool())
+  if (isCoordinatorSimpleModeActive()) {
+    addCoordinatorSimpleModeTools(simpleTools, { includeAgent: true })
   }
   return simpleTools
 }
@@ -224,7 +234,7 @@ export function getAllBaseTools(): Tools {
     ...(TerminalCaptureTool ? [TerminalCaptureTool] : []),
     ...(isEnvTruthy(process.env.ENABLE_LSP_TOOL) ? [LSPTool] : []),
     ...(isWorktreeModeEnabled() ? [EnterWorktreeTool, ExitWorktreeTool] : []),
-    getSendMessageTool(),
+    SendMessageTool,
     ...(ListPeersTool ? [ListPeersTool] : []),
     ...(isAgentSwarmsEnabled()
       ? [getTeamCreateTool(), getTeamDeleteTool()]

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test as baseTest } from 'bun:test'
 import {
   existsSync,
   mkdtempSync,
@@ -16,15 +16,17 @@ import {
   setSkillLearningConfigForTest,
 } from '../config.js'
 import { loadInstincts, readObservations } from '../index.js'
+import { runWithCwdOverride } from '../../../utils/cwd.js'
 
 let root: string
-let previousCwd: string
 const originalEnv = { ...process.env }
+
+function test(name: string, fn: () => void | Promise<void>): void {
+  baseTest(name, () => runWithCwdOverride(root, fn))
+}
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'skill-learning-smoke-'))
-  previousCwd = process.cwd()
-  process.chdir(root)
   process.env = { ...originalEnv }
   process.env.CLAUDE_SKILL_LEARNING_HOME = join(root, 'learning-home')
   process.env.CLAUDE_CONFIG_DIR = join(root, 'config')
@@ -35,7 +37,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  process.chdir(previousCwd)
   process.env = { ...originalEnv }
   resetSkillLearningConfig()
   clearCommandsCache()

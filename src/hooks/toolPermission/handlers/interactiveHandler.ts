@@ -1,8 +1,8 @@
 import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { randomUUID } from 'crypto'
-import { CHANNEL_TAG } from 'src/constants/xml.js'
-import { logForDebugging } from 'src/utils/debug.js'
+import { CHANNEL_TAG } from '../../../constants/xml.js'
+import { logForDebugging } from '../../../utils/debug.js'
 import { getAllowedChannels } from '../../../bootstrap/state.js'
 import type { BridgePermissionCallbacks } from '../../../bridge/bridgePermissionCallbacks.js'
 import type { ToolUseConfirm } from '../../../components/permissions/PermissionRequest.js'
@@ -18,8 +18,8 @@ import {
   shortRequestId,
   truncateForPreview,
 } from '../../../services/mcp/channelPermissions.js'
-import { executeAsyncClassifierCheck } from '@go-hare/builtin-tools/tools/BashTool/bashPermissions.js'
-import { BASH_TOOL_NAME } from '@go-hare/builtin-tools/tools/BashTool/toolName.js'
+import { executeAsyncClassifierCheck } from '../../../../packages/builtin-tools/src/tools/BashTool/bashPermissions.js'
+import { BASH_TOOL_NAME } from '../../../../packages/builtin-tools/src/tools/BashTool/toolName.js'
 import {
   clearClassifierChecking,
   setClassifierApproval,

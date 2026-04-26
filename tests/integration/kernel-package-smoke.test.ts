@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'os'
 import { join } from 'path'
 
+const repoRoot = join(import.meta.dir, '../..')
 const packageJson = JSON.parse(
-  readFileSync(join(process.cwd(), 'package.json'), 'utf8'),
+  readFileSync(join(repoRoot, 'package.json'), 'utf8'),
 ) as {
   exports?: Record<string, { import?: string; default?: string } | string>
 }
@@ -53,9 +54,9 @@ describe('kernel package smoke', () => {
   test(
     'imports the built package-level kernel entry',
     async () => {
-      if (!existsSync(join(process.cwd(), 'dist', 'kernel.js'))) {
+      if (!existsSync(join(repoRoot, 'dist', 'kernel.js'))) {
         execFileSync('bun', ['run', 'build'], {
-          cwd: process.cwd(),
+          cwd: repoRoot,
           encoding: 'utf8',
         })
       }
@@ -78,7 +79,7 @@ describe('kernel package smoke', () => {
           'npm',
           ['pack', '--json', '--ignore-scripts', '--pack-destination', tempRoot],
           {
-            cwd: process.cwd(),
+            cwd: repoRoot,
             encoding: 'utf8',
           },
         )

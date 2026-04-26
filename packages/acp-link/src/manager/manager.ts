@@ -17,6 +17,23 @@ type LaunchResolverOptions = {
   fileExists?: (path: string) => boolean;
 };
 
+function isWindowsLaunchContext(execPath: string, moduleUrl: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(execPath) || /^file:\/\/\/[A-Za-z]:/i.test(moduleUrl);
+}
+
+function normalizeLaunchEntrypoint(path: string, execPath: string, moduleUrl: string): string {
+  if (!isWindowsLaunchContext(execPath, moduleUrl)) {
+    return path;
+  }
+
+  const windowsDrivePath = path.match(/^\/([A-Za-z]:\/.*)$/);
+  if (!windowsDrivePath) {
+    return path;
+  }
+
+  return windowsDrivePath[1].replace(/\//g, "\\");
+}
+
 export function resolveSelfLaunchCommand(
   options: LaunchResolverOptions = {},
 ): string[] {
@@ -25,8 +42,16 @@ export function resolveSelfLaunchCommand(
   const fileExists = options.fileExists ?? existsSync;
   const isBun = basename(execPath).toLowerCase().includes("bun");
 
-  const sourceEntry = fileURLToPath(new URL("../cli/bin.ts", moduleUrl));
-  const distEntry = fileURLToPath(new URL("../cli/bin.js", moduleUrl));
+  const sourceEntry = normalizeLaunchEntrypoint(
+    fileURLToPath(new URL("../cli/bin.ts", moduleUrl)),
+    execPath,
+    moduleUrl,
+  );
+  const distEntry = normalizeLaunchEntrypoint(
+    fileURLToPath(new URL("../cli/bin.js", moduleUrl)),
+    execPath,
+    moduleUrl,
+  );
   const entryCandidates = isBun ? [sourceEntry, distEntry] : [distEntry];
   const entrypoint = entryCandidates.find((path) => fileExists(path));
 

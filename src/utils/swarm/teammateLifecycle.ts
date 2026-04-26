@@ -8,7 +8,7 @@ import type { TeamFile } from './teamHelpers.js'
 
 type TeamMember = Pick<
   TeamFile['members'][number],
-  'agentId' | 'name' | 'tmuxPaneId' | 'backendType'
+  'agentId' | 'name' | 'tmuxPaneId' | 'backendType' | 'insideTmux'
 >
 
 type TeammateLifecycleContext = {

@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import { getCwd } from '../../utils/cwd.js'
 import type {
   SkillLearningProjectContext as BaseSkillLearningProjectContext,
   SkillLearningScope,
@@ -81,7 +82,7 @@ export function getSkillLearningRoot(
   if (process.env.CLAUDE_SKILL_LEARNING_HOME) {
     return process.env.CLAUDE_SKILL_LEARNING_HOME
   }
-  return join(process.env.HOME ?? process.cwd(), '.claude', 'skill-learning')
+  return join(process.env.HOME ?? getCwd(), '.claude', 'skill-learning')
 }
 
 export function getObservationFilePath(
@@ -296,7 +297,7 @@ function observationsFromTranscriptEntry(
     sessionId: entry.sessionId ?? 'unknown-session',
     projectId: project?.projectId ?? 'global',
     projectName: project?.projectName ?? 'global',
-    cwd: entry.cwd ?? project?.cwd ?? process.cwd(),
+    cwd: entry.cwd ?? project?.cwd ?? getCwd(),
     timestamp: entry.timestamp ?? new Date().toISOString(),
     source: 'transcript' as const,
   }

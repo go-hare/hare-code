@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getCwd } from '../../utils/cwd.js'
 import { clearSkillIndexCache } from '../skillSearch/localSearch.js'
 import type { Instinct } from './instinctParser.js'
 import { buildLearnedSkillName, normalizeSkillName } from './learningPolicy.js'
@@ -143,7 +144,7 @@ export function getLearnedSkillPath(
 ): string {
   if (options?.outputRoot) return join(options.outputRoot, name)
   if (scope === 'project') {
-    return join(options?.cwd ?? process.cwd(), '.claude', 'skills', name)
+    return join(options?.cwd ?? getCwd(), '.claude', 'skills', name)
   }
   return join(
     options?.globalSkillsDir ?? join(getClaudeConfigHomeDir(), 'skills'),

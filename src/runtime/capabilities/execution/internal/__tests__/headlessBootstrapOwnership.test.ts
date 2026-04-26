@@ -3,17 +3,11 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const bootstrapContent = readFileSync(
-  join(
-    process.cwd(),
-    'src/runtime/capabilities/execution/internal/headlessBootstrap.ts',
-  ),
+  join(import.meta.dir, '../headlessBootstrap.ts'),
   'utf8',
 )
 const loopContent = readFileSync(
-  join(
-    process.cwd(),
-    'src/runtime/capabilities/execution/internal/headlessRuntimeLoop.ts',
-  ),
+  join(import.meta.dir, '../headlessRuntimeLoop.ts'),
   'utf8',
 )
 

@@ -3,16 +3,16 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from 'src/services/analytics/index.js'
-import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
+} from '../../services/analytics/index.js'
+import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.js'
 import type { ToolUseConfirm } from '../../components/permissions/PermissionRequest.js'
 import type {
   ToolPermissionContext,
   Tool as ToolType,
   ToolUseContext,
 } from '../../Tool.js'
-import { awaitClassifierAutoApproval } from '@go-hare/builtin-tools/tools/BashTool/bashPermissions.js'
-import { BASH_TOOL_NAME } from '@go-hare/builtin-tools/tools/BashTool/toolName.js'
+import { awaitClassifierAutoApproval } from '../../../packages/builtin-tools/src/tools/BashTool/bashPermissions.js'
+import { BASH_TOOL_NAME } from '../../../packages/builtin-tools/src/tools/BashTool/toolName.js'
 import type { AssistantMessage } from '../../types/message.js'
 import type {
   PendingClassifierCheck,

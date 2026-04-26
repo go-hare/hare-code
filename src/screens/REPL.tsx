@@ -480,11 +480,8 @@ import {
 } from '../utils/autoRunIssue.js';
 import type { HookProgress } from '../types/hooks.js';
 import { TungstenLiveMonitor } from '@go-hare/builtin-tools/tools/TungstenTool/TungstenLiveMonitor.js';
-/* eslint-disable @typescript-eslint/no-require-imports */
-const WebBrowserPanelModule = feature('WEB_BROWSER_TOOL')
-  ? (require('@go-hare/builtin-tools/tools/WebBrowserTool/WebBrowserPanel.js') as typeof import('@go-hare/builtin-tools/tools/WebBrowserTool/WebBrowserPanel.js'))
-  : null;
-/* eslint-enable @typescript-eslint/no-require-imports */
+// WebBrowserTool is browser-lite and returns results inline via tool_result.
+// Full browser control is provided by Claude-in-Chrome MCP tools.
 import { IssueFlagBanner } from '../components/PromptInput/IssueFlagBanner.js';
 import { useIssueFlagBanner } from '../hooks/useIssueFlagBanner.js';
 import { CompanionSprite, CompanionFloatingBubble, MIN_COLS_FOR_FULL_SPRITE } from '../buddy/CompanionSprite.js';
@@ -2747,7 +2744,7 @@ export function REPL({
         abortController,
         options: {
           commands,
-          tools,
+          tools: computeTools(),
           debug,
           verbose: s.verbose,
           mainLoopModel,
@@ -5700,7 +5697,7 @@ export function REPL({
                 </Box>
               )}
               {process.env.USER_TYPE === 'ant' && <TungstenLiveMonitor />}
-              {feature('WEB_BROWSER_TOOL') ? WebBrowserPanelModule && <WebBrowserPanelModule.WebBrowserPanel /> : null}
+              {/* WebBrowserTool is browser-lite, no panel */}
               <Box flexGrow={1} />
               {showSpinner && (
                 <SpinnerWithVerb

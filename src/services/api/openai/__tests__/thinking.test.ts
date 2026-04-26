@@ -1,5 +1,9 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
-import { isOpenAIThinkingEnabled, buildOpenAIRequestBody } from '../requestBody.js'
+import {
+  isOpenAIThinkingEnabled,
+  resolveOpenAIMaxTokens,
+  buildOpenAIRequestBody,
+} from '../requestBody.js'
 
 describe('isOpenAIThinkingEnabled', () => {
   const originalEnv = {
@@ -142,6 +146,62 @@ describe('isOpenAIThinkingEnabled', () => {
       process.env.OPENAI_ENABLE_THINKING = '1'
       expect(isOpenAIThinkingEnabled('deepseek-reasoner')).toBe(true)
     })
+  })
+})
+
+describe('resolveOpenAIMaxTokens', () => {
+  const originalEnv = {
+    OPENAI_MAX_TOKENS: process.env.OPENAI_MAX_TOKENS,
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS:
+      process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
+  }
+
+  beforeEach(() => {
+    delete process.env.OPENAI_MAX_TOKENS
+    delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+  })
+
+  afterEach(() => {
+    if (originalEnv.OPENAI_MAX_TOKENS === undefined) {
+      delete process.env.OPENAI_MAX_TOKENS
+    } else {
+      process.env.OPENAI_MAX_TOKENS = originalEnv.OPENAI_MAX_TOKENS
+    }
+
+    if (originalEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS === undefined) {
+      delete process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+    } else {
+      process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS =
+        originalEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS
+    }
+  })
+
+  test('caps the implicit OpenAI-compatible default at 32k', () => {
+    expect(resolveOpenAIMaxTokens(64_000)).toBe(32_000)
+  })
+
+  test('does not raise a lower model upper limit', () => {
+    expect(resolveOpenAIMaxTokens(8_192)).toBe(8_192)
+  })
+
+  test('keeps programmatic override above the default cap', () => {
+    expect(resolveOpenAIMaxTokens(64_000, 48_000)).toBe(48_000)
+  })
+
+  test('keeps OPENAI_MAX_TOKENS above the default cap', () => {
+    process.env.OPENAI_MAX_TOKENS = '48000'
+    expect(resolveOpenAIMaxTokens(64_000)).toBe(48_000)
+  })
+
+  test('falls back to CLAUDE_CODE_MAX_OUTPUT_TOKENS', () => {
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = '12000'
+    expect(resolveOpenAIMaxTokens(64_000)).toBe(12_000)
+  })
+
+  test('ignores invalid env overrides', () => {
+    process.env.OPENAI_MAX_TOKENS = '-1'
+    process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = 'abc'
+    expect(resolveOpenAIMaxTokens(64_000)).toBe(32_000)
   })
 })
 

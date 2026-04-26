@@ -50,6 +50,8 @@ import {
 } from 'src/utils/messages.js'
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js'
 import { permissionRuleValueFromString } from 'src/utils/permissions/permissionRuleParser.js'
+import { isTranscriptPersistenceDisabled } from 'src/utils/sessionStorage.js'
+import { writeTaskOutputSnapshot } from 'src/utils/task/diskOutput.js'
 import {
   buildTranscriptForClassifier,
   classifyYoloAction,
@@ -500,6 +502,23 @@ export function extractPartialResult(
   return undefined
 }
 
+export async function writeAgentOutputSnapshotIfPersistenceDisabled(
+  taskId: string,
+  message: string,
+): Promise<void> {
+  if (!isTranscriptPersistenceDisabled()) {
+    return
+  }
+  const content = message.endsWith('\n') ? message : `${message}\n`
+  try {
+    await writeTaskOutputSnapshot(taskId, content)
+  } catch (error) {
+    logForDebugging(
+      `Failed to write agent output snapshot for ${taskId}: ${errorMessage(error)}`,
+    )
+  }
+}
+
 type SetAppState = (f: (prev: AppState) => AppState) => void
 
 /**
@@ -620,6 +639,8 @@ export async function runAsyncAgentLifecycle({
       }
     }
 
+    await writeAgentOutputSnapshotIfPersistenceDisabled(taskId, finalMessage)
+
     const worktreeResult = await getWorktreeResult()
 
     await enqueueAgentNotification({
@@ -657,6 +678,10 @@ export async function runAsyncAgentLifecycle({
       })
       const worktreeResult = await getWorktreeResult()
       const partialResult = extractPartialResult(agentMessages)
+      await writeAgentOutputSnapshotIfPersistenceDisabled(
+        taskId,
+        partialResult ?? 'Agent was stopped before producing a final response.',
+      )
       await enqueueAgentNotification({
         taskId,
         description,
@@ -670,6 +695,7 @@ export async function runAsyncAgentLifecycle({
     }
     const msg = errorMessage(error)
     failAsyncAgent(taskId, msg, rootSetAppState)
+    await writeAgentOutputSnapshotIfPersistenceDisabled(taskId, msg)
     const worktreeResult = await getWorktreeResult()
     await enqueueAgentNotification({
       taskId,

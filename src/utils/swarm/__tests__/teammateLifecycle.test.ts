@@ -1,8 +1,29 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from 'bun:test'
+import * as executorFacade from '../backends/executorFacade.js'
+import type {
+  TeammateExecutorFacade,
+  TeammateLifecycleMember,
+} from '../backends/executorFacade.js'
 
 const requestShutdownMock = mock(async () => true)
 const terminateMock = mock(async () => true)
-const createTeammateExecutorForMemberMock = mock((member: any) => {
+const createTeammateExecutorForMemberMock = spyOn(
+  executorFacade,
+  'createTeammateExecutorForMember',
+)
+
+function createMockExecutor(
+  member: Pick<TeammateLifecycleMember, 'backendType' | 'tmuxPaneId'>,
+): TeammateExecutorFacade | undefined {
   if (!member.backendType && member.tmuxPaneId !== 'in-process') {
     return undefined
   }
@@ -13,33 +34,32 @@ const createTeammateExecutorForMemberMock = mock((member: any) => {
     cleanupOrphan: mock(async () => true),
     type: member.backendType ?? 'in-process',
   }
+}
+
+function resetLifecycleMocks(): void {
+  createTeammateExecutorForMemberMock.mockReset()
+  requestShutdownMock.mockReset()
+  terminateMock.mockReset()
+  requestShutdownMock.mockImplementation(async () => true)
+  terminateMock.mockImplementation(async () => true)
+  createTeammateExecutorForMemberMock.mockImplementation(createMockExecutor)
+}
+
+beforeEach(() => {
+  resetLifecycleMocks()
 })
 
-mock.module('../backends/executorFacade.js', () => ({
-  createTeammateExecutorForMember: createTeammateExecutorForMemberMock,
-}))
+afterEach(() => {
+  createTeammateExecutorForMemberMock.mockReset()
+  requestShutdownMock.mockReset()
+  terminateMock.mockReset()
+})
+
+afterAll(() => {
+  createTeammateExecutorForMemberMock.mockRestore()
+})
 
 describe('requestTeammateShutdown', () => {
-  afterEach(() => {
-    createTeammateExecutorForMemberMock.mockReset()
-    requestShutdownMock.mockReset()
-    terminateMock.mockReset()
-    requestShutdownMock.mockImplementation(async () => true)
-    terminateMock.mockImplementation(async () => true)
-    createTeammateExecutorForMemberMock.mockImplementation((member: any) => {
-      if (!member.backendType && member.tmuxPaneId !== 'in-process') {
-        return undefined
-      }
-
-      return {
-        requestShutdown: requestShutdownMock,
-        terminate: terminateMock,
-        cleanupOrphan: mock(async () => true),
-        type: member.backendType ?? 'in-process',
-      }
-    })
-  })
-
   test('delegates shutdown requests through the executor facade', async () => {
     const { requestTeammateShutdown } = await import('../teammateLifecycle.js')
     const context = {
@@ -93,26 +113,6 @@ describe('requestTeammateShutdown', () => {
 })
 
 describe('terminateTeammate', () => {
-  afterEach(() => {
-    createTeammateExecutorForMemberMock.mockReset()
-    requestShutdownMock.mockReset()
-    terminateMock.mockReset()
-    requestShutdownMock.mockImplementation(async () => true)
-    terminateMock.mockImplementation(async () => true)
-    createTeammateExecutorForMemberMock.mockImplementation((member: any) => {
-      if (!member.backendType && member.tmuxPaneId !== 'in-process') {
-        return undefined
-      }
-
-      return {
-        requestShutdown: requestShutdownMock,
-        terminate: terminateMock,
-        cleanupOrphan: mock(async () => true),
-        type: member.backendType ?? 'in-process',
-      }
-    })
-  })
-
   test('delegates termination through the executor facade', async () => {
     const { terminateTeammate } = await import('../teammateLifecycle.js')
     const context = {

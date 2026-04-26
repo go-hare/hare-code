@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 
-const repoRoot = process.cwd()
+const repoRoot = join(import.meta.dir, '../../..')
 
 async function readRepoFile(relativePath: string): Promise<string> {
   return readFile(join(repoRoot, relativePath), 'utf8')

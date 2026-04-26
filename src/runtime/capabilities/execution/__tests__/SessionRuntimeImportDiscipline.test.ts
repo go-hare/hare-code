@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
+const repoRoot = join(import.meta.dir, '../../../../..')
 const content = readFileSync(
   join(
-    process.cwd(),
+    repoRoot,
     'src/runtime/capabilities/execution/SessionRuntime.ts',
   ),
   'utf8',
@@ -19,5 +20,9 @@ describe('SessionRuntime import discipline', () => {
     expect(content).toContain(
       'bootstrapStateProvider?: RuntimeBootstrapStateProvider',
     )
+  })
+
+  test('does not reach into builtin-tools source files by relative path', () => {
+    expect(content).not.toContain('packages/builtin-tools/src')
   })
 })

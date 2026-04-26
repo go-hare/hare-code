@@ -10,6 +10,8 @@ import type { BetaJSONOutputFormat } from '@anthropic-ai/sdk/resources/beta/mess
 import type { EffortValue } from '../../../utils/effort.js'
 import { isEnvTruthy, isEnvDefinedFalsy } from '../../../utils/envUtils.js'
 
+const OPENAI_COMPAT_DEFAULT_MAX_TOKENS_CAP = 32_000
+
 /**
  * Detect whether DeepSeek-style thinking mode should be enabled.
  *
@@ -40,16 +42,25 @@ export function isOpenAIThinkingEnabled(model: string): boolean {
  * 2. OPENAI_MAX_TOKENS env var (OpenAI-specific, useful for local models
  *    with small context windows, e.g. RTX 3060 12GB running 65536-token models)
  * 3. CLAUDE_CODE_MAX_OUTPUT_TOKENS env var (generic override)
- * 4. upperLimit default (64000)
+ * 4. min(upperLimit, 32k) default cap for OpenAI-compatible gateways
  */
 export function resolveOpenAIMaxTokens(
   upperLimit: number,
   maxOutputTokensOverride?: number,
 ): number {
   return maxOutputTokensOverride
-    ?? (process.env.OPENAI_MAX_TOKENS ? parseInt(process.env.OPENAI_MAX_TOKENS, 10) || undefined : undefined)
-    ?? (process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS ? parseInt(process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, 10) || undefined : undefined)
-    ?? upperLimit
+    ?? parsePositiveIntegerEnv(process.env.OPENAI_MAX_TOKENS)
+    ?? parsePositiveIntegerEnv(process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS)
+    ?? Math.min(upperLimit, OPENAI_COMPAT_DEFAULT_MAX_TOKENS_CAP)
+}
+
+function parsePositiveIntegerEnv(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const parsed = parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
 }
 
 /**

@@ -4,7 +4,12 @@
  */
 
 import React from 'react'
+import {
+  isCustomAgent,
+  type CustomAgentDefinition,
+} from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { ToolUseContext } from 'src/Tool.js'
+import { isInProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/types.js'
 import { formatAgentId } from 'src/utils/agentId.js'
 import { getGlobalConfig } from 'src/utils/config.js'
 import { getCwd } from 'src/utils/cwd.js'
@@ -16,6 +21,7 @@ import { isTmuxAvailable } from 'src/utils/swarm/backends/detection.js'
 import {
   createInProcessTeammateExecutor,
   createPaneTeammateExecutor,
+  createTeammateExecutorForMember,
   registerOutOfProcessTeammateTaskForTesting,
   resetTrackedPaneCleanupForTesting,
   type TeammateSpawnExecutionResult,
@@ -221,6 +227,7 @@ type NormalizedSpawnInput = {
   useSplitPane: boolean
   invokingRequestId?: string
   workingDir: string
+  agentDefinition?: CustomAgentDefinition
 }
 
 function updateTeamContextAfterSpawn(
@@ -305,8 +312,138 @@ async function addTeammateToTeamFile(
       execution.backendType === 'in-process' ? getCwd() : normalized.workingDir,
     subscriptions: [],
     backendType: execution.backendType,
+    insideTmux: execution.insideTmux,
   })
   await writeTeamFileAsync(normalized.teamName, teamFile)
+}
+
+function resolveCustomAgentDefinition(
+  agentType: string | undefined,
+  context: ToolUseContext,
+): CustomAgentDefinition | undefined {
+  if (!agentType) {
+    return undefined
+  }
+
+  const agent = context.options?.agentDefinitions?.activeAgents.find(
+    candidate => candidate.agentType === agentType,
+  )
+  if (agent && isCustomAgent(agent)) {
+    return agent
+  }
+  return undefined
+}
+
+async function rollbackTeamFileMember(
+  normalized: NormalizedSpawnInput,
+): Promise<void> {
+  try {
+    const teamFile = await readTeamFileAsync(normalized.teamName)
+    if (!teamFile) {
+      return
+    }
+
+    const nextMembers = teamFile.members.filter(
+      member => member.agentId !== normalized.teammateId,
+    )
+    if (nextMembers.length === teamFile.members.length) {
+      return
+    }
+
+    await writeTeamFileAsync(normalized.teamName, {
+      ...teamFile,
+      members: nextMembers,
+    })
+  } catch (error) {
+    logForDebugging(
+      `[handleSpawn] Failed to roll back team file for ${normalized.teammateId}: ${errorMessage(error)}`,
+    )
+  }
+}
+
+function removeSpawnedTeammateFromAppState(
+  context: ToolUseContext,
+  normalized: NormalizedSpawnInput,
+): void {
+  context.setAppState(prev => {
+    const tasks: typeof prev.tasks = {}
+    for (const [taskId, task] of Object.entries(prev.tasks)) {
+      if (
+        isInProcessTeammateTask(task) &&
+        task.identity.agentId === normalized.teammateId
+      ) {
+        continue
+      }
+      tasks[taskId] = task
+    }
+
+    if (!prev.teamContext?.teammates) {
+      return {
+        ...prev,
+        tasks,
+      }
+    }
+
+    const { [normalized.teammateId]: _removed, ...teammates } =
+      prev.teamContext.teammates
+
+    return {
+      ...prev,
+      tasks,
+      teamContext: {
+        ...prev.teamContext,
+        teammates,
+      },
+    }
+  })
+}
+
+async function cleanupSpawnAfterFailure(
+  normalized: NormalizedSpawnInput,
+  execution: TeammateSpawnExecutionResult,
+  context: ToolUseContext,
+): Promise<void> {
+  const executor = createTeammateExecutorForMember({
+    agentId: normalized.teammateId,
+    name: normalized.sanitizedName,
+    tmuxPaneId: execution.paneId,
+    backendType: execution.backendType,
+    insideTmux: execution.insideTmux,
+  })
+
+  if (executor) {
+    try {
+      const terminated = await executor.terminate(
+        normalized.teamName,
+        {
+          agentId: normalized.teammateId,
+          name: normalized.sanitizedName,
+          tmuxPaneId: execution.paneId,
+          backendType: execution.backendType,
+          insideTmux: execution.insideTmux,
+        },
+        context,
+      )
+      if (!terminated) {
+        logForDebugging(
+          `[handleSpawn] Spawn rollback could not terminate ${normalized.teammateId}`,
+        )
+      }
+    } catch (error) {
+      logForDebugging(
+        `[handleSpawn] Spawn rollback failed to terminate ${normalized.teammateId}: ${errorMessage(error)}`,
+      )
+    }
+  }
+
+  await rollbackTeamFileMember(normalized)
+  try {
+    removeSpawnedTeammateFromAppState(context, normalized)
+  } catch (error) {
+    logForDebugging(
+      `[handleSpawn] Failed to roll back AppState for ${normalized.teammateId}: ${errorMessage(error)}`,
+    )
+  }
 }
 
 async function normalizeSpawnInput(
@@ -337,6 +474,7 @@ async function normalizeSpawnInput(
 
   return {
     agent_type,
+    agentDefinition: resolveCustomAgentDefinition(agent_type, context),
     description,
     model: resolveTeammateModel(input.model, appState.mainLoopModel),
     permissionMode: appState.toolPermissionContext.mode,
@@ -368,6 +506,7 @@ async function executeSpawn(
     teammateColor: normalized.teammateColor,
     model: normalized.model,
     agentType: normalized.agent_type,
+    agentDefinition: normalized.agentDefinition,
     planModeRequired: normalized.plan_mode_required,
     description: normalized.description,
     useSplitPane: normalized.useSplitPane,
@@ -408,19 +547,24 @@ async function handleSpawn(
   const normalized = await normalizeSpawnInput(input, context)
   const execution = await executeSpawn(normalized, context)
 
-  updateTeamContextAfterSpawn(context, normalized, execution)
-  await addTeammateToTeamFile(normalized, execution)
+  try {
+    await addTeammateToTeamFile(normalized, execution)
+    updateTeamContextAfterSpawn(context, normalized, execution)
 
-  if (execution.backendType !== 'in-process') {
-    await writeToMailbox(
-      normalized.sanitizedName,
-      {
-        from: TEAM_LEAD_NAME,
-        text: normalized.prompt,
-        timestamp: new Date().toISOString(),
-      },
-      normalized.teamName,
-    )
+    if (execution.backendType !== 'in-process') {
+      await writeToMailbox(
+        normalized.sanitizedName,
+        {
+          from: TEAM_LEAD_NAME,
+          text: normalized.prompt,
+          timestamp: new Date().toISOString(),
+        },
+        normalized.teamName,
+      )
+    }
+  } catch (error) {
+    await cleanupSpawnAfterFailure(normalized, execution, context)
+    throw error
   }
 
   return {

@@ -118,7 +118,11 @@ import {
 	saveGlobalConfig,
 } from "./utils/config.js";
 import { seedEarlyInput, stopCapturingEarlyInput } from "./utils/earlyInput.js";
-import { getInitialEffortSetting, parseEffortValue } from "./utils/effort.js";
+import {
+	EFFORT_LEVELS,
+	getInitialEffortSetting,
+	parseEffortValue,
+} from "./utils/effort.js";
 import {
 	getInitialFastModeSetting,
 	isFastModeEnabled,
@@ -1637,10 +1641,10 @@ async function run(): Promise<CommanderCommand> {
 		.addOption(
 			new Option(
 				"--effort <level>",
-				`Effort level for the current session (low, medium, high, max)`,
+				`Effort level for the current session (${EFFORT_LEVELS.join(", ")})`,
 			).argParser((rawValue: string) => {
 				const value = rawValue.toLowerCase();
-				const allowed = ["low", "medium", "high", "max"];
+				const allowed = EFFORT_LEVELS as readonly string[];
 				if (!allowed.includes(value)) {
 					throw new InvalidArgumentError(
 						`It must be one of: ${allowed.join(", ")}`,

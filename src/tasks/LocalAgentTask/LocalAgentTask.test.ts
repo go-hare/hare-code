@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test'
+import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { asAgentId } from '../../types/ids.js'
 import { getPendingNotificationsSnapshot, resetCommandQueue } from '../../utils/messageQueueManager.js'
 import {
@@ -9,6 +9,10 @@ import { enqueueAgentNotification } from './LocalAgentTask.js'
 
 const taskListId = `local-agent-notification-test-${Date.now()}`
 const previousTaskListId = process.env.CLAUDE_CODE_TASK_LIST_ID
+
+beforeEach(() => {
+  resetCommandQueue()
+})
 
 afterEach(() => {
   resetCommandQueue()

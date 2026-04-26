@@ -11,6 +11,7 @@ import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 import { AGENT_TOOL_NAME } from './constants.js'
 import { isForkSubagentEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
+import { shouldExposeTaskIdInput } from './taskLinking.js'
 
 function getToolsDescription(agent: AgentDefinition): string {
   const { tools, disallowedTools } = agent
@@ -247,6 +248,9 @@ When NOT to use the ${AGENT_TOOL_NAME} tool:
       ? `
 - Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses`
       : ''
+  const taskLinkingNote = shouldExposeTaskIdInput()
+    ? '- If the work corresponds to a tracked task, pass `task_id` so completion can be linked back to that task. If the agent should own specific write paths, pass them via `owned_files`.'
+    : '- If the agent should own specific write paths, pass them via `owned_files`.'
 
   // Non-coordinator gets the full prompt with all sections
   return `${shared}
@@ -265,7 +269,7 @@ Usage notes:
       : ''
   }
 - To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field. The agent resumes with its full context preserved. ${forkEnabled ? 'Each fresh Agent invocation with a subagent_type starts without context — provide a complete task description.' : 'Each Agent invocation starts fresh — provide a complete task description.'}
-- If the work corresponds to a tracked task, pass \`task_id\` so completion can be linked back to that task. If the agent should own specific write paths, pass them via \`owned_files\`.
+${taskLinkingNote}
 - The agent's outputs should generally be trusted
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.)${forkEnabled ? '' : ", since it is not aware of the user's intent"}
 - If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.

@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
+const repoRoot = join(import.meta.dir, '../../../../..')
 const content = readFileSync(
   join(
-    process.cwd(),
+    repoRoot,
     'src/runtime/capabilities/execution/HeadlessRuntime.ts',
   ),
   'utf8',

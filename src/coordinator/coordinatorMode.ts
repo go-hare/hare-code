@@ -15,6 +15,7 @@ import { TASK_STOP_TOOL_NAME } from '@go-hare/builtin-tools/tools/TaskStopTool/p
 import { TEAM_CREATE_TOOL_NAME } from '@go-hare/builtin-tools/tools/TeamCreateTool/constants.js'
 import { TEAM_DELETE_TOOL_NAME } from '@go-hare/builtin-tools/tools/TeamDeleteTool/constants.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
+import { isTodoV2Enabled } from '../utils/tasks.js'
 
 // Checks the same gate as isScratchpadEnabled() in
 // utils/permissions/filesystem.ts. Duplicated here because importing
@@ -127,6 +128,10 @@ export function getCoordinatorSystemPrompt(): string {
   const workerCapabilities = isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
     ? 'Workers have access to Bash, Read, and Edit tools, plus MCP tools from configured MCP servers.'
     : 'Workers have access to standard tools, MCP tools from configured MCP servers, and project skills via the Skill tool. Delegate skill invocations (e.g. /commit, /verify) to workers.'
+  const taskLinkingInstruction = isTodoV2Enabled()
+    ? `- If the work maps to a tracked task, pass that task's ID as \`task_id\` so worker completion can be linked back to the task.
+`
+    : ''
 
   return `You are Claude Code, an AI assistant that orchestrates software engineering tasks across multiple workers.
 
@@ -152,8 +157,7 @@ When calling ${AGENT_TOOL_NAME}:
 - Do not use workers to trivially report file contents or run commands. Give them higher-level tasks.
 - Do not set the model parameter. Workers need the default model for the substantive tasks you delegate.
 - Continue workers whose work is complete via ${SEND_MESSAGE_TOOL_NAME} to take advantage of their loaded context
-- If the work maps to a tracked task, pass that task's ID as \`task_id\` so worker completion can be linked back to the task.
-- If the worker is expected to write specific files, pass those paths via \`owned_files\`. Use a disjoint file list per worker for concurrent write tasks.
+${taskLinkingInstruction}- If the worker is expected to write specific files, pass those paths via \`owned_files\`. Use a disjoint file list per worker for concurrent write tasks.
 - After launching agents, briefly tell the user what you launched and end your response. Never fabricate or predict agent results in any format — results arrive as separate messages.
 
 ### ${AGENT_TOOL_NAME} Results

@@ -10,10 +10,12 @@ import {
   cleanupTeamDirectories,
   clearLeaderTeamName,
   clearTeammateColors,
+  killInProcessTeammate,
   logEvent,
   readTeamFile,
   requestTeammateShutdown,
   sleep,
+  terminateTeammate,
   unregisterTeamForSessionCleanup,
 } from './teamDeleteDeps.js'
 import { TEAM_DELETE_TOOL_NAME } from './constants.js'
@@ -33,6 +35,87 @@ const inputSchema = lazySchema(() =>
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
+
+type TeamDeleteContext = Parameters<typeof terminateTeammate>[2]
+type TeamMember = NonNullable<ReturnType<typeof readTeamFile>>['members'][number]
+type RunningTeammateTask = {
+  id: string
+  executionBackend?: string
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function getRunningTeammateTask(
+  agentId: string,
+  context: TeamDeleteContext,
+): RunningTeammateTask | undefined {
+  const tasks = context.getAppState().tasks ?? {}
+  for (const taskValue of Object.values(tasks)) {
+    const task = asRecord(taskValue)
+    const identity = asRecord(task?.identity)
+    if (
+      task?.type === 'in_process_teammate' &&
+      task.status === 'running' &&
+      identity?.agentId === agentId &&
+      typeof task.id === 'string'
+    ) {
+      return {
+        id: task.id,
+        executionBackend:
+          typeof task.executionBackend === 'string'
+            ? task.executionBackend
+            : undefined,
+      }
+    }
+  }
+  return undefined
+}
+
+async function terminateInactiveTeammates(
+  teamName: string,
+  context: TeamDeleteContext,
+): Promise<string[]> {
+  const teamFile = readTeamFile(teamName)
+  if (!teamFile) return []
+
+  const failed: string[] = []
+  const members = teamFile.members.filter(m => m.name !== TEAM_LEAD_NAME)
+  for (const member of members) {
+    const terminated = await terminateInactiveTeammate(teamName, member, context)
+    if (!terminated && getRunningTeammateTask(member.agentId, context)) {
+      failed.push(member.name)
+    }
+  }
+  return failed
+}
+
+async function terminateInactiveTeammate(
+  teamName: string,
+  member: TeamMember,
+  context: TeamDeleteContext,
+): Promise<boolean> {
+  try {
+    await terminateTeammate(teamName, member, context)
+  } catch {
+    // Fall through to the AppState check below.
+  }
+
+  const runningTask = getRunningTeammateTask(member.agentId, context)
+  if (!runningTask) return true
+
+  if (
+    runningTask.executionBackend === undefined ||
+    runningTask.executionBackend === 'in-process'
+  ) {
+    return killInProcessTeammate(runningTask.id, context.setAppState)
+  }
+
+  return false
+}
 
 export type Output = {
   success: boolean
@@ -133,7 +216,9 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
               refreshed?.members.filter(
                 m => m.name !== TEAM_LEAD_NAME && m.isActive !== false,
               ) ?? []
-            if (stillActive.length > 0) {
+            if (stillActive.length === 0) {
+              // Fall through to cleanup with the refreshed team file state.
+            } else {
               const memberNames = stillActive.map(m => m.name).join(', ')
               return {
                 data: {
@@ -144,13 +229,14 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
               }
             }
           }
-
           const latestTeamFile = readTeamFile(teamName)
           const latestActiveMembers =
             latestTeamFile?.members.filter(
               m => m.name !== TEAM_LEAD_NAME && m.isActive !== false,
             ) ?? []
-          if (latestActiveMembers.length > 0) {
+          if (latestActiveMembers.length === 0) {
+            // Continue to cleanup below.
+          } else {
             const memberNames = latestActiveMembers.map(m => m.name).join(', ')
             return {
               data: {
@@ -166,6 +252,19 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
         }
       }
 
+      const failedInactiveTerminations = await terminateInactiveTeammates(
+        teamName,
+        context,
+      )
+      if (failedInactiveTerminations.length > 0) {
+        return {
+          data: {
+            success: false,
+            message: `Cleanup is still blocked by running teammate(s): ${failedInactiveTerminations.join(', ')}.`,
+            team_name: teamName,
+          },
+        }
+      }
       await cleanupTeamDirectories(teamName)
       // Already cleaned — don't try again on gracefulShutdown.
       unregisterTeamForSessionCleanup(teamName)

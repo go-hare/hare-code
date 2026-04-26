@@ -3,10 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const content = readFileSync(
-  join(
-    process.cwd(),
-    'src/runtime/capabilities/execution/internal/headlessBootstrap.ts',
-  ),
+  join(import.meta.dir, '../headlessBootstrap.ts'),
   'utf8',
 )
 

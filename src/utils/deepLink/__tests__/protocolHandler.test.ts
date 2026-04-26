@@ -7,8 +7,12 @@ const mockParseDeepLink = mock((_uri: string): DeepLinkAction => ({
 }))
 const mockLaunchInTerminal = mock(async () => true)
 const mockReadLastFetchTime = mock(async (_cwd: string) => undefined as Date | undefined)
+const mockBuildDeepLinkBanner = mock(() => 'mock deep link banner')
+const mockUpdateGithubRepoPathMapping = mock(async () => {})
 const mockGetKnownPathsForRepo = mock((_repo: string) => [] as string[])
 const mockFilterExistingPaths = mock(async (_paths: string[]) => [] as string[])
+const mockValidateRepoAtPath = mock(async (_path: string, _repo: string) => true)
+const mockRemovePathFromRepo = mock((_repo: string, _path: string) => {})
 const mockWaitForUrlEvent = mock(
   async (_timeoutMs?: number): Promise<string | null> => null,
 )
@@ -23,11 +27,15 @@ mock.module('../terminalLauncher.js', () => ({
   launchInTerminal: mockLaunchInTerminal,
 }))
 mock.module('../banner.js', () => ({
+  buildDeepLinkBanner: mockBuildDeepLinkBanner,
   readLastFetchTime: mockReadLastFetchTime,
 }))
 mock.module('../../githubRepoPathMapping.js', () => ({
+  updateGithubRepoPathMapping: mockUpdateGithubRepoPathMapping,
   getKnownPathsForRepo: mockGetKnownPathsForRepo,
   filterExistingPaths: mockFilterExistingPaths,
+  validateRepoAtPath: mockValidateRepoAtPath,
+  removePathFromRepo: mockRemovePathFromRepo,
 }))
 mock.module('url-handler-napi', () => ({
   waitForUrlEvent: mockWaitForUrlEvent,
@@ -43,8 +51,12 @@ beforeEach(() => {
   mockParseDeepLink.mockReset()
   mockLaunchInTerminal.mockReset()
   mockReadLastFetchTime.mockReset()
+  mockBuildDeepLinkBanner.mockReset()
+  mockUpdateGithubRepoPathMapping.mockReset()
   mockGetKnownPathsForRepo.mockReset()
   mockFilterExistingPaths.mockReset()
+  mockValidateRepoAtPath.mockReset()
+  mockRemovePathFromRepo.mockReset()
   mockWaitForUrlEvent.mockReset()
 
   mockParseDeepLink.mockImplementation((_uri: string): DeepLinkAction => ({
@@ -55,8 +67,14 @@ beforeEach(() => {
   mockReadLastFetchTime.mockImplementation(
     async (_cwd: string) => undefined as Date | undefined,
   )
+  mockBuildDeepLinkBanner.mockImplementation(() => 'mock deep link banner')
+  mockUpdateGithubRepoPathMapping.mockImplementation(async () => {})
   mockGetKnownPathsForRepo.mockImplementation((_repo: string) => [])
   mockFilterExistingPaths.mockImplementation(async (_paths: string[]) => [])
+  mockValidateRepoAtPath.mockImplementation(
+    async (_path: string, _repo: string) => true,
+  )
+  mockRemovePathFromRepo.mockImplementation((_repo: string, _path: string) => {})
   mockWaitForUrlEvent.mockImplementation(
     async (_timeoutMs?: number): Promise<string | null> => null,
   )

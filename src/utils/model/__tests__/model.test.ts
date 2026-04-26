@@ -55,6 +55,12 @@ afterEach(() => {
 })
 
 describe('firstPartyNameToCanonical', () => {
+  test('maps opus-4-7 full name to canonical', () => {
+    expect(firstPartyNameToCanonical('claude-opus-4-7-20260101')).toBe(
+      'claude-opus-4-7',
+    )
+  })
+
   test('maps opus-4-6 full name to canonical', () => {
     expect(firstPartyNameToCanonical('claude-opus-4-6-20250514')).toBe(
       'claude-opus-4-6',
@@ -113,7 +119,7 @@ describe('firstPartyNameToCanonical', () => {
     expect(firstPartyNameToCanonical('unknown-model')).toBe('unknown-model')
   })
 
-  test('differentiates opus-4 vs opus-4-5 vs opus-4-6', () => {
+  test('differentiates opus-4 vs opus-4-5 vs opus-4-6 vs opus-4-7', () => {
     expect(firstPartyNameToCanonical('claude-opus-4-20240101')).toBe(
       'claude-opus-4',
     )
@@ -122,6 +128,9 @@ describe('firstPartyNameToCanonical', () => {
     )
     expect(firstPartyNameToCanonical('claude-opus-4-6-20240101')).toBe(
       'claude-opus-4-6',
+    )
+    expect(firstPartyNameToCanonical('claude-opus-4-7-20240101')).toBe(
+      'claude-opus-4-7',
     )
   })
 

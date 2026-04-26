@@ -1218,10 +1218,13 @@ async function* queryModel(
     cacheEditingBetaHeader = betas.CACHE_EDITING_BETA_HEADER
     const featureEnabled = isCachedMicrocompactEnabled()
     const modelSupported = isModelSupportedForCacheEditing(options.model)
-    cachedMCEnabled = featureEnabled && modelSupported
+    // cachedMC requires a non-empty beta header; the CACHE_EDITING_BETA_HEADER
+    // constant is '' in this fork until upstream publishes the real value.
+    const headerAvailable = !!cacheEditingBetaHeader
+    cachedMCEnabled = featureEnabled && modelSupported && headerAvailable
     const config = getCachedMCConfig()
     logForDebugging(
-      `Cached MC gate: enabled=${featureEnabled} modelSupported=${modelSupported} model=${options.model} supportedModels=${jsonStringify((config as any).supportedModels)}`,
+      `Cached MC gate: enabled=${featureEnabled} modelSupported=${modelSupported} headerAvailable=${headerAvailable} model=${options.model} supportedModels=${jsonStringify((config as Record<string, unknown>).supportedModels)}`,
     )
   }
 
@@ -1727,6 +1730,7 @@ async function* queryModel(
       options.querySource === 'repl_main_thread'
     if (
       cacheEditingHeaderLatched &&
+      cacheEditingBetaHeader &&
       getAPIProvider() === 'firstParty' &&
       options.querySource === 'repl_main_thread' &&
       !betasParams.includes(cacheEditingBetaHeader)
@@ -1743,7 +1747,11 @@ async function* queryModel(
       ? (options.temperatureOverride ?? 1)
       : undefined
 
-    lastRequestBetas = betasParams
+    // Filter out any empty-string beta headers before sending.
+    // Constants like CACHE_EDITING_BETA_HEADER or AFK_MODE_BETA_HEADER can be ''
+    // when their feature gate is off; empty betas produce invalid headers.
+    const filteredBetas = betasParams.filter(Boolean)
+    lastRequestBetas = filteredBetas
 
     return {
       model: normalizeModelStringForAPI(options.model),
@@ -1759,7 +1767,7 @@ async function* queryModel(
       system,
       tools: allTools,
       tool_choice: options.toolChoice,
-      ...(useBetas && { betas: betasParams }),
+      ...(useBetas && { betas: filteredBetas }),
       metadata: getAPIMetadata(),
       max_tokens: maxOutputTokens,
       thinking,

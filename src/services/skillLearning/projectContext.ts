@@ -9,6 +9,7 @@ import {
 } from 'fs'
 import { basename, dirname, join, relative, resolve } from 'path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getCwd } from '../../utils/cwd.js'
 import type {
   ProjectContextSource,
   SkillLearningProjectContext,
@@ -50,7 +51,7 @@ const PERSIST_INTERVAL_MS = 5 * 60 * 1000
 let lastPersistAt = 0
 
 export function resolveProjectContext(
-  cwd = process.cwd(),
+  cwd = getCwd(),
 ): SkillLearningProjectContext {
   const cached = contextCache.get(cwd)
   if (cached) {

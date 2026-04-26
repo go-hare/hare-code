@@ -44,6 +44,7 @@ export type TeammateLifecycleMember = {
   name: string
   tmuxPaneId: string
   backendType?: BackendType
+  insideTmux?: boolean
 }
 
 export type TeammateLifecycleContext = {
@@ -65,6 +66,7 @@ export type TeammateSpawnRequest = {
   useSplitPane: boolean
   permissionMode?: PermissionMode
   invokingRequestId?: string
+  agentDefinition?: CustomAgentDefinition
 }
 
 export type TeammateSpawnExecutionResult = {
@@ -175,12 +177,14 @@ function trackPaneTeammateForCleanup(
   })
   ensureTrackedPaneCleanupRegistered()
 
-  return () => {
-    trackedPaneTeammates.delete(teammateId)
-    if (trackedPaneTeammates.size === 0 && unregisterTrackedPaneCleanup) {
-      unregisterTrackedPaneCleanup()
-      unregisterTrackedPaneCleanup = undefined
-    }
+  return () => untrackPaneTeammateForCleanup(teammateId)
+}
+
+function untrackPaneTeammateForCleanup(teammateId: string): void {
+  trackedPaneTeammates.delete(teammateId)
+  if (trackedPaneTeammates.size === 0 && unregisterTrackedPaneCleanup) {
+    unregisterTrackedPaneCleanup()
+    unregisterTrackedPaneCleanup = undefined
   }
 }
 
@@ -367,6 +371,7 @@ function buildTeammateArgParts(params: {
   teammateColor: AgentColorName
   planModeRequired?: boolean
   agentType?: string
+  agentDefinition?: CustomAgentDefinition
   model?: string
   permissionMode?: PermissionMode
 }): string[] {
@@ -377,6 +382,7 @@ function buildTeammateArgParts(params: {
     teammateColor,
     planModeRequired,
     agentType,
+    agentDefinition,
     model,
     permissionMode,
   } = params
@@ -404,8 +410,59 @@ function buildTeammateArgParts(params: {
     getSessionId(),
     ...(planModeRequired ? ['--plan-mode-required'] : []),
     ...(agentType ? ['--agent-type', agentType] : []),
+    ...(agentDefinition
+      ? ['--agents', serializeAgentDefinitionForCli(agentDefinition)]
+      : []),
     ...inheritedArgParts,
   ]
+}
+
+function serializeAgentDefinitionForCli(
+  agentDefinition: CustomAgentDefinition,
+): string {
+  const definition: Record<string, unknown> = {
+    description: agentDefinition.whenToUse,
+    prompt: agentDefinition.getSystemPrompt(),
+  }
+
+  if (agentDefinition.tools !== undefined) {
+    definition.tools = agentDefinition.tools
+  }
+  if (agentDefinition.disallowedTools !== undefined) {
+    definition.disallowedTools = agentDefinition.disallowedTools
+  }
+  if (agentDefinition.model !== undefined) {
+    definition.model = agentDefinition.model
+  }
+  if (agentDefinition.effort !== undefined) {
+    definition.effort = agentDefinition.effort
+  }
+  if (agentDefinition.permissionMode !== undefined) {
+    definition.permissionMode = agentDefinition.permissionMode
+  }
+  if (agentDefinition.mcpServers !== undefined) {
+    definition.mcpServers = agentDefinition.mcpServers
+  }
+  if (agentDefinition.hooks !== undefined) {
+    definition.hooks = agentDefinition.hooks
+  }
+  if (agentDefinition.maxTurns !== undefined) {
+    definition.maxTurns = agentDefinition.maxTurns
+  }
+  if (agentDefinition.skills !== undefined) {
+    definition.skills = agentDefinition.skills
+  }
+  if (agentDefinition.initialPrompt !== undefined) {
+    definition.initialPrompt = agentDefinition.initialPrompt
+  }
+  if (agentDefinition.background !== undefined) {
+    definition.background = agentDefinition.background
+  }
+  if (agentDefinition.isolation !== undefined) {
+    definition.isolation = agentDefinition.isolation
+  }
+
+  return JSON.stringify({ [agentDefinition.agentType]: definition })
 }
 
 function isInProcessTeammateMember(member: TeammateLifecycleMember): boolean {
@@ -430,12 +487,16 @@ class InProcessTeammateExecutor implements TeammateExecutorFacade {
       model: request.model,
     }
 
-    let agentDefinition: CustomAgentDefinition | undefined
+    let agentDefinition = request.agentDefinition
     if (request.agentType) {
-      const allAgents = context.options?.agentDefinitions?.activeAgents ?? []
-      const foundAgent = allAgents.find(a => a.agentType === request.agentType)
-      if (foundAgent && isCustomAgent(foundAgent)) {
-        agentDefinition = foundAgent
+      if (!agentDefinition) {
+        const allAgents = context.options?.agentDefinitions?.activeAgents ?? []
+        const foundAgent = allAgents.find(
+          a => a.agentType === request.agentType,
+        )
+        if (foundAgent && isCustomAgent(foundAgent)) {
+          agentDefinition = foundAgent
+        }
       }
       logForDebugging(
         `[executorFacade] in-process spawn agent_type=${request.agentType}, found=${!!agentDefinition}`,
@@ -591,6 +652,7 @@ class PaneTeammateExecutor implements TeammateExecutorFacade {
       teammateColor: request.teammateColor,
       planModeRequired: request.planModeRequired,
       agentType: request.agentType,
+      agentDefinition: request.agentDefinition,
       model: request.model,
       permissionMode: request.permissionMode,
     })
@@ -688,7 +750,12 @@ class PaneTeammateExecutor implements TeammateExecutorFacade {
   ): Promise<boolean> {
     try {
       const backend = await this.getBackend()
-      return await backend.killPane(member.tmuxPaneId, !isInsideTmuxSync())
+      const insideTmux = member.insideTmux ?? isInsideTmuxSync()
+      const terminated = await backend.killPane(member.tmuxPaneId, !insideTmux)
+      if (terminated) {
+        untrackPaneTeammateForCleanup(member.agentId)
+      }
+      return terminated
     } catch (error) {
       logForDebugging(
         `[executorFacade] Failed to kill pane ${member.tmuxPaneId} for ${member.agentId}: ${String(error)}`,
@@ -700,7 +767,8 @@ class PaneTeammateExecutor implements TeammateExecutorFacade {
   async cleanupOrphan(member: TeammateLifecycleMember): Promise<boolean> {
     try {
       const backend = await this.getBackend()
-      return await backend.killPane(member.tmuxPaneId, !(await isInsideTmux()))
+      const insideTmux = member.insideTmux ?? (await isInsideTmux())
+      return await backend.killPane(member.tmuxPaneId, !insideTmux)
     } catch (error) {
       logForDebugging(
         `[executorFacade] Failed orphan cleanup for ${member.agentId}: ${String(error)}`,

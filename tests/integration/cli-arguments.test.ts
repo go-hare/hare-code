@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { Command } from '@commander-js/extra-typings'
+import { Command, InvalidArgumentError, Option } from '@commander-js/extra-typings'
+import { EFFORT_LEVELS } from '../../src/utils/effort.js'
 
 // Test Commander.js option parsing independently from main.tsx initialization.
 // main.tsx has heavy bootstrap dependencies; we test the CLI argument parsing
@@ -19,6 +20,21 @@ function createTestProgram(): Command {
     .option('--system-prompt <prompt>', 'system prompt')
     .option('--allowedTools <tools...>', 'allowed tools')
     .option('--max-turns <n>', 'max conversation turns', parseInt)
+    .addOption(
+      new Option(
+        '--effort <level>',
+        `Effort level for the current session (${EFFORT_LEVELS.join(', ')})`,
+      ).argParser((rawValue: string) => {
+        const value = rawValue.toLowerCase()
+        const allowed = EFFORT_LEVELS as readonly string[]
+        if (!allowed.includes(value)) {
+          throw new InvalidArgumentError(
+            `It must be one of: ${allowed.join(', ')}`,
+          )
+        }
+        return value
+      }),
+    )
     .version('1.0.0', '-V, --version', 'display version')
   return program
 }
@@ -70,6 +86,19 @@ describe('CLI arguments: option parsing', () => {
     const program = createTestProgram()
     program.parse(['node', 'test', '--max-turns', '10'])
     expect(program.opts().maxTurns).toBe(10)
+  })
+
+  test('--effort accepts xhigh', () => {
+    const program = createTestProgram()
+    program.parse(['node', 'test', '--effort', 'xhigh'])
+    expect(program.opts().effort).toBe('xhigh')
+  })
+
+  test('--effort invalid value lists xhigh', () => {
+    const program = createTestProgram()
+    expect(() => {
+      program.parse(['node', 'test', '--effort', 'extreme'])
+    }).toThrow('It must be one of: low, medium, high, xhigh, max')
   })
 
   test('multiple flags can be combined', () => {

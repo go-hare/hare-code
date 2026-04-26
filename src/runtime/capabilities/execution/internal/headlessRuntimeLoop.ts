@@ -321,6 +321,7 @@ import {
   flushHeldBackResultAndSuggestion,
 } from './headlessPostTurn.js'
 import { emitHeadlessRuntimeMessage } from './headlessStreamEmission.js'
+import { hasHeadlessBackgroundWorkPending } from './headlessBackgroundWork.js'
 import { createHeadlessStreamCollector } from './headlessStreaming.js'
 import {
   canBatchWith,
@@ -924,6 +925,9 @@ function runHeadlessStreaming(
   let inputClosed = false
   let shutdownPromptInjected = false
   let heldBackResult: StdoutMessage | null = null
+  let heldBackAssistantMessages: StdoutMessage[] = []
+  let terminalResultEmitted = false
+  const pendingHeadlessBackgroundTaskIds = new Set<string>()
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
   const managedSession = createHeadlessManagedSession(initialMessages, {
@@ -940,6 +944,16 @@ function runHeadlessStreaming(
   void session.registerIndexedSession(managedSession)
   const mutableMessages = managedSession.messages
   const emitOutput = (message: StdoutMessage) => {
+    if (
+      terminalResultEmitted &&
+      (message.type === 'assistant' ||
+        message.type === 'user' ||
+        message.type === 'stream_event' ||
+        message.type === 'streamlined_text' ||
+        message.type === 'result')
+    ) {
+      return
+    }
     managedSession.emitOutput(message)
   }
   const sessionOutput = {
@@ -1050,6 +1064,66 @@ function runHeadlessStreaming(
     lastEmitted: null,
     pendingSuggestion: null,
     pendingLastEmittedEntry: null,
+  }
+
+  const observeHeadlessBackgroundSdkEvent = (message: StdoutMessage) => {
+    const record = message as Record<string, unknown>
+    if (record.type !== 'system') {
+      return
+    }
+
+    const taskId =
+      typeof record.task_id === 'string' ? record.task_id : undefined
+    if (!taskId) {
+      return
+    }
+
+    if (record.subtype === 'task_started') {
+      const taskType =
+        typeof record.task_type === 'string' ? record.task_type : undefined
+      if (taskType === 'local_agent' || taskType === 'local_bash') {
+        pendingHeadlessBackgroundTaskIds.add(taskId)
+      }
+      return
+    }
+
+    if (record.subtype === 'task_notification') {
+      pendingHeadlessBackgroundTaskIds.delete(taskId)
+    }
+  }
+
+  const drainTrackedSdkEvents = (): StdoutMessage[] => {
+    const events = drainSdkEvents()
+    for (const event of events) {
+      observeHeadlessBackgroundSdkEvent(event)
+    }
+    return events
+  }
+
+  const hasPendingHeadlessBackgroundWork = (): boolean =>
+    pendingHeadlessBackgroundTaskIds.size > 0 ||
+    hasHeadlessBackgroundWorkPending(getAppState())
+
+  const flushHeldBackIfNoBackgroundWork = () => {
+    if (hasPendingHeadlessBackgroundWork()) {
+      return
+    }
+    if (terminalResultEmitted) {
+      heldBackResult = null
+      heldBackAssistantMessages = []
+    }
+    const hadHeldBackResult = heldBackResult !== null
+    const flushed = flushHeldBackResultAndSuggestion({
+      output: sessionOutput,
+      heldBackResult,
+      heldBackAssistantMessages,
+      suggestionState,
+    })
+    heldBackResult = flushed.heldBackResult
+    heldBackAssistantMessages = flushed.heldBackAssistantMessages
+    if (hadHeldBackResult) {
+      terminalResultEmitted = true
+    }
   }
 
   // Set up AWS auth status listener if enabled
@@ -1883,7 +1957,7 @@ function runHeadlessStreaming(
             // consumers. Terminal bookends are now emitted directly via
             // emitTaskTerminatedSdk, so skipping statusless events is safe.
             if (statusMatch) {
-              emitOutput({
+              const taskNotificationMessage = {
                 type: 'system',
                 subtype: 'task_notification',
                 task_id: taskIdMatch?.[1] ?? '',
@@ -1905,7 +1979,9 @@ function runHeadlessStreaming(
                   session.bootstrapStateProvider.getSessionIdentity()
                     .sessionId,
                 uuid: randomUUID(),
-              })
+              } as StdoutMessage
+              observeHeadlessBackgroundSdkEvent(taskNotificationMessage)
+              emitOutput(taskNotificationMessage)
             }
             // No continue -- fall through to ask() so the model processes the result
           }
@@ -2042,16 +2118,18 @@ function runHeadlessStreaming(
                   const emission = emitHeadlessRuntimeMessage({
                     message: message as StdoutMessage,
                     output: sessionOutput,
-                    drainSdkEvents,
-                    hasBackgroundTasks: getRunningTasks(getAppState()).some(
-                      task =>
-                        (task.type === 'local_agent' ||
-                          task.type === 'local_workflow') &&
-                        isBackgroundTask(task),
-                    ),
+                    drainSdkEvents: drainTrackedSdkEvents,
+                    hasBackgroundTasks: hasPendingHeadlessBackgroundWork,
                     heldBackResult,
+                    heldBackAssistantMessages,
+                    terminalResultEmitted,
                   })
                   heldBackResult = emission.heldBackResult
+                  heldBackAssistantMessages =
+                    emission.heldBackAssistantMessages
+                  if (emission.terminalResultEmitted) {
+                    terminalResultEmitted = true
+                  }
                   if (emission.lastResultIsError !== undefined) {
                     lastResultIsError = emission.lastResultIsError
                   }
@@ -2224,9 +2302,10 @@ function runHeadlessStreaming(
       do {
         // Drain SDK events (task_started, task_progress) before command queue
         // so progress events precede task_notification on the stream.
-        for (const event of drainSdkEvents()) {
+        for (const event of drainTrackedSdkEvents()) {
           emitOutput(event)
         }
+        flushHeldBackIfNoBackgroundWork()
 
         runPhase = 'draining_commands'
         await drainCommandQueue()
@@ -2241,10 +2320,7 @@ function runHeadlessStreaming(
         // doesn't hit this.
         waitingForAgents = false
         {
-          const state = getAppState()
-          const hasRunningBg = getRunningTasks(state).some(
-            t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
-          )
+          const hasRunningBg = hasPendingHeadlessBackgroundWork()
           const hasMainThreadQueued = peek(isMainThread) !== undefined
           if (hasRunningBg || hasMainThreadQueued) {
             waitingForAgents = true
@@ -2258,35 +2334,34 @@ function runHeadlessStreaming(
         }
       } while (waitingForAgents)
 
-      heldBackResult = flushHeldBackResultAndSuggestion({
-        output: sessionOutput,
-        heldBackResult,
-        suggestionState,
-      })
+      flushHeldBackIfNoBackgroundWork()
     } catch (error) {
       // Emit error result message before shutting down
       // Write directly to structuredIO to ensure immediate delivery
       try {
-        await structuredIO.write({
-          type: 'result',
-          subtype: 'error_during_execution',
-          duration_ms: 0,
-          duration_api_ms: 0,
-          is_error: true,
-          num_turns: 0,
-          stop_reason: null,
-          session_id:
-            session.bootstrapStateProvider.getSessionIdentity().sessionId,
-          total_cost_usd: 0,
-          usage: EMPTY_USAGE,
-          modelUsage: {},
-          permission_denials: [],
-          uuid: randomUUID(),
-          errors: [
-            errorMessage(error),
-            ...getInMemoryErrors().map(_ => _.error),
-          ],
-        })
+        if (!terminalResultEmitted) {
+          await structuredIO.write({
+            type: 'result',
+            subtype: 'error_during_execution',
+            duration_ms: 0,
+            duration_api_ms: 0,
+            is_error: true,
+            num_turns: 0,
+            stop_reason: null,
+            session_id:
+              session.bootstrapStateProvider.getSessionIdentity().sessionId,
+            total_cost_usd: 0,
+            usage: EMPTY_USAGE,
+            modelUsage: {},
+            permission_denials: [],
+            uuid: randomUUID(),
+            errors: [
+              errorMessage(error),
+              ...getInMemoryErrors().map(_ => _.error),
+            ],
+          })
+          terminalResultEmitted = true
+        }
       } catch {
         // If we can't emit the error result, continue with shutdown anyway
       }
@@ -2306,9 +2381,10 @@ function runHeadlessStreaming(
         // command. The do-while drain above only runs while
         // waitingForAgents; once we're here the next drain would be the
         // top of the next run(), which won't come if input is idle.
-        for (const event of drainSdkEvents()) {
+        for (const event of drainTrackedSdkEvents()) {
           emitOutput(event)
         }
+        flushHeldBackIfNoBackgroundWork()
       }
       running = false
       // Start idle timer when we finish processing and are waiting for input

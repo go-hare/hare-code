@@ -24,19 +24,34 @@ type PendingSuggestionState = {
 export function flushHeldBackResultAndSuggestion({
   output,
   heldBackResult,
+  heldBackAssistantMessages = [],
   suggestionState,
   now = Date.now,
 }: {
   output: { enqueue(message: StdoutMessage): void }
   heldBackResult: StdoutMessage | null
+  heldBackAssistantMessages?: StdoutMessage[]
   suggestionState: PendingSuggestionState
   now?: () => number
-}): StdoutMessage | null {
-  if (!heldBackResult) {
-    return heldBackResult
+}): {
+  heldBackResult: StdoutMessage | null
+  heldBackAssistantMessages: StdoutMessage[]
+} {
+  if (!heldBackResult && heldBackAssistantMessages.length === 0) {
+    return {
+      heldBackResult,
+      heldBackAssistantMessages,
+    }
   }
 
-  output.enqueue(heldBackResult)
+  for (const message of heldBackAssistantMessages) {
+    output.enqueue(message)
+  }
+
+  if (heldBackResult) {
+    output.enqueue(heldBackResult)
+  }
+
   if (suggestionState.pendingSuggestion) {
     output.enqueue(
       suggestionState.pendingSuggestion as unknown as StdoutMessage,
@@ -51,7 +66,10 @@ export function flushHeldBackResultAndSuggestion({
     suggestionState.pendingSuggestion = null
   }
 
-  return null
+  return {
+    heldBackResult: null,
+    heldBackAssistantMessages: [],
+  }
 }
 
 export function createFilesPersistedMessage({

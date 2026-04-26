@@ -1,26 +1,26 @@
 import type { BetaContentBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
-import { getSessionId } from 'src/bootstrap/state.js'
+import { getSessionId } from '../../bootstrap/state.js'
 import {
   LOCAL_COMMAND_STDERR_TAG,
   LOCAL_COMMAND_STDOUT_TAG,
-} from 'src/constants/xml.js'
+} from '../../constants/xml.js'
 import type {
   SDKAssistantMessage,
   SDKCompactBoundaryMessage,
   SDKMessage,
   SDKRateLimitInfo,
-} from 'src/entrypoints/agentSdkTypes.js'
-import type { ClaudeAILimits } from 'src/services/claudeAiLimits.js'
-import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@go-hare/builtin-tools/tools/ExitPlanModeTool/constants.js'
+} from '../../entrypoints/agentSdkTypes.js'
+import type { ClaudeAILimits } from '../../services/claudeAiLimits.js'
+import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../../../packages/builtin-tools/src/tools/ExitPlanModeTool/constants.js'
 import type {
   AssistantMessage,
   CompactMetadata,
   Message,
   MessageContent,
-} from 'src/types/message.js'
-import type { DeepImmutable } from 'src/types/utils.js'
+} from '../../types/message.js'
+import type { DeepImmutable } from '../../types/utils.js'
 import stripAnsi from 'strip-ansi'
 import { createAssistantMessage } from '../messages.js'
 import { getPlan } from '../plans.js'

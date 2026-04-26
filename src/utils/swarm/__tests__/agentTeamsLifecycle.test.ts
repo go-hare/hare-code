@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resetStateForTests } from '../../../bootstrap/state.js'
@@ -12,7 +18,7 @@ import {
   setCliTeammateModeOverride,
 } from '../backends/teammateModeSnapshot.js'
 
-const startInProcessTeammateMock = mock(() => {})
+const startInProcessTeammateMock = mock((..._args: unknown[]) => {})
 
 mock.module('src/utils/swarm/inProcessRunner.js', () => ({
   startInProcessTeammate: startInProcessTeammateMock,
@@ -52,7 +58,7 @@ beforeEach(() => {
   setCliTeammateModeOverride('in-process')
   captureTeammateModeSnapshot()
   startInProcessTeammateMock.mockReset()
-  startInProcessTeammateMock.mockImplementation(() => {})
+  startInProcessTeammateMock.mockImplementation((..._args: unknown[]) => {})
   state = getDefaultAppState()
 })
 
@@ -122,6 +128,114 @@ describe('Agent Teams lifecycle', () => {
       name: 'worker',
       tmuxPaneId: 'in-process',
     })
+  })
+
+  test('passes parent custom agent definition into in-process teammate spawn', async () => {
+    const { TeamCreateTool } = await import(
+      '../../../../packages/builtin-tools/src/tools/TeamCreateTool/TeamCreateTool.js'
+    )
+    const { spawnTeammate } = await import(
+      '../../../../packages/builtin-tools/src/tools/shared/spawnMultiAgent.js'
+    )
+
+    const customAgent = {
+      agentType: 'reviewer',
+      whenToUse: 'Reviews code',
+      getSystemPrompt: () => 'You are the injected reviewer.',
+      source: 'flagSettings' as const,
+      tools: ['Read', 'Grep'],
+      model: 'gpt-5.4',
+    }
+    const context = {
+      getAppState: () => state,
+      setAppState: setState,
+      options: {
+        agentDefinitions: { activeAgents: [customAgent] },
+      },
+      abortController: new AbortController(),
+      toolUseId: 'toolu_custom_agent',
+    } as any
+
+    await TeamCreateTool.call(
+      { team_name: 'alpha', description: 'test team' },
+      context,
+      undefined as any,
+      undefined as any,
+    )
+    await spawnTeammate(
+      {
+        name: 'reviewer',
+        prompt: 'review this change',
+        team_name: 'alpha',
+        agent_type: 'reviewer',
+      },
+      context,
+    )
+
+    expect(startInProcessTeammateMock).toHaveBeenCalledTimes(1)
+    const firstSpawnArgs = (
+      startInProcessTeammateMock.mock.calls as unknown as Array<[unknown]>
+    )[0]?.[0]
+    expect(firstSpawnArgs).toMatchObject({
+      agentDefinition: customAgent,
+    })
+  })
+
+  test('rolls back spawned teammate when team file persistence fails', async () => {
+    const { TeamCreateTool } = await import(
+      '../../../../packages/builtin-tools/src/tools/TeamCreateTool/TeamCreateTool.js'
+    )
+    const { spawnTeammate } = await import(
+      '../../../../packages/builtin-tools/src/tools/shared/spawnMultiAgent.js'
+    )
+
+    const context = {
+      getAppState: () => state,
+      setAppState: setState,
+      options: {
+        agentDefinitions: { activeAgents: [] },
+      },
+      abortController: new AbortController(),
+      toolUseId: 'toolu_rollback',
+    } as any
+
+    await TeamCreateTool.call(
+      { team_name: 'alpha', description: 'test team' },
+      context,
+      undefined as any,
+      undefined as any,
+    )
+
+    const configPath = join(tempHome, 'teams', 'alpha', 'config.json')
+    chmodSync(configPath, 0o444)
+
+    try {
+      await expect(
+        spawnTeammate(
+          {
+            name: 'worker',
+            prompt: 'handle assigned tasks',
+            team_name: 'alpha',
+          },
+          context,
+        ),
+      ).rejects.toThrow()
+    } finally {
+      chmodSync(configPath, 0o644)
+    }
+
+    expect(startInProcessTeammateMock).toHaveBeenCalledTimes(1)
+    expect(state.teamContext?.teammates?.['worker@alpha']).toBeUndefined()
+    expect(
+      Object.values(state.tasks).find(
+        (candidate: any) => candidate?.identity?.agentId === 'worker@alpha',
+      ),
+    ).toBeUndefined()
+    expect(
+      readTeamConfig('alpha').members.some(
+        (member: any) => member.agentId === 'worker@alpha',
+      ),
+    ).toBe(false)
   })
 
   test('runs TeamCreate -> spawn -> TaskUpdate -> SendMessage -> TeamDelete', async () => {
@@ -243,5 +357,10 @@ describe('Agent Teams lifecycle', () => {
     )
     expect(deleted.data.success).toBe(true)
     expect(state.teamContext).toBeUndefined()
+    expect(
+      Object.values(state.tasks).find(
+        (candidate: any) => candidate?.identity?.agentId === 'worker@alpha',
+      ),
+    ).toMatchObject({ status: 'killed' })
   })
 })

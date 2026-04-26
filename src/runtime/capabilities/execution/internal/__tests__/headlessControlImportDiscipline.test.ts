@@ -3,17 +3,11 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const headlessControlContent = readFileSync(
-  join(
-    process.cwd(),
-    'src/runtime/capabilities/execution/internal/headlessControl.ts',
-  ),
+  join(import.meta.dir, '../headlessControl.ts'),
   'utf8',
 )
 const headlessSessionControlContent = readFileSync(
-  join(
-    process.cwd(),
-    'src/runtime/capabilities/execution/internal/headlessSessionControl.ts',
-  ),
+  join(import.meta.dir, '../headlessSessionControl.ts'),
   'utf8',
 )
 

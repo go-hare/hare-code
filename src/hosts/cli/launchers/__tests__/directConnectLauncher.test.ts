@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { DirectConnectLaunchOptions } from '../directConnectLauncher.js'
 
 const callOrder: string[] = []
@@ -31,8 +31,16 @@ const mockLaunchRepl = mock(
   },
 )
 const mockCreateSystemMessage = mock((_message: string, _variant: string) => {
-  callOrder.push('message')
+  callOrder.push('system-message')
   return connectInfoMessage
+})
+const mockCreateUserMessage = mock((_options: { content: string }) => {
+  callOrder.push('user-message')
+  return {
+    uuid: 'msg-user',
+    type: 'user',
+    content: _options.content,
+  }
 })
 const mockStatsStore = {
   increment() {},
@@ -55,9 +63,14 @@ mock.module('../../../../replLauncher.js', () => ({
 
 mock.module('../../../../utils/messages.js', () => ({
   createSystemMessage: mockCreateSystemMessage,
+  createUserMessage: mockCreateUserMessage,
 }))
 
 const { runDirectConnectLaunch } = await import('../directConnectLauncher.js')
+
+afterAll(() => {
+  mock.restore()
+})
 
 function createLaunchOptions(): DirectConnectLaunchOptions {
   return {
@@ -100,6 +113,7 @@ describe('runDirectConnectLaunch', () => {
     mockGetDirectConnectErrorMessage.mockClear()
     mockLaunchRepl.mockClear()
     mockCreateSystemMessage.mockClear()
+    mockCreateUserMessage.mockClear()
   })
 
   test('connects, builds the info message, and launches the REPL', async () => {
@@ -107,7 +121,7 @@ describe('runDirectConnectLaunch', () => {
 
     await runDirectConnectLaunch(options)
 
-    expect(callOrder).toEqual(['connect', 'message', 'launch'])
+    expect(callOrder).toEqual(['connect', 'system-message', 'launch'])
     expect(mockConnectDirectHostSession).toHaveBeenCalledWith(
       options.connect,
       options.stateWriter,

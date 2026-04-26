@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 const mockRunHeadlessRuntime = mock(async () => {})
 
@@ -8,8 +8,28 @@ const {
   runKernelHeadless,
 } = await import('../../src/kernel/headless.js')
 
+const savedAuthEnv = {
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+  CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+  CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR:
+    process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR,
+}
+
+beforeEach(() => {
+  process.env.ANTHROPIC_API_KEY = 'test-key'
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR
+})
+
 afterEach(() => {
   mock.restore()
+  for (const [key, value] of Object.entries(savedAuthEnv)) {
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
+    }
+  }
 })
 
 describe('kernel headless smoke', () => {

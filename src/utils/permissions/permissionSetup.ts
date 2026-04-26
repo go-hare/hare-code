@@ -891,7 +891,9 @@ export async function initializeToolPermissionContext({
   const parsedAllowedToolsCli = parseToolListFromCLI(allowedToolsCli).map(
     rule => permissionRuleValueToString(permissionRuleValueFromString(rule)),
   )
-  let parsedDisallowedToolsCli = parseToolListFromCLI(disallowedToolsCli)
+  const parsedExplicitDisallowedToolsCli =
+    parseToolListFromCLI(disallowedToolsCli)
+  let parsedDisallowedToolsCli = [...parsedExplicitDisallowedToolsCli]
 
   // If base tools are specified, automatically deny all tools NOT in the base set
   // We need to check if base tools were explicitly provided (not just empty default)
@@ -967,6 +969,7 @@ export async function initializeToolPermissionContext({
       alwaysAllowRules: { cliArg: parsedAllowedToolsCli },
       alwaysDenyRules: { cliArg: parsedDisallowedToolsCli },
       alwaysAskRules: {},
+      spawnedAgentCliArgDenyRules: parsedExplicitDisallowedToolsCli,
       isBypassPermissionsModeAvailable,
       ...(feature('TRANSCRIPT_CLASSIFIER')
         ? { isAutoModeAvailable: true }

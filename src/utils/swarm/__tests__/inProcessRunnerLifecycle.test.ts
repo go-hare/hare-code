@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const content = readFileSync(
-  join(process.cwd(), 'src/utils/swarm/inProcessRunner.ts'),
+  join(import.meta.dir, '../inProcessRunner.ts'),
   'utf8',
 )
 

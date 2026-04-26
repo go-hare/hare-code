@@ -446,37 +446,63 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
         })
       }
 
-      const done = new Promise<SessionDoneStatus>(resolve => {
-        child.on('close', (code, signal) => {
-          // Close transcript stream on exit
-          if (transcriptStream) {
-            transcriptStream.end()
-            transcriptStream = null
+      const closeTranscriptStream = (): Promise<void> => {
+        const stream = transcriptStream
+        if (!stream) {
+          return Promise.resolve()
+        }
+        transcriptStream = null
+        return new Promise(resolveClose => {
+          let settled = false
+          const finish = () => {
+            if (settled) return
+            settled = true
+            resolveClose()
           }
+          stream.once('finish', finish)
+          stream.once('error', finish)
+          stream.end()
+        })
+      }
 
+      const done = new Promise<SessionDoneStatus>(resolve => {
+        let resolved = false
+        const finishSession = (
+          status: SessionDoneStatus,
+          debugMessage: string,
+        ) => {
+          if (resolved) return
+          resolved = true
+          void closeTranscriptStream().then(() => {
+            deps.onDebug(debugMessage)
+            resolve(status)
+          })
+        }
+
+        child.on('close', (code, signal) => {
           if (signal === 'SIGTERM' || signal === 'SIGINT') {
-            deps.onDebug(
+            finishSession(
+              'interrupted',
               `[bridge:session] sessionId=${opts.sessionId} interrupted signal=${signal} pid=${child.pid}`,
             )
-            resolve('interrupted')
           } else if (code === 0) {
-            deps.onDebug(
+            finishSession(
+              'completed',
               `[bridge:session] sessionId=${opts.sessionId} completed exit_code=0 pid=${child.pid}`,
             )
-            resolve('completed')
           } else {
-            deps.onDebug(
+            finishSession(
+              'failed',
               `[bridge:session] sessionId=${opts.sessionId} failed exit_code=${code} pid=${child.pid}`,
             )
-            resolve('failed')
           }
         })
 
         child.on('error', err => {
-          deps.onDebug(
+          finishSession(
+            'failed',
             `[bridge:session] sessionId=${opts.sessionId} spawn error: ${err.message}`,
           )
-          resolve('failed')
         })
       })
 

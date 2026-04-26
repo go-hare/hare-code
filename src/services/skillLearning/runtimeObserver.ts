@@ -45,6 +45,7 @@ import { checkPromotion } from './promotion.js'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getCwd } from '../../utils/cwd.js'
 
 export const RUNTIME_SESSION_ID = 'runtime-session'
 
@@ -99,7 +100,7 @@ export function initSkillLearning(): void {
 async function runStartupMaintenance(): Promise<void> {
   if (!isSkillLearningEnabled()) return
   if (process.env.CLAUDE_SKILL_LEARNING_DISABLE) return
-  const project = resolveProjectContext(process.cwd())
+  const project = resolveProjectContext(getCwd())
   const options = { project }
   await Promise.allSettled([
     decayInstinctConfidence(options),
@@ -128,7 +129,7 @@ export async function runSkillLearningPostSampling(
   if (process.env.CLAUDE_SKILL_LEARNING_DISABLE) return
   if (!context.querySource?.startsWith('repl_main_thread')) return
   if (context.toolUseContext.agentId) return
-  const cwd = process.cwd()
+  const cwd = getCwd()
   if (isInsideSkillLearningStorage(cwd)) return
 
   const project = resolveProjectContext(cwd)
@@ -207,7 +208,7 @@ async function autoEvolveLearnedSkills(options: {
   project: ReturnType<typeof resolveProjectContext>
 }): Promise<void> {
   const instincts = await loadInstincts(options)
-  const cwd = process.cwd()
+  const cwd = getCwd()
 
   const skillRoots = [
     join(cwd, '.claude', 'skills'),

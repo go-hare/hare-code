@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test as baseTest } from 'bun:test'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,15 +13,17 @@ import {
   runSkillLearningPostSampling,
 } from '../runtimeObserver.js'
 import { executePostSamplingHooks } from '../../../utils/hooks/postSamplingHooks.js'
+import { runWithCwdOverride } from '../../../utils/cwd.js'
 
 let root: string
-let previousCwd: string
 const originalEnv = { ...process.env }
+
+function test(name: string, fn: () => void | Promise<void>): void {
+  baseTest(name, () => runWithCwdOverride(root, fn))
+}
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'skill-learning-runtime-'))
-  previousCwd = process.cwd()
-  process.chdir(root)
   process.env = { ...originalEnv }
   process.env.CLAUDE_SKILL_LEARNING_HOME = join(root, 'learning-home')
   process.env.CLAUDE_CONFIG_DIR = join(root, 'config')
@@ -32,7 +34,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  process.chdir(previousCwd)
   process.env = { ...originalEnv }
   resetSkillLearningConfig()
   rmSync(root, { recursive: true, force: true })

@@ -9,6 +9,7 @@ import type {
 } from './types.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { logError } from '../../utils/log.js'
+import { getCwd } from '../../utils/cwd.js'
 
 /**
  * Tool event hook layer.
@@ -195,7 +196,7 @@ export async function runToolCallWithSkillLearningHooks<T>(
     if (!isSkillLearningEnabled()) {
       return invoke()
     }
-    const project = resolveProjectContext(process.cwd())
+    const project = resolveProjectContext(getCwd())
     // Always emit under the runtime observer's sessionId so the post-sampling
     // consumer can find our records. The prior default `'cli'` fell outside
     // the observer's sessionId filter and made tool-hook observations

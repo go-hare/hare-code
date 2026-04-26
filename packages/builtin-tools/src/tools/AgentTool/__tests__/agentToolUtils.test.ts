@@ -10,6 +10,9 @@ const allAgentDisallowedTools = new Set<string>();
 const asyncAgentAllowedTools = new Set<string>();
 const customAgentDisallowedTools = new Set<string>();
 const inProcessTeammateAllowedTools = new Set<string>();
+let transcriptPersistenceDisabled = false;
+let snapshotError: Error | undefined;
+const snapshotWrites: Array<{ taskId: string; content: string }> = [];
 
 mock.module("bun:bundle", () => ({ feature: () => false }));
 
@@ -131,6 +134,19 @@ mock.module("src/utils/errors.js", () => ({
 
 mock.module("src/utils/forkedAgent.js", () => ({}));
 
+mock.module("src/utils/sessionStorage.js", () => ({
+  isTranscriptPersistenceDisabled: () => transcriptPersistenceDisabled,
+}));
+
+mock.module("src/utils/task/diskOutput.js", () => ({
+  writeTaskOutputSnapshot: async (taskId: string, content: string) => {
+    snapshotWrites.push({ taskId, content });
+    if (snapshotError) {
+      throw snapshotError;
+    }
+  },
+}));
+
 mock.module("src/utils/permissions/yoloClassifier.js", () => ({
   buildTranscriptForClassifier: () => "",
   classifyYoloAction: () => null,
@@ -173,6 +189,7 @@ const {
   countToolUses,
   getLastToolUseName,
   resolveAgentTools,
+  writeAgentOutputSnapshotIfPersistenceDisabled,
 } = await import("../agentToolUtils");
 
 afterEach(() => {
@@ -180,6 +197,9 @@ afterEach(() => {
   asyncAgentAllowedTools.clear();
   customAgentDisallowedTools.clear();
   inProcessTeammateAllowedTools.clear();
+  transcriptPersistenceDisabled = false;
+  snapshotError = undefined;
+  snapshotWrites.length = 0;
 });
 
 function makeAssistantMessage(content: any[]): any {
@@ -344,5 +364,31 @@ describe("resolveAgentTools", () => {
     expect(subAgent.validTools).toEqual(["Agent(worker)"]);
     expect(subAgent.allowedAgentTypes).toEqual(["worker"]);
     expect(subAgent.invalidTools).toEqual([]);
+  });
+});
+
+describe("writeAgentOutputSnapshotIfPersistenceDisabled", () => {
+  test("skips output snapshot when transcript persistence is enabled", async () => {
+    await writeAgentOutputSnapshotIfPersistenceDisabled("task-1", "done");
+
+    expect(snapshotWrites).toEqual([]);
+  });
+
+  test("writes newline-terminated output when transcript persistence is disabled", async () => {
+    transcriptPersistenceDisabled = true;
+
+    await writeAgentOutputSnapshotIfPersistenceDisabled("task-1", "done");
+
+    expect(snapshotWrites).toEqual([{ taskId: "task-1", content: "done\n" }]);
+  });
+
+  test("does not throw when output snapshot writing fails", async () => {
+    transcriptPersistenceDisabled = true;
+    snapshotError = new Error("disk unavailable");
+
+    await expect(
+      writeAgentOutputSnapshotIfPersistenceDisabled("task-1", "done"),
+    ).resolves.toBeUndefined();
+    expect(snapshotWrites).toEqual([{ taskId: "task-1", content: "done\n" }]);
   });
 });

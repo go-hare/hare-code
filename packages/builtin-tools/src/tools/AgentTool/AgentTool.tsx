@@ -112,6 +112,7 @@ import {
   finalizeAgentTool,
   getLastToolUseName,
   runAsyncAgentLifecycle,
+  writeAgentOutputSnapshotIfPersistenceDisabled,
 } from './agentToolUtils.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import {
@@ -133,7 +134,10 @@ import {
   isBuiltInAgent,
 } from './loadAgentsDir.js'
 import { getPrompt } from './prompt.js'
-import { runAgent } from './runAgent.js'
+import {
+  getSpawnedAgentToolPermissionContext,
+  runAgent,
+} from './runAgent.js'
 import {
   renderGroupedAgentToolUse,
   renderToolResultMessage,
@@ -145,6 +149,11 @@ import {
   userFacingName,
   userFacingNameBackgroundColor,
 } from './UI.js'
+import {
+  normalizeAgentOwnedFiles,
+  resolveAgentTaskExecutionContext,
+  shouldExposeTaskIdInput,
+} from './taskLinking.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const proactiveModule =
@@ -264,22 +273,24 @@ const fullInputSchema = lazySchema(() => {
 // (field type collapses to `unknown`). The ternary return produces a union
 // type, but call() destructures via the explicit AgentToolInput type below
 // which always includes all optional fields.
-export const inputSchema = lazySchema(() => {
+export const inputSchema = () => {
   const schema = feature('KAIROS')
     ? fullInputSchema()
     : fullInputSchema().omit({ cwd: true })
+  const schemaWithTaskFields = shouldExposeTaskIdInput()
+    ? schema
+    : schema.omit({ task_id: true })
+  const coordinatorSchema = isCoordinatorMode()
+    ? schemaWithTaskFields.omit({ name: true, team_name: true, mode: true })
+    : schemaWithTaskFields
 
-  // GrowthBook-in-lazySchema is acceptable here (unlike subagent_type, which
-  // was removed in 906da6c723): the divergence window is one-session-per-
-  // gate-flip via _CACHED_MAY_BE_STALE disk read, and worst case is either
-  // "schema shows a no-op param" (gate flips on mid-session: param ignored
-  // by forceAsync) or "schema hides a param that would've worked" (gate
-  // flips off mid-session: everything still runs async via memoized
-  // forceAsync). No Zod rejection, no crash — unlike required→optional.
+  // Keep this final wrapper dynamic. Coordinator mode and task-tool exposure
+  // can change after AgentTool has already been imported or serialized once,
+  // and a memoized final schema would leave stale team-only fields visible.
   return isBackgroundTasksDisabled || isForkSubagentEnabled()
-    ? schema.omit({ run_in_background: true })
-    : schema
-})
+    ? coordinatorSchema.omit({ run_in_background: true })
+    : coordinatorSchema
+}
 type InputSchema = ReturnType<typeof inputSchema>
 
 // Explicit type widens the schema inference to always include all optional
@@ -317,6 +328,10 @@ export const outputSchema = lazySchema(() => {
       .describe(
         'Whether the calling agent has Read/Bash tools to check progress',
       ),
+    taskLinkingWarning: z
+      .string()
+      .optional()
+      .describe('Warning when a requested task_id could not be linked'),
   })
 
   return z.union([syncOutputSchema, asyncOutputSchema])
@@ -432,7 +447,11 @@ export const AgentTool = buildTool({
     onProgress?,
   ) {
     const startTime = Date.now()
-    const model = isCoordinatorMode() ? undefined : modelParam
+    const isCoordinator = isCoordinatorMode()
+    const model = isCoordinator ? undefined : modelParam
+    const routableAgentName = isCoordinator ? undefined : name
+    const teamNameInput = isCoordinator ? undefined : team_name
+    const teammateSpawnMode = isCoordinator ? undefined : spawnMode
 
     // Get app state for permission mode and agent filtering
     const appState = toolUseContext.getAppState()
@@ -443,15 +462,15 @@ export const AgentTool = buildTool({
       toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
 
     // Check if user is trying to use agent teams without access
-    if (team_name && !isAgentSwarmsEnabled()) {
+    if (teamNameInput && !isAgentSwarmsEnabled()) {
       throw new Error('Agent Teams is not yet available on your plan.')
     }
 
     // Teammates (in-process or tmux) passing `name` would trigger spawnTeammate()
     // below, but TeamFile.members is a flat array with one leadAgentId — nested
     // teammates land in the roster with no provenance and confuse the lead.
-    const teamName = resolveTeamName({ team_name }, appState)
-    if (isTeammate() && teamName && name) {
+    const teamName = resolveTeamName({ team_name: teamNameInput }, appState)
+    if (isTeammate() && teamName && routableAgentName) {
       throw new Error(
         'Teammates cannot spawn other teammates — the team roster is flat. To spawn a subagent instead, omit the `name` parameter.',
       )
@@ -467,7 +486,7 @@ export const AgentTool = buildTool({
 
     // Check if this is a multi-agent spawn request
     // Spawn is triggered when team_name is set (from param or context) and name is provided
-    if (teamName && name) {
+    if (teamName && routableAgentName) {
       // Set agent definition color for grouped UI display before spawning
       const agentDef = subagent_type
         ? toolUseContext.options.agentDefinitions.activeAgents.find(
@@ -479,12 +498,12 @@ export const AgentTool = buildTool({
       }
       const result = await spawnTeammate(
         {
-          name,
+          name: routableAgentName,
           prompt,
           description,
           team_name: teamName,
           use_splitpane: true,
-          plan_mode_required: spawnMode === 'plan',
+          plan_mode_required: teammateSpawnMode === 'plan',
           model: model ?? agentDef?.model,
           agent_type: subagent_type,
           invokingRequestId: assistantMessage?.requestId as string | undefined,
@@ -754,22 +773,19 @@ export const AgentTool = buildTool({
       | ReturnType<typeof buildEffectiveSystemPrompt>
       | undefined
     let promptMessages: MessageType[]
-    const normalizedOwnedFiles = owned_files?.filter(
-      filePath => filePath.trim().length > 0,
-    )
-    let taskExecutionContext = toolUseContext.activeTaskExecutionContext
-    if (task_id) {
-      const taskListId = getTaskListId()
-      const task = await getTask(taskListId, task_id)
-      if (!task) {
-        throw new Error(`Task '${task_id}' not found in task list '${taskListId}'`)
-      }
-      taskExecutionContext = {
-        taskListId,
-        taskId: task_id,
-        ownedFiles: normalizedOwnedFiles ?? getTaskOwnedFiles(task),
-      }
-    }
+    const normalizedOwnedFiles = normalizeAgentOwnedFiles(owned_files)
+    const {
+      taskExecutionContext,
+      taskLinkingWarning,
+    } = await resolveAgentTaskExecutionContext({
+      taskId: task_id,
+      inheritedContext: toolUseContext.activeTaskExecutionContext,
+      explicitOwnedFiles: normalizedOwnedFiles,
+      getTaskListId,
+      getTask,
+      getTaskOwnedFiles,
+      logWarning: logForDebugging,
+    })
     const workerOwnedFiles =
       normalizedOwnedFiles ?? taskExecutionContext?.ownedFiles
 
@@ -850,11 +866,6 @@ export const AgentTool = buildTool({
         !isBackgroundTasksDisabled,
     }
 
-    // Use inline env check instead of coordinatorModule to avoid circular
-    // dependency issues during test module loading.
-    const isCoordinator = feature('COORDINATOR_MODE')
-      ? isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
-      : false
     if (isCoordinator && !isForkPath && enhancedSystemPrompt) {
       enhancedSystemPrompt = [
         ...enhancedSystemPrompt,
@@ -890,10 +901,10 @@ export const AgentTool = buildTool({
     // permission mode, so they aren't affected by the parent's tool
     // restrictions. This is computed here so that runAgent doesn't need to
     // import from tools.ts (which would create a circular dependency).
-    const workerPermissionContext = {
+    const workerPermissionContext = getSpawnedAgentToolPermissionContext({
       ...appState.toolPermissionContext,
       mode: selectedAgent.permissionMode ?? 'acceptEdits',
-    }
+    })
     const workerTools = assembleToolPool(
       workerPermissionContext,
       appState.mcp.tools,
@@ -1048,10 +1059,10 @@ export const AgentTool = buildTool({
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
       // so we don't leave a stale entry if spawn fails. Sync agents skipped —
       // coordinator is blocked, so SendMessage routing doesn't apply.
-      if (name) {
+      if (routableAgentName) {
         rootSetAppState(prev => {
           const next = new Map(prev.agentNameRegistry)
-          next.set(name, asAgentId(asyncAgentId))
+          next.set(routableAgentName, asAgentId(asyncAgentId))
           return { ...prev, agentNameRegistry: next }
         })
       }
@@ -1119,6 +1130,7 @@ export const AgentTool = buildTool({
           prompt: prompt,
           outputFile: getTaskOutputPath(agentBackgroundTask.agentId),
           canReadOutputFile,
+          taskLinkingWarning,
         },
       }
     } else {
@@ -1420,6 +1432,11 @@ export const AgentTool = buildTool({
                         }
                       }
 
+                      await writeAgentOutputSnapshotIfPersistenceDisabled(
+                        backgroundedTaskId,
+                        finalMessage,
+                      )
+
                       // Clean up worktree before notification so we can include it
                       const worktreeResult = await cleanupWorktreeIfNeeded()
 
@@ -1456,6 +1473,11 @@ export const AgentTool = buildTool({
                         const worktreeResult = await cleanupWorktreeIfNeeded()
                         const partialResult =
                           extractPartialResult(agentMessages)
+                        await writeAgentOutputSnapshotIfPersistenceDisabled(
+                          backgroundedTaskId,
+                          partialResult ??
+                            'Agent was stopped before producing a final response.',
+                        )
                         await enqueueAgentNotification({
                           taskId: backgroundedTaskId,
                           description,
@@ -1472,6 +1494,10 @@ export const AgentTool = buildTool({
                         backgroundedTaskId,
                         errMsg,
                         rootSetAppState,
+                      )
+                      await writeAgentOutputSnapshotIfPersistenceDisabled(
+                        backgroundedTaskId,
+                        errMsg,
                       )
                       const worktreeResult = await cleanupWorktreeIfNeeded()
                       await enqueueAgentNotification({
@@ -1508,6 +1534,7 @@ export const AgentTool = buildTool({
                       prompt: prompt,
                       outputFile: getTaskOutputPath(backgroundedTaskId),
                       canReadOutputFile,
+                      taskLinkingWarning,
                     },
                   }
                 }
@@ -1851,10 +1878,13 @@ The agent is now running and will receive instructions via mailbox.`,
     }
     if (data.status === 'async_launched') {
       const prefix = `Async agent launched successfully.\nagentId: ${data.agentId} (internal ID - do not mention to user. Use SendMessage with to: '${data.agentId}' to continue this agent.)\nThe agent is working in the background. You will be notified automatically when it completes.`
+      const warning = data.taskLinkingWarning
+        ? `\nwarning: ${data.taskLinkingWarning}`
+        : ''
       const instructions = data.canReadOutputFile
         ? `Do not duplicate this agent's work — avoid working with the same files or topics it is using. Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.\noutput_file: ${data.outputFile}\nIf asked, you can check progress before completion by using ${FILE_READ_TOOL_NAME} or ${BASH_TOOL_NAME} tail on the output file.`
         : `Briefly tell the user what you launched and end your response. Do not generate any other text — agent results will arrive in a subsequent message.`
-      const text = `${prefix}\n${instructions}`
+      const text = `${prefix}${warning}\n${instructions}`
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',

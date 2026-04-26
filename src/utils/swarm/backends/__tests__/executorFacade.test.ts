@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readMailbox } from 'src/utils/teammateMailbox.js'
+import { readMailbox } from '../../../teammateMailbox.js'
 import {
   createPaneTeammateExecutor,
   createTeammateExecutorForMember,
@@ -144,6 +144,53 @@ describe('executorFacade', () => {
     expect(context.setAppState).toHaveBeenCalledTimes(1)
   })
 
+  test('passes custom agent definitions to pane teammate processes', async () => {
+    let sentCommand = ''
+    const backend = createBackend({
+      async sendCommandToPane(_paneId, command) {
+        sentCommand = command
+      },
+    })
+    const executor = createPaneTeammateExecutor(backend)
+
+    await executor.spawn!(
+      {
+        teammateId: 'reviewer@alpha',
+        sanitizedName: 'reviewer',
+        teamName: 'alpha',
+        prompt: 'review the change',
+        cwd: tempHome,
+        teammateColor: 'blue',
+        agentType: 'code-reviewer',
+        agentDefinition: {
+          agentType: 'code-reviewer',
+          whenToUse: 'Reviews code changes',
+          getSystemPrompt: () => 'You are a strict code reviewer.',
+          source: 'flagSettings',
+          tools: ['Read', 'Grep'],
+          disallowedTools: ['Write'],
+          model: 'gpt-5.4',
+          permissionMode: 'acceptEdits',
+          maxTurns: 3,
+          skills: ['review'],
+          initialPrompt: 'Start with high-risk issues.',
+          background: true,
+        },
+        permissionMode: 'auto',
+        useSplitPane: true,
+      },
+      createContext(),
+    )
+
+    expect(sentCommand).toContain('--agent-type')
+    expect(sentCommand).toContain('code-reviewer')
+    expect(sentCommand).toContain('--agents')
+    expect(sentCommand).toContain('"code-reviewer"')
+    expect(sentCommand).toContain('"prompt":"You are a strict code reviewer."')
+    expect(sentCommand).toContain('"tools":["Read","Grep"]')
+    expect(sentCommand).toContain('"permissionMode":"acceptEdits"')
+  })
+
   test('preserves separate-window spawning when useSplitPane is false', async () => {
     let paneSpawned = false
     let windowSpawned = false
@@ -268,5 +315,42 @@ describe('executorFacade', () => {
     expect(result).toBe(true)
     expect(requestTeammateShutdownMock).not.toHaveBeenCalled()
     expect(await readMailbox('worker', 'alpha')).toEqual([])
+  })
+
+  test('uses persisted tmux context when terminating pane teammates', async () => {
+    const executor = createPaneTeammateExecutor('tmux')
+
+    const result = await executor.terminate(
+      'alpha',
+      {
+        agentId: 'worker@alpha',
+        name: 'worker',
+        tmuxPaneId: '%1',
+        backendType: 'tmux',
+        insideTmux: false,
+      },
+      {
+        getAppState: () => ({ tasks: {} }),
+        setAppState: mock(() => {}),
+      },
+    )
+
+    expect(result).toBe(true)
+    expect(killPaneMock).toHaveBeenCalledWith('%1', true)
+  })
+
+  test('uses persisted tmux context when cleaning orphaned pane teammates', async () => {
+    const executor = createPaneTeammateExecutor('tmux')
+
+    const result = await executor.cleanupOrphan({
+      agentId: 'worker@alpha',
+      name: 'worker',
+      tmuxPaneId: '%1',
+      backendType: 'tmux',
+      insideTmux: true,
+    })
+
+    expect(result).toBe(true)
+    expect(killPaneMock).toHaveBeenCalledWith('%1', false)
   })
 })

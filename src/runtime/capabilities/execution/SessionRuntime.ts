@@ -9,9 +9,9 @@ import type {
   SDKPermissionDenial,
   SDKStatus,
   SDKUserMessageReplay,
-} from 'src/entrypoints/agentSdkTypes.js'
+} from '../../../entrypoints/agentSdkTypes.js'
 import type { BetaMessageDeltaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import { accumulateUsage, updateUsage } from 'src/services/api/claude.js'
+import { accumulateUsage, updateUsage } from '../../../services/api/claude.js'
 import type { NonNullableUsage } from '@ant/model-provider'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import stripAnsi from 'strip-ansi'
@@ -96,9 +96,9 @@ import type { RuntimeSessionLifecycle } from '../../contracts/session.js'
 // Lazy: MessageSelector.tsx pulls React/ink; only needed for message filtering at query time
 /* eslint-disable @typescript-eslint/no-require-imports */
 const messageSelector =
-  (): typeof import('src/components/MessageSelector.js') | null => {
+  (): typeof import('../../../components/MessageSelector.js') | null => {
     try {
-      return require('src/components/MessageSelector.js')
+      return require('../../../components/MessageSelector.js')
     } catch {
       return null
     }

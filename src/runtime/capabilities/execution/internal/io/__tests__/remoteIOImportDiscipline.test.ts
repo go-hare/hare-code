@@ -3,17 +3,11 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const remoteIOContent = readFileSync(
-  join(
-    process.cwd(),
-    'src/runtime/capabilities/execution/internal/io/remoteIO.ts',
-  ),
+  join(import.meta.dir, '../remoteIO.ts'),
   'utf8',
 )
 const headlessControlContent = readFileSync(
-  join(
-    process.cwd(),
-    'src/runtime/capabilities/execution/internal/headlessControl.ts',
-  ),
+  join(import.meta.dir, '../../headlessControl.ts'),
   'utf8',
 )
 

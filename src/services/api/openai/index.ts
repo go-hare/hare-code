@@ -22,6 +22,7 @@ import {
 } from '../../../Tool.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { addToTotalSessionCost } from '../../../cost-tracker.js'
+import { addToTotalDurationState } from '../../../bootstrap/state.js'
 import { calculateUSDCost } from '../../../utils/modelCost.js'
 import { isOpenAIThinkingEnabled, resolveOpenAIMaxTokens, buildOpenAIRequestBody } from './requestBody.js'
 import { resolveAppliedEffort } from '../../../utils/effort.js'
@@ -111,6 +112,15 @@ export async function* queryModelOpenAI(
   StreamEvent | AssistantMessage | SystemAPIErrorMessage,
   void
 > {
+  let requestStart = 0
+  let hasRecordedAPIDuration = false
+  const recordAPIDuration = () => {
+    if (requestStart === 0 || hasRecordedAPIDuration) return
+    const duration = Date.now() - requestStart
+    addToTotalDurationState(duration, duration)
+    hasRecordedAPIDuration = true
+  }
+
   try {
     // 1. Resolve model name
     const openaiModel = resolveOpenAIModel(options.model)
@@ -202,18 +212,19 @@ export async function* queryModelOpenAI(
     //     thinking is enabled the thinking phase consumes the entire budget
     //     leaving no tokens for the final response.
     //
-    //     Use upperLimit (not the slot-cap default) because the Anthropic path's
-    //     slot-reservation cap (CAPPED_DEFAULT_MAX_TOKENS=8k) is paired with an
-    //     auto-retry at 64k in query.ts. The OpenAI path has no such retry, so
-    //     using the capped 8k default would silently truncate responses in
-    //     multi-turn conversations where thinking consumes most of the budget.
+    //     The Anthropic path's slot-reservation cap
+    //     (CAPPED_DEFAULT_MAX_TOKENS=8k) is paired with an auto-retry at 64k in
+    //     query.ts. The OpenAI path has no such retry, so the fallback stays
+    //     above that cap, but avoids defaulting to 64k because some
+    //     OpenAI-compatible gateways fail oversized max_tokens requests before
+    //     streaming any response.
     //
     //     Override priority:
     //     1. options.maxOutputTokensOverride (programmatic)
     //     2. OPENAI_MAX_TOKENS env var (OpenAI-specific, useful for local models
     //        with small context windows, e.g. RTX 3060 12GB running 65536-token models)
     //     3. CLAUDE_CODE_MAX_OUTPUT_TOKENS env var (generic override)
-    //     4. upperLimit default (64000)
+    //     4. min(upperLimit, 32k) default cap
     const { upperLimit } = getModelMaxOutputTokens(openaiModel)
     const maxTokens = resolveOpenAIMaxTokens(upperLimit, options.maxOutputTokensOverride)
 
@@ -237,9 +248,10 @@ export async function* queryModelOpenAI(
       enableThinking,
       maxTokens,
       temperatureOverride: options.temperatureOverride,
-      effortValue: resolveAppliedEffort(options.model, options.effortValue),
+      effortValue: resolveAppliedEffort(openaiModel, options.effortValue),
       outputFormat: options.outputFormat,
     })
+    requestStart = Date.now()
     const stream = await client.chat.completions.create(
       requestBody,
       { signal },
@@ -261,98 +273,103 @@ export async function* queryModelOpenAI(
       cache_read_input_tokens: 0,
     }
     let ttftMs = 0
-    const start = Date.now()
+    const start = requestStart
 
-    for await (const event of adaptedStream) {
-      switch (event.type) {
-        case 'message_start': {
-          partialMessage = (event as any).message
-          ttftMs = Date.now() - start
-          if ((event as any).message?.usage) {
-            usage = {
-              ...usage,
-              ...(event as any).message.usage,
-            }
-          }
-          break
-        }
-        case 'content_block_start': {
-          const idx = (event as any).index
-          const cb = (event as any).content_block
-          if (cb.type === 'tool_use') {
-            contentBlocks[idx] = { ...cb, input: '' }
-          } else if (cb.type === 'text') {
-            contentBlocks[idx] = { ...cb, text: '' }
-          } else if (cb.type === 'thinking') {
-            contentBlocks[idx] = { ...cb, thinking: '', signature: '' }
-          } else {
-            contentBlocks[idx] = { ...cb }
-          }
-          break
-        }
-        case 'content_block_delta': {
-          const idx = (event as any).index
-          const delta = (event as any).delta
-          const block = contentBlocks[idx]
-          if (!block) break
-          if (delta.type === 'text_delta') {
-            block.text = (block.text || '') + delta.text
-          } else if (delta.type === 'input_json_delta') {
-            block.input = (block.input || '') + delta.partial_json
-          } else if (delta.type === 'thinking_delta') {
-            block.thinking = (block.thinking || '') + delta.thinking
-          } else if (delta.type === 'signature_delta') {
-            block.signature = delta.signature
-          }
-          break
-        }
-        case 'content_block_stop': {
-          // Block accumulation is complete; assembly happens at message_stop.
-          break
-        }
-        case 'message_delta': {
-          const deltaUsage = (event as any).usage
-          if (deltaUsage) {
-            usage = { ...usage, ...deltaUsage }
-          }
-          if ((event as any).delta?.stop_reason != null) {
-            stopReason = (event as any).delta.stop_reason
-          }
-          break
-        }
-        case 'message_stop': {
-          // Assemble ONE AssistantMessage with ALL content blocks, matching the
-          // Anthropic SDK path. Real usage (input + output tokens) is available
-          // here and injected so tokenCountWithEstimation() can read it.
-          if (partialMessage) {
-            for (const output of assembleFinalAssistantOutputs({
-              partialMessage, contentBlocks, tools, agentId: options.agentId,
-              usage, stopReason, maxTokens,
-            })) {
-              if (output.type === 'assistant') {
-                collectedMessages.push(output)
+    try {
+      for await (const event of adaptedStream) {
+        switch (event.type) {
+          case 'message_start': {
+            partialMessage = (event as any).message
+            ttftMs = Date.now() - start
+            if ((event as any).message?.usage) {
+              usage = {
+                ...usage,
+                ...(event as any).message.usage,
               }
-              yield output
             }
-            // Reset partialMessage so the post-loop safety fallback does not
-            // yield a second identical AssistantMessage.
-            partialMessage = null
+            break
           }
-          // Track cost and token usage
-          if (usage.input_tokens + usage.output_tokens > 0) {
-            const costUSD = calculateUSDCost(openaiModel, usage as any)
-            addToTotalSessionCost(costUSD, usage as any, options.model)
+          case 'content_block_start': {
+            const idx = (event as any).index
+            const cb = (event as any).content_block
+            if (cb.type === 'tool_use') {
+              contentBlocks[idx] = { ...cb, input: '' }
+            } else if (cb.type === 'text') {
+              contentBlocks[idx] = { ...cb, text: '' }
+            } else if (cb.type === 'thinking') {
+              contentBlocks[idx] = { ...cb, thinking: '', signature: '' }
+            } else {
+              contentBlocks[idx] = { ...cb }
+            }
+            break
           }
-          break
+          case 'content_block_delta': {
+            const idx = (event as any).index
+            const delta = (event as any).delta
+            const block = contentBlocks[idx]
+            if (!block) break
+            if (delta.type === 'text_delta') {
+              block.text = (block.text || '') + delta.text
+            } else if (delta.type === 'input_json_delta') {
+              block.input = (block.input || '') + delta.partial_json
+            } else if (delta.type === 'thinking_delta') {
+              block.thinking = (block.thinking || '') + delta.thinking
+            } else if (delta.type === 'signature_delta') {
+              block.signature = delta.signature
+            }
+            break
+          }
+          case 'content_block_stop': {
+            // Block accumulation is complete; assembly happens at message_stop.
+            break
+          }
+          case 'message_delta': {
+            const deltaUsage = (event as any).usage
+            if (deltaUsage) {
+              usage = { ...usage, ...deltaUsage }
+            }
+            if ((event as any).delta?.stop_reason != null) {
+              stopReason = (event as any).delta.stop_reason
+            }
+            break
+          }
+          case 'message_stop': {
+            // Assemble ONE AssistantMessage with ALL content blocks, matching the
+            // Anthropic SDK path. Real usage (input + output tokens) is available
+            // here and injected so tokenCountWithEstimation() can read it.
+            if (partialMessage) {
+              for (const output of assembleFinalAssistantOutputs({
+                partialMessage, contentBlocks, tools, agentId: options.agentId,
+                usage, stopReason, maxTokens,
+              })) {
+                if (output.type === 'assistant') {
+                  collectedMessages.push(output)
+                }
+                yield output
+              }
+              // Reset partialMessage so the post-loop safety fallback does not
+              // yield a second identical AssistantMessage.
+              partialMessage = null
+            }
+            // Track cost and token usage under the actual OpenAI model that
+            // was sent to the provider after env/model mapping resolution.
+            if (usage.input_tokens + usage.output_tokens > 0) {
+              const costUSD = calculateUSDCost(openaiModel, usage as any)
+              addToTotalSessionCost(costUSD, usage as any, openaiModel)
+            }
+            break
+          }
         }
-      }
 
-      // Also yield as StreamEvent for real-time display (matching Anthropic path)
-      yield {
-        type: 'stream_event',
-        event,
-        ...(event.type === 'message_start' ? { ttftMs } : undefined),
-      } as StreamEvent
+        // Also yield as StreamEvent for real-time display (matching Anthropic path)
+        yield {
+          type: 'stream_event',
+          event,
+          ...(event.type === 'message_start' ? { ttftMs } : undefined),
+        } as StreamEvent
+      }
+    } finally {
+      recordAPIDuration()
     }
 
     // Record LLM observation in Langfuse (no-op if not configured)
@@ -383,6 +400,7 @@ export async function* queryModelOpenAI(
       }
     }
   } catch (error) {
+    recordAPIDuration()
     const errorMessage = error instanceof Error ? error.message : String(error)
     logForDebugging(`[OpenAI] Error: ${errorMessage}`, { level: 'error' })
     yield createAssistantAPIErrorMessage({

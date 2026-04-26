@@ -4,6 +4,7 @@ import { Dialog } from '@anthropic/ink';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { isSkillLearningEnabled } from '../../services/skillLearning/featureCheck.js';
+import { getCwd } from '../../utils/cwd.js';
 
 type SkillAction = {
   label: string;
@@ -43,7 +44,7 @@ async function getStatusText(): Promise<string> {
   const { readObservations, loadInstincts, resolveProjectContext } = await import(
     '../../services/skillLearning/index.js'
   );
-  const project = resolveProjectContext(process.cwd());
+  const project = resolveProjectContext(getCwd());
   const [observations, instincts] = await Promise.all([readObservations({ project }), loadInstincts({ project })]);
   return [
     `Skill Learning status for ${project.projectName} (${project.projectId})`,

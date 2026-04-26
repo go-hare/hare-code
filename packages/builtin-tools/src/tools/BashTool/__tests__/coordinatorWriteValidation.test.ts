@@ -5,6 +5,7 @@ import { expandPath } from 'src/utils/path.js'
 
 mock.module('src/coordinator/coordinatorMode.js', () => ({
   isCoordinatorMode: () => true,
+  getWorkerAntiInjectionAddendum: () => '',
 }))
 
 const { validateCoordinatorBashWriteAccess } = await import(

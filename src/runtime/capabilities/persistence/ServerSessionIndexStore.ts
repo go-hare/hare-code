@@ -20,6 +20,10 @@ function isFsInaccessible(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
+function isJsonParseFailure(error: unknown): boolean {
+  return error instanceof SyntaxError
+}
+
 function getDefaultServerSessionIndexPath(): string {
   const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')
   return join(configDir, 'server-sessions.json')
@@ -34,7 +38,7 @@ export function createServerSessionIndexStore(
       const parsed = JSON.parse(raw) as RuntimeSessionIndex
       return parsed ?? {}
     } catch (error) {
-      if (isFsInaccessible(error)) {
+      if (isFsInaccessible(error) || isJsonParseFailure(error)) {
         return {}
       }
       throw error

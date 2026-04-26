@@ -1,4 +1,4 @@
-import { describe, expect, test, mock, beforeEach } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 // ── Heavy module mocks (must be before any import of the module under test) ──
 
@@ -111,6 +111,8 @@ const { forwardSessionUpdates } = await import('../agentBridgeDeps.js')
 
 // ── Helpers ───────────────────────────────────────────────────────
 
+const originalCwd = process.cwd()
+
 function makeConn() {
   return {
     sessionUpdate: mock(async () => {}),
@@ -125,6 +127,10 @@ describe('AcpAgent', () => {
     mockSetModel.mockClear()
     mockGetMainLoopModel.mockClear()
     mockGetDefaultAppState.mockClear()
+  })
+
+  afterEach(() => {
+    process.chdir(originalCwd)
   })
 
   describe('initialize', () => {

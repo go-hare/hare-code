@@ -2,9 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
+const repoRoot = join(import.meta.dir, '../../../../..')
 const turnEngineContent = readFileSync(
   join(
-    process.cwd(),
+    repoRoot,
     'src/runtime/capabilities/execution/TurnEngine.ts',
   ),
   'utf8',

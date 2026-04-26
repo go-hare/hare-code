@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { InteractiveLaunchOptions } from '../interactiveLauncher.js'
 
 const callOrder: string[] = []
@@ -15,8 +15,16 @@ const mockLaunchRepl = mock(async () => {
   callOrder.push('launch')
 })
 const mockCreateSystemMessage = mock((_message: string, _variant: string) => {
-  callOrder.push('message')
+  callOrder.push('system-message')
   return bannerMessage
+})
+const mockCreateUserMessage = mock((_options: { content: string }) => {
+  callOrder.push('user-message')
+  return {
+    uuid: 'msg-user',
+    type: 'user',
+    content: _options.content,
+  }
 })
 const mockBuildDeepLinkBanner = mock((_options: unknown) => {
   callOrder.push('banner')
@@ -33,6 +41,7 @@ mock.module('../../../../replLauncher.js', () => ({
 
 mock.module('../../../../utils/messages.js', () => ({
   createSystemMessage: mockCreateSystemMessage,
+  createUserMessage: mockCreateUserMessage,
 }))
 
 mock.module('../../../../utils/deepLink/banner.js', () => ({
@@ -40,6 +49,10 @@ mock.module('../../../../utils/deepLink/banner.js', () => ({
 }))
 
 const { runInteractiveLaunch } = await import('../interactiveLauncher.js')
+
+afterAll(() => {
+  mock.restore()
+})
 
 function createLaunchOptions(): InteractiveLaunchOptions {
   return {
@@ -93,6 +106,7 @@ describe('runInteractiveLaunch', () => {
     mockLogEvent.mockClear()
     mockLaunchRepl.mockClear()
     mockCreateSystemMessage.mockClear()
+    mockCreateUserMessage.mockClear()
     mockBuildDeepLinkBanner.mockClear()
   })
 
@@ -134,7 +148,7 @@ describe('runInteractiveLaunch', () => {
       'save-mode',
       'event',
       'banner',
-      'message',
+      'system-message',
       'launch',
     ])
     expect(mockLaunchRepl).toHaveBeenCalledWith(

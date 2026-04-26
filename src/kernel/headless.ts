@@ -9,17 +9,10 @@ import type {
   MCPServerConnection,
   McpSdkServerConfig,
 } from '../services/mcp/types.js'
-import {
-  getDefaultAppState,
-  type AppState,
-} from '../state/AppStateStore.js'
+import { getDefaultAppState, type AppState } from '../state/AppStateStore.js'
 import { onChangeAppState } from '../state/onChangeAppState.js'
 import { createStore } from '../state/store.js'
-import {
-  type Tool,
-  type ToolPermissionContext,
-  type Tools,
-} from '../Tool.js'
+import { type Tool, type ToolPermissionContext, type Tools } from '../Tool.js'
 import type { AgentDefinition } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { getInitialEffortSetting, parseEffortValue } from '../utils/effort.js'
 import {
@@ -27,6 +20,7 @@ import {
   isFastModeEnabled,
 } from '../utils/fastMode.js'
 import { verifyAutoModeGateAccess } from '../utils/permissions/permissionSetup.js'
+import { enableConfigs } from '../utils/config.js'
 
 export type KernelHeadlessInput = HeadlessRuntimeInput
 
@@ -60,10 +54,47 @@ export type KernelHeadlessRunOptions = HeadlessRuntimeOptions
 
 type KernelHeadlessDeps = {
   runHeadlessRuntime: typeof runHeadlessRuntime
+  prepareRuntime?: () => void
 }
 
 const defaultKernelHeadlessDeps: KernelHeadlessDeps = {
   runHeadlessRuntime,
+  prepareRuntime: prepareKernelHeadlessRuntime,
+}
+
+type RuntimeMacro = {
+  VERSION: string
+  BUILD_TIME: string
+  FEEDBACK_CHANNEL: string
+  ISSUES_EXPLAINER: string
+  NATIVE_PACKAGE_URL: string
+  PACKAGE_URL: string
+  VERSION_CHANGELOG: string
+}
+
+const KERNEL_MACRO_FALLBACK: RuntimeMacro = {
+  VERSION: process.env.CLAUDE_CODE_VERSION ?? '0.0.0-kernel',
+  BUILD_TIME: '',
+  FEEDBACK_CHANNEL: '',
+  ISSUES_EXPLAINER: '',
+  NATIVE_PACKAGE_URL: '',
+  PACKAGE_URL: '',
+  VERSION_CHANGELOG: '',
+}
+
+function ensureKernelMacroFallback(): void {
+  const globalWithMacro = globalThis as typeof globalThis & {
+    MACRO?: Partial<RuntimeMacro>
+  }
+  globalWithMacro.MACRO = {
+    ...KERNEL_MACRO_FALLBACK,
+    ...globalWithMacro.MACRO,
+  }
+}
+
+export function prepareKernelHeadlessRuntime(): void {
+  ensureKernelMacroFallback()
+  enableConfigs()
 }
 
 export type KernelHeadlessSession = {
@@ -182,6 +213,7 @@ export async function runKernelHeadless(
   options: KernelHeadlessRunOptions,
   deps: KernelHeadlessDeps = defaultKernelHeadlessDeps,
 ): Promise<void> {
+  deps.prepareRuntime?.()
   return deps.runHeadlessRuntime(
     inputPrompt,
     () => environment.store.getState(),

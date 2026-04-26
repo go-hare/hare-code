@@ -1,42 +1,62 @@
-import { describe, expect, test, beforeEach, afterEach, mock } from "bun:test";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
+import {
+  resetSettingsCache,
+  setSessionSettingsCache,
+} from "src/utils/settings/settingsCache.js";
 
-// Mock heavy dependencies to avoid import chain issues
-mock.module("src/utils/thinking.js", () => ({
-  isUltrathinkEnabled: () => false,
-}));
-mock.module("src/utils/settings/settings.js", () => ({
-  getInitialSettings: () => ({}),
-  getSettings_DEPRECATED: () => ({}),
-  getSettingsForSource: () => ({}),
-}));
-mock.module("src/utils/auth.js", () => ({
-  isProSubscriber: () => false,
-  isMaxSubscriber: () => false,
-  isTeamSubscriber: () => false,
-}));
-mock.module("src/utils/model/modelSupportOverrides.js", () => ({
-  get3PModelCapabilityOverride: () => undefined,
-}));
+type EffortModule = typeof import("src/utils/effort.js");
 
-const {
-  isEffortLevel,
-  parseEffortValue,
-  isValidNumericEffort,
-  convertEffortValueToLevel,
-  getEffortLevelDescription,
-  getEffortSuffix,
-  resolveAppliedEffort,
-  resolvePickerEffortPersistence,
-  shouldShowEffortUI,
-  toPersistableEffort,
-  EFFORT_LEVELS,
-} = await import("src/utils/effort.js");
+let isEffortLevel: EffortModule["isEffortLevel"];
+let parseEffortValue: EffortModule["parseEffortValue"];
+let isValidNumericEffort: EffortModule["isValidNumericEffort"];
+let convertEffortValueToLevel: EffortModule["convertEffortValueToLevel"];
+let getEffortLevelDescription: EffortModule["getEffortLevelDescription"];
+let getEffortSuffix: EffortModule["getEffortSuffix"];
+let resolveAppliedEffort: EffortModule["resolveAppliedEffort"];
+let resolvePickerEffortPersistence: EffortModule["resolvePickerEffortPersistence"];
+let shouldShowEffortUI: EffortModule["shouldShowEffortUI"];
+let toPersistableEffort: EffortModule["toPersistableEffort"];
+let EFFORT_LEVELS: EffortModule["EFFORT_LEVELS"];
+let modelSupportsXhighEffort: EffortModule["modelSupportsXhighEffort"];
+
+beforeAll(async () => {
+  ({
+    isEffortLevel,
+    parseEffortValue,
+    isValidNumericEffort,
+    convertEffortValueToLevel,
+    getEffortLevelDescription,
+    getEffortSuffix,
+    resolveAppliedEffort,
+    resolvePickerEffortPersistence,
+    shouldShowEffortUI,
+    toPersistableEffort,
+    EFFORT_LEVELS,
+    modelSupportsXhighEffort,
+  } = await import("src/utils/effort.js"));
+});
+
+beforeEach(() => {
+  resetSettingsCache();
+  setSessionSettingsCache({ settings: {}, errors: [] });
+});
+
+afterEach(() => {
+  resetSettingsCache();
+});
 
 // ─── EFFORT_LEVELS constant ────────────────────────────────────────────
 
 describe("EFFORT_LEVELS", () => {
   test("contains the canonical levels", () => {
-    expect(EFFORT_LEVELS).toEqual(["low", "medium", "high", "max", "xhigh"]);
+    expect(EFFORT_LEVELS).toEqual(["low", "medium", "high", "xhigh", "max"]);
   });
 });
 
@@ -235,15 +255,26 @@ describe("getEffortLevelDescription", () => {
 
   test("returns description for 'xhigh'", () => {
     const desc = getEffortLevelDescription("xhigh");
-    expect(desc).toContain("OpenAI");
+    expect(desc).toContain("Opus 4.7");
   });
 });
 
 // ─── persistence and applied effort ────────────────────────────────────
 
 describe("toPersistableEffort", () => {
-  test("does not persist xhigh", () => {
-    expect(toPersistableEffort("xhigh")).toBeUndefined();
+  test("persists xhigh", () => {
+    expect(toPersistableEffort("xhigh")).toBe("xhigh");
+  });
+});
+
+describe("modelSupportsXhighEffort", () => {
+  test("supports Opus 4.7", () => {
+    expect(modelSupportsXhighEffort("claude-opus-4-7")).toBe(true);
+  });
+
+  test("does not support pre-Opus-4.7 public models", () => {
+    expect(modelSupportsXhighEffort("claude-opus-4-6")).toBe(false);
+    expect(modelSupportsXhighEffort("claude-sonnet-4-6")).toBe(false);
   });
 });
 
@@ -269,6 +300,11 @@ describe("resolveAppliedEffort", () => {
   test("preserves xhigh for OpenAI provider", () => {
     process.env.CLAUDE_CODE_USE_OPENAI = "1";
     expect(resolveAppliedEffort("gpt-5", "xhigh")).toBe("xhigh");
+  });
+
+  test("preserves xhigh for Opus 4.7 outside OpenAI provider", () => {
+    delete process.env.CLAUDE_CODE_USE_OPENAI;
+    expect(resolveAppliedEffort("claude-opus-4-7", "xhigh")).toBe("xhigh");
   });
 
   test("downgrades xhigh outside OpenAI provider", () => {

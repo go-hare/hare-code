@@ -31,7 +31,10 @@ import {
 import { registerCleanup } from '../../utils/cleanupRegistry.js'
 import { getToolSearchOrReadInfo } from '../../utils/collapseReadSearch.js'
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js'
-import { getAgentTranscriptPath } from '../../utils/sessionStorage.js'
+import {
+  getAgentTranscriptPath,
+  isTranscriptPersistenceDisabled,
+} from '../../utils/sessionStorage.js'
 import {
   getTaskExecutionMetadata,
   getTaskListId,
@@ -41,6 +44,7 @@ import {
 import {
   evictTaskOutput,
   getTaskOutputPath,
+  initTaskOutput,
   initTaskOutputAsSymlink,
 } from '../../utils/task/diskOutput.js'
 import {
@@ -210,6 +214,20 @@ export type LocalAgentTaskState = TaskStateBase & {
   // timestamp = hide + GC-eligible after this time. Set at terminal transition
   // and on unselect; cleared on retain.
   evictAfter?: number
+}
+
+function initAgentTaskOutput(agentId: string): void {
+  if (isTranscriptPersistenceDisabled()) {
+    void initTaskOutput(agentId)
+    return
+  }
+  void initTaskOutputAsSymlink(agentId, getAgentTranscriptPath(asAgentId(agentId)))
+}
+
+function evictAgentTaskOutputIfPersistent(taskId: string): void {
+  if (!isTranscriptPersistenceDisabled()) {
+    void evictTaskOutput(taskId)
+  }
 }
 
 export function isLocalAgentTask(task: unknown): task is LocalAgentTaskState {
@@ -465,7 +483,7 @@ export function killAsyncAgent(taskId: string, setAppState: SetAppState): void {
     }
   })
   if (killed) {
-    void evictTaskOutput(taskId)
+    evictAgentTaskOutputIfPersistent(taskId)
   }
 }
 
@@ -611,7 +629,7 @@ export function completeAgentTask(
       selectedAgent: undefined,
     }
   })
-  void evictTaskOutput(taskId)
+  evictAgentTaskOutputIfPersistent(taskId)
   // Note: Notification is sent by AgentTool via enqueueAgentNotification
 }
 
@@ -641,7 +659,7 @@ export function failAgentTask(
       selectedAgent: undefined,
     }
   })
-  void evictTaskOutput(taskId)
+  evictAgentTaskOutputIfPersistent(taskId)
   // Note: Notification is sent by AgentTool via enqueueAgentNotification
 }
 
@@ -672,10 +690,7 @@ export function registerAsyncAgent({
   notificationTargetAgentId?: AgentId
   toolUseId?: string
 }): LocalAgentTaskState {
-  void initTaskOutputAsSymlink(
-    agentId,
-    getAgentTranscriptPath(asAgentId(agentId)),
-  )
+  initAgentTaskOutput(agentId)
 
   // Create abort controller - if parent provided, create child that auto-aborts with parent
   const abortController = parentAbortController
@@ -746,10 +761,7 @@ export function registerAgentForeground({
   backgroundSignal: Promise<void>
   cancelAutoBackground?: () => void
 } {
-  void initTaskOutputAsSymlink(
-    agentId,
-    getAgentTranscriptPath(asAgentId(agentId)),
-  )
+  initAgentTaskOutput(agentId)
 
   const abortController = createAbortController()
 

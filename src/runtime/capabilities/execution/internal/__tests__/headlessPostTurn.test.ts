@@ -50,11 +50,21 @@ describe('flushHeldBackResultAndSuggestion', () => {
         type: 'result',
         subtype: 'success',
       } as never,
+      heldBackAssistantMessages: [
+        {
+          type: 'assistant',
+          message: { content: 'background result' },
+        },
+      ] as never,
       suggestionState,
       now: () => 123,
     })
 
     expect(emitted).toEqual([
+      {
+        type: 'assistant',
+        message: { content: 'background result' },
+      },
       {
         type: 'result',
         subtype: 'success',
@@ -66,7 +76,10 @@ describe('flushHeldBackResultAndSuggestion', () => {
         session_id: 'session-1',
       },
     ])
-    expect(result).toBeNull()
+    expect(result).toEqual({
+      heldBackResult: null,
+      heldBackAssistantMessages: [],
+    })
     expect(suggestionState.lastEmitted).toEqual({
       text: 'next prompt',
       promptId: 'followup',

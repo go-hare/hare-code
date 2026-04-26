@@ -3,11 +3,11 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 const adaptersContent = readFileSync(
-  join(process.cwd(), 'src/runtime/core/state/adapters.ts'),
+  join(import.meta.dir, '../adapters.ts'),
   'utf8',
 )
 const bootstrapProviderContent = readFileSync(
-  join(process.cwd(), 'src/runtime/core/state/bootstrapProvider.ts'),
+  join(import.meta.dir, '../bootstrapProvider.ts'),
   'utf8',
 )
 

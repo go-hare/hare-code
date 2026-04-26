@@ -129,6 +129,8 @@ export type ToolPermissionContext = DeepImmutable<{
   alwaysAllowRules: ToolPermissionRulesBySource
   alwaysDenyRules: ToolPermissionRulesBySource
   alwaysAskRules: ToolPermissionRulesBySource
+  /** CLI deny rules that should still apply inside spawned agents. Excludes synthetic --tools base-tool denies. */
+  spawnedAgentCliArgDenyRules?: string[]
   isBypassPermissionsModeAvailable: boolean
   isAutoModeAvailable?: boolean
   strippedDangerousRules?: ToolPermissionRulesBySource

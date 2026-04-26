@@ -11,6 +11,7 @@ import {
 } from './localSearch.js'
 import { normalizeQueryIntent } from './intentNormalize.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { getCwd } from '../../utils/cwd.js'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseFrontmatter } from '../../utils/frontmatterParser.js'
@@ -204,7 +205,7 @@ async function maybeRecordSkillGap(
     const gap = await recordSkillGap({
       prompt: queryText,
       cwd:
-        ((context as Record<string, unknown>).cwd as string) ?? process.cwd(),
+        ((context as Record<string, unknown>).cwd as string) ?? getCwd(),
       sessionId:
         ((context as Record<string, unknown>).sessionId as string) ??
         'unknown-session',
@@ -242,7 +243,7 @@ async function runSkillDiscoveryPrefetch(
   try {
     const cwd =
       ((toolUseContext as Record<string, unknown>).cwd as string) ??
-      process.cwd()
+      getCwd()
     const index = await getSkillIndex(cwd)
     const results = searchSkills(queryText, index)
 
@@ -327,7 +328,7 @@ export async function getTurnZeroSkillDiscovery(
 
   try {
     const cwd =
-      ((context as Record<string, unknown>).cwd as string) ?? process.cwd()
+      ((context as Record<string, unknown>).cwd as string) ?? getCwd()
     const index = await getSkillIndex(cwd)
     // Intent normalization (feature-flagged, ASCII-only fast path, graceful
     // fallback to original). Turn-zero is the one blocking entry — acceptable

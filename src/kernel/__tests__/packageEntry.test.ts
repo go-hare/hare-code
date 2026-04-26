@@ -4,6 +4,7 @@ import { join } from 'path'
 
 import * as kernel from '../index.js'
 
+const repoRoot = join(import.meta.dir, '../../..')
 const EXPECTED_KERNEL_EXPORTS = [
   'DirectConnectError',
   'applyDirectConnectSessionState',
@@ -29,7 +30,7 @@ const EXPECTED_KERNEL_EXPORTS = [
 
 const packageEntry = await import('../../entrypoints/kernel.js')
 const packageJson = JSON.parse(
-  await readFile(join(process.cwd(), 'package.json'), 'utf8'),
+  await readFile(join(repoRoot, 'package.json'), 'utf8'),
 ) as {
   exports?: Record<
     string,
@@ -52,7 +53,7 @@ describe('kernel package entry', () => {
     expect(kernelExport?.types).toBe('./src/kernel/index.d.ts')
 
     const declaration = await readFile(
-      join(process.cwd(), kernelExport!.types!),
+      join(repoRoot, kernelExport!.types!),
       'utf8',
     )
 

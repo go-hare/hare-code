@@ -3,18 +3,19 @@ import { describe, expect, mock, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-import { createFileStateCacheWithSizeLimit } from 'src/utils/fileStateCache.js'
+import { createFileStateCacheWithSizeLimit } from '../../../../utils/fileStateCache.js'
 
+const repoRoot = join(import.meta.dir, '../../../../..')
 const content = readFileSync(
   join(
-    process.cwd(),
+    repoRoot,
     'src/runtime/capabilities/execution/SessionRuntime.ts',
   ),
   'utf8',
 )
 const headlessManagedSessionContent = readFileSync(
   join(
-    process.cwd(),
+    repoRoot,
     'src/runtime/capabilities/execution/internal/headlessManagedSession.ts',
   ),
   'utf8',
@@ -33,7 +34,7 @@ describe('SessionRuntime contracts', () => {
 
   test('keeps MessageSelector optional at the runtime boundary', () => {
     expect(content).toContain(
-      "(): typeof import('src/components/MessageSelector.js') | null",
+      "(): typeof import('../../../components/MessageSelector.js') | null",
     )
     expect(content).toContain('return null')
     expect(content).toContain('function selectableUserMessagesFilter')

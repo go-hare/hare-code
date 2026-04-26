@@ -60,4 +60,4 @@ export interface Query {
 export interface InternalQuery extends Query {
   [key: string]: unknown
 }
-export type EffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
+export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
