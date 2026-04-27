@@ -6,6 +6,11 @@ import {
   createToolStub,
 } from '../remote/remotePermissionBridge.js'
 import {
+  handleKernelRuntimeHostEvent,
+  KernelRuntimeOutputDeltaDedupe,
+  KernelRuntimeSDKMessageDedupe,
+} from '../remote/kernelRuntimeHostEvents.js'
+import {
   convertSDKMessage,
   isSessionEndMessage,
 } from '../remote/sdkMessageAdapter.js'
@@ -39,6 +44,8 @@ type UseDirectConnectProps = {
   setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>
   tools: Tool[]
   onRuntimeEvent?: KernelRuntimeEventSink
+  onRuntimeOutputDelta?: (text: string) => void
+  onRuntimeTurnTerminal?: (envelope: Parameters<KernelRuntimeEventSink>[0]) => void
 }
 
 export function useDirectConnect({
@@ -48,12 +55,16 @@ export function useDirectConnect({
   setToolUseConfirmQueue,
   tools,
   onRuntimeEvent,
+  onRuntimeOutputDelta,
+  onRuntimeTurnTerminal,
 }: UseDirectConnectProps): UseDirectConnectResult {
   const isRemoteMode = !!config
 
   const managerRef = useRef<DirectConnectSessionManager | null>(null)
   const hasReceivedInitRef = useRef(false)
   const isConnectedRef = useRef(false)
+  const sdkMessageDedupeRef = useRef(new KernelRuntimeSDKMessageDedupe())
+  const outputDeltaDedupeRef = useRef(new KernelRuntimeOutputDeltaDedupe())
 
   // Keep a ref to tools so the WebSocket callback doesn't go stale
   const toolsRef = useRef(tools)
@@ -67,29 +78,37 @@ export function useDirectConnect({
     }
 
     hasReceivedInitRef.current = false
+    sdkMessageDedupeRef.current.clear()
+    outputDeltaDedupeRef.current.clear()
     logForDebugging(`[useDirectConnect] Connecting to ${config.wsUrl}`)
 
+    const handleSDKMessage = (sdkMessage: Parameters<typeof convertSDKMessage>[0]) => {
+      if (!sdkMessageDedupeRef.current.shouldProcess(sdkMessage)) {
+        return
+      }
+
+      if (isSessionEndMessage(sdkMessage)) {
+        setIsLoading(false)
+      }
+
+      // Skip duplicate init messages (server sends one per turn)
+      if (sdkMessage.type === 'system' && sdkMessage.subtype === 'init') {
+        if (hasReceivedInitRef.current) {
+          return
+        }
+        hasReceivedInitRef.current = true
+      }
+
+      const converted = convertSDKMessage(sdkMessage, {
+        convertToolResults: true,
+      })
+      if (converted.type === 'message') {
+        setMessages(prev => [...prev, converted.message])
+      }
+    }
+
     const manager = new DirectConnectSessionManager(config, {
-      onMessage: sdkMessage => {
-        if (isSessionEndMessage(sdkMessage)) {
-          setIsLoading(false)
-        }
-
-        // Skip duplicate init messages (server sends one per turn)
-        if (sdkMessage.type === 'system' && sdkMessage.subtype === 'init') {
-          if (hasReceivedInitRef.current) {
-            return
-          }
-          hasReceivedInitRef.current = true
-        }
-
-        const converted = convertSDKMessage(sdkMessage, {
-          convertToolResults: true,
-        })
-        if (converted.type === 'message') {
-          setMessages(prev => [...prev, converted.message])
-        }
-      },
+      onMessage: handleSDKMessage,
       onPermissionRequest: (request, requestId) => {
         logForDebugging(
           `[useDirectConnect] Permission request for tool: ${request.tool_name}`,
@@ -183,7 +202,22 @@ export function useDirectConnect({
         )
         setIsLoading(true)
       },
-      onRuntimeEvent,
+      onRuntimeEvent: envelope => {
+        handleKernelRuntimeHostEvent(envelope, {
+          onRuntimeEvent,
+          onSDKMessage: handleSDKMessage,
+          onOutputDelta: delta => {
+            if (!outputDeltaDedupeRef.current.shouldProcess(envelope)) {
+              return
+            }
+            onRuntimeOutputDelta?.(delta.text)
+          },
+          onTurnTerminal: () => {
+            setIsLoading(false)
+            onRuntimeTurnTerminal?.(envelope)
+          },
+        })
+      },
       onConnected: () => {
         logForDebugging('[useDirectConnect] Connected')
         isConnectedRef.current = true
@@ -222,6 +256,8 @@ export function useDirectConnect({
     setIsLoading,
     setToolUseConfirmQueue,
     onRuntimeEvent,
+    onRuntimeOutputDelta,
+    onRuntimeTurnTerminal,
   ])
 
   const sendMessage = useCallback(

@@ -27,6 +27,7 @@ import type {
   KernelRuntimeCreateConversationCommand,
   KernelRuntimeDisconnectHostCommand,
   KernelRuntimeHostDisconnectPolicy,
+  KernelRuntimeRunTurnCommand,
   KernelRuntimeSubscribeEventsCommand,
 } from '../../contracts/wire.js'
 import { RuntimeConversationBusyError } from '../conversation/RuntimeConversation.js'
@@ -138,6 +139,7 @@ type Awaitable<T> = T | Promise<T>
 export type KernelRuntimeWireConversationRecoverySnapshot = {
   conversation: KernelConversationSnapshot
   activeTurn?: KernelTurnSnapshot
+  activeExecution?: KernelRuntimeRunTurnCommand
 }
 
 export type KernelRuntimeWireConversationSnapshotStore = {
@@ -400,7 +402,15 @@ export class KernelRuntimeWireRouter {
     await this.recordConversationSnapshot(
       conversation,
       recoveredSnapshot?.activeTurn,
+      recoveredSnapshot?.activeExecution,
     )
+    if (recoveredSnapshot?.activeExecution && recoveredSnapshot.activeTurn) {
+      this.startTurnExecution(
+        recoveredSnapshot.activeExecution,
+        conversation,
+        recoveredSnapshot.activeTurn,
+      )
+    }
     return this.eventBus.ack({
       requestId: command.requestId,
       conversationId: conversation.id,
@@ -421,7 +431,7 @@ export class KernelRuntimeWireRouter {
       attachments: command.attachments,
       metadata: command.metadata,
     })
-    await this.recordConversationSnapshot(conversation, snapshot)
+    await this.recordConversationSnapshot(conversation, snapshot, command)
     this.startTurnExecution(command, conversation, snapshot)
     return this.eventBus.ack({
       requestId: command.requestId,
@@ -653,7 +663,7 @@ export class KernelRuntimeWireRouter {
   }
 
   private startTurnExecution(
-    command: Extract<KernelRuntimeCommand, { type: 'run_turn' }>,
+    command: KernelRuntimeRunTurnCommand,
     conversation: KernelRuntimeWireConversation,
     snapshot: KernelTurnSnapshot,
   ): void {
@@ -856,9 +866,15 @@ export class KernelRuntimeWireRouter {
         conversation,
         recovered.activeTurn,
       )
+      const activeExecution = selectRecoveredActiveExecution(
+        conversation,
+        activeTurn,
+        recovered.activeExecution,
+      )
       return {
         conversation,
         activeTurn,
+        activeExecution,
       }
     } catch (error) {
       this.emitConversationSnapshotFailure(command.conversationId, error, {
@@ -871,6 +887,7 @@ export class KernelRuntimeWireRouter {
   private async recordConversationSnapshot(
     conversation: KernelRuntimeWireConversation,
     activeTurnSnapshot?: KernelTurnSnapshot,
+    activeExecution?: KernelRuntimeRunTurnCommand,
   ): Promise<void> {
     if (!this.options.conversationSnapshotStore) {
       return
@@ -883,6 +900,13 @@ export class KernelRuntimeWireRouter {
         activeTurnSnapshot &&
         conversationSnapshot.activeTurnId === activeTurnSnapshot.turnId
           ? activeTurnSnapshot
+          : undefined,
+      activeExecution:
+        activeExecution &&
+        activeTurnSnapshot?.state === 'running' &&
+        conversationSnapshot.activeTurnId === activeExecution.turnId &&
+        activeTurnSnapshot.turnId === activeExecution.turnId
+          ? activeExecution
           : undefined,
     }) as KernelRuntimeWireConversationRecoverySnapshot
 
@@ -1132,6 +1156,24 @@ function selectRecoveredActiveTurn(
     return undefined
   }
   return activeTurn
+}
+
+function selectRecoveredActiveExecution(
+  conversation: KernelConversationSnapshot,
+  activeTurn: KernelTurnSnapshot | undefined,
+  activeExecution: KernelRuntimeRunTurnCommand | undefined,
+): KernelRuntimeRunTurnCommand | undefined {
+  if (!activeTurn || activeTurn.state !== 'running' || !activeExecution) {
+    return undefined
+  }
+  if (
+    activeExecution.type !== 'run_turn' ||
+    activeExecution.conversationId !== conversation.conversationId ||
+    activeExecution.turnId !== activeTurn.turnId
+  ) {
+    return undefined
+  }
+  return activeExecution
 }
 
 function isRuntimeOwnedActiveState(

@@ -103,6 +103,7 @@ function createDeps(): HeadlessRuntimeCapabilityBundleDeps {
       >,
     ),
     applyPluginMcpDiffRuntime: mock(async () => {}),
+    setupPluginHookHotReload: mock(() => {}),
     logError: mock(() => {}),
   }
 }
@@ -122,7 +123,7 @@ describe('createHeadlessRuntimeCapabilityBundle', () => {
       deps,
     )
 
-    const response = await bundle.refreshPlugins()
+    const response = await bundle.refresh()
 
     expect(deps.refreshActivePlugins).toHaveBeenCalled()
     expect(deps.getCommands).toHaveBeenCalledWith('/repo')
@@ -131,6 +132,7 @@ describe('createHeadlessRuntimeCapabilityBundle', () => {
       applyMcpServerChanges: mcpService.applyServerChanges,
       updateSdkMcp: mcpService.updateSdk,
     })
+    expect(deps.setupPluginHookHotReload).toHaveBeenCalled()
     expect(response.commands).toEqual([
       {
         name: 'refreshed',

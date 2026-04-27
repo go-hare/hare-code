@@ -93,6 +93,11 @@ import {
   type RuntimeBootstrapStateProvider,
 } from '../../core/state/index.js'
 import type { RuntimeSessionLifecycle } from '../../contracts/session.js'
+import type {
+  KernelRuntimeEnvelopeBase,
+  KernelEvent,
+} from '../../contracts/events.js'
+import { RuntimeEventBus } from '../../core/events/RuntimeEventBus.js'
 
 // Lazy: MessageSelector.tsx pulls React/ink; only needed for message filtering at query time
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -198,6 +203,10 @@ export type QueryEngineConfig = {
 }
 
 export interface RuntimeExecutionSession extends RuntimeSessionLifecycle {
+  submitRuntimeTurn(
+    prompt: string | ContentBlockParam[],
+    options?: { uuid?: string; isMeta?: boolean },
+  ): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown>
   submitMessage(
     prompt: string | ContentBlockParam[],
     options?: { uuid?: string; isMeta?: boolean },
@@ -209,14 +218,49 @@ export type ExecutionSessionFactory = (
   config: QueryEngineConfig,
 ) => RuntimeExecutionSession
 
+function cloneSDKMessageForRuntimeEvent(message: SDKMessage): SDKMessage {
+  return JSON.parse(JSON.stringify(message)) as SDKMessage
+}
+
+function isErrorSDKResultMessage(message: SDKMessage): boolean {
+  const record = message as Record<string, unknown>
+  return record.is_error === true
+}
+
+function stopReasonFromSDKResultMessage(message: SDKMessage): string | null {
+  const record = message as Record<string, unknown>
+  if (typeof record.stop_reason === 'string') {
+    return record.stop_reason
+  }
+  switch (record.subtype) {
+    case 'error_max_budget_usd':
+    case 'error_max_turns':
+    case 'error_max_structured_output_retries':
+      return 'max_turn_requests'
+    default:
+      return null
+  }
+}
+
+function getSDKMessageFromRuntimeEnvelope(
+  envelope: KernelRuntimeEnvelopeBase,
+): SDKMessage | undefined {
+  const event = envelope.payload as KernelEvent | undefined
+  if (event?.type !== 'headless.sdk_message') {
+    return undefined
+  }
+  return event.payload as SDKMessage | undefined
+}
+
 /**
  * SessionRuntime owns the query lifecycle and session state for a conversation.
  * It extracts the core logic from ask() into a standalone class that can be
  * used by both the headless/SDK path and (in a future phase) the REPL.
  *
- * One SessionRuntime per conversation. Each submitMessage() call starts a new
- * turn within the same conversation. State (messages, file cache, usage, etc.)
- * persists across turns.
+ * One SessionRuntime per conversation. Each submitRuntimeTurn() call starts a
+ * new runtime turn within the same conversation; submitMessage() remains as the
+ * SDK-compatible projection. State (messages, file cache, usage, etc.) persists
+ * across turns.
  */
 export class SessionRuntime implements RuntimeExecutionSession {
   private config: QueryEngineConfig
@@ -227,6 +271,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
   private hasHandledOrphanedPermission = false
   private readFileState: FileStateCache
   private live = true
+  private readonly runtimeEventBus: RuntimeEventBus
   private readonly stateProviders: ReturnType<
     typeof createExecutionStateProviders
   >
@@ -250,6 +295,87 @@ export class SessionRuntime implements RuntimeExecutionSession {
       setAppState: config.setAppState,
       bootstrapStateProvider: config.bootstrapStateProvider,
     })
+    this.runtimeEventBus = new RuntimeEventBus({
+      runtimeId: `session:${this.getSessionId()}`,
+    })
+  }
+
+  async *submitRuntimeTurn(
+    prompt: string | ContentBlockParam[],
+    options?: { uuid?: string; isMeta?: boolean },
+  ): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown> {
+    const sessionId = this.getSessionId()
+    const turnId = options?.uuid ?? randomUUID()
+    yield this.runtimeEventBus.emit({
+      conversationId: sessionId,
+      turnId,
+      type: 'turn.started',
+      replayable: true,
+      payload: {
+        conversationId: sessionId,
+        turnId,
+        state: 'running',
+      },
+    })
+
+    let sawTerminalResult = false
+    try {
+      for await (const message of this.submitMessage(prompt, options)) {
+        yield this.runtimeEventBus.emit({
+          conversationId: sessionId,
+          turnId,
+          type: 'headless.sdk_message',
+          replayable: true,
+          payload: cloneSDKMessageForRuntimeEvent(message),
+        })
+
+        if (message.type === 'result') {
+          sawTerminalResult = true
+          const failed = isErrorSDKResultMessage(message)
+          yield this.runtimeEventBus.emit({
+            conversationId: sessionId,
+            turnId,
+            type: failed ? 'turn.failed' : 'turn.completed',
+            replayable: true,
+            payload: {
+              conversationId: sessionId,
+              turnId,
+              state: failed ? 'failed' : 'completed',
+              stopReason: stopReasonFromSDKResultMessage(message),
+            },
+          })
+        }
+      }
+
+      if (!sawTerminalResult) {
+        yield this.runtimeEventBus.emit({
+          conversationId: sessionId,
+          turnId,
+          type: 'turn.completed',
+          replayable: true,
+          payload: {
+            conversationId: sessionId,
+            turnId,
+            state: 'completed',
+            stopReason: null,
+          },
+        })
+      }
+    } catch (error) {
+      yield this.runtimeEventBus.emit({
+        conversationId: sessionId,
+        turnId,
+        type: 'turn.failed',
+        replayable: true,
+        payload: {
+          conversationId: sessionId,
+          turnId,
+          state: 'failed',
+          stopReason: error instanceof Error ? error.message : String(error),
+        },
+      })
+      throw error
+    }
   }
 
   async *submitMessage(
@@ -1225,7 +1351,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
     this.abortController.abort()
   }
 
-  /** Reset the abort controller so the next submitMessage() call can start
+  /** Reset the abort controller so the next submitRuntimeTurn() call can start
    *  with a fresh, non-aborted signal. Must be called after interrupt(). */
   resetAbortController(): void {
     this.abortController = createAbortController()
@@ -1394,10 +1520,15 @@ export async function* ask({
   })
 
   try {
-    yield* engine.submitMessage(prompt, {
+    for await (const envelope of engine.submitRuntimeTurn(prompt, {
       uuid: promptUuid,
       isMeta,
-    })
+    })) {
+      const sdkMessage = getSDKMessageFromRuntimeEnvelope(envelope)
+      if (sdkMessage) {
+        yield sdkMessage
+      }
+    }
   } finally {
     setReadFileCache(engine.getReadFileState())
     await engine.stopAndWait(true)

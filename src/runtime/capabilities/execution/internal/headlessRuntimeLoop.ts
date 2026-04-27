@@ -308,7 +308,10 @@ import {
 } from './headlessPostTurn.js'
 import { emitHeadlessRuntimeMessage } from './headlessStreamEmission.js'
 import { hasHeadlessBackgroundWorkPending } from './headlessBackgroundWork.js'
-import { createHeadlessStreamCollector } from './headlessStreaming.js'
+import {
+  createHeadlessRuntimeStreamPublisher,
+  createHeadlessStreamCollector,
+} from './headlessStreaming.js'
 import {
   type HeadlessRuntimeEventSink,
   createHeadlessPermissionRuntime,
@@ -885,25 +888,16 @@ export async function runHeadlessRuntimeLoop(
 
     const streamCollector = createHeadlessStreamCollector(
       options,
-      runtimeEventSink
-        ? {
-            emitSdkMessage(message) {
-              try {
-                headlessConversation.eventBus.emit({
-                  conversationId: headlessConversation.id,
-                  turnId: headlessConversation.activeTurnId,
-                  type: 'headless.sdk_message',
-                  replayable: true,
-                  payload: message,
-                })
-              } catch (error) {
-                logForDebugging(
-                  `[headless] Failed to emit runtime SDK message event: ${error instanceof Error ? error.message : String(error)}`,
-                )
-              }
-            },
-          }
-        : undefined,
+      createHeadlessRuntimeStreamPublisher({
+        eventBus: headlessConversation.eventBus,
+        conversationId: headlessConversation.id,
+        getTurnId: () => headlessConversation.activeTurnId,
+        onPublishError(error) {
+          logForDebugging(
+            `[headless] Failed to publish runtime SDK message event: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        },
+      }),
     )
 
     headlessProfilerCheckpoint('before_runHeadlessStreaming')
@@ -1675,14 +1669,7 @@ function runHeadlessStreaming(
       pluginInstallPromise = null
 
       // Refresh commands, agents, and hooks now that plugins are installed
-      await runtimeCapabilities.refreshPlugins()
-
-      // Set up hot-reload for plugin hooks now that the initial install is done.
-      // In sync-install mode, setup.ts skips this to avoid racing with the install.
-      const { setupPluginHookHotReload } = await import(
-        '../../../../utils/plugins/loadPluginHooks.js'
-      )
-      setupPluginHookHotReload()
+      await runtimeCapabilities.refresh()
     }
 
     // Only main-thread commands (agentId===undefined) — subagent
@@ -2977,7 +2964,7 @@ function runHeadlessStreaming(
 
             sendControlResponseSuccess(
               msg,
-              await runtimeCapabilities.refreshPlugins(),
+              await runtimeCapabilities.refresh(),
             )
           } catch (error) {
             sendControlResponseError(msg, errorMessage(error))

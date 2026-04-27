@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { createHeadlessStreamCollector } from '../headlessStreaming.js'
+import { RuntimeEventBus } from '../../../../core/events/RuntimeEventBus.js'
+import {
+  createHeadlessRuntimeStreamPublisher,
+  createHeadlessStreamCollector,
+} from '../headlessStreaming.js'
 
 describe('createHeadlessStreamCollector', () => {
   const originalEnv = process.env.CLAUDE_CODE_STREAMLINED_OUTPUT
@@ -69,24 +73,30 @@ describe('createHeadlessStreamCollector', () => {
     ])
   })
 
-  test('emits SDK messages to the runtime event adapter in stream-json verbose mode', async () => {
-    const runtimeMessages: unknown[] = []
+  test('publishes runtime SDK message envelopes before legacy stream-json output', async () => {
+    const eventBus = new RuntimeEventBus({
+      runtimeId: 'runtime-1',
+      createMessageId: () => 'message-1',
+      now: () => '2026-04-27T00:00:00.000Z',
+    })
     const collector = createHeadlessStreamCollector(
       {
         outputFormat: 'stream-json',
         verbose: true,
       },
-      {
-        emitSdkMessage(message) {
-          runtimeMessages.push(message)
-        },
-      },
+      createHeadlessRuntimeStreamPublisher({
+        eventBus,
+        conversationId: 'conversation-1',
+        getTurnId: () => 'turn-1',
+      }),
     )
     const writes: unknown[] = []
+    const runtimeEventCountsAtWrite: number[] = []
 
     await collector.handleMessage(
       {
         write: async (message: unknown) => {
+          runtimeEventCountsAtWrite.push(eventBus.replay().length)
           writes.push(message)
         },
       } as never,
@@ -97,6 +107,8 @@ describe('createHeadlessStreamCollector', () => {
       } as never,
     )
 
+    const runtimeEnvelopes = eventBus.replay()
+
     expect(writes).toEqual([
       {
         type: 'assistant',
@@ -104,11 +116,19 @@ describe('createHeadlessStreamCollector', () => {
         optionalField: undefined,
       },
     ])
-    expect(runtimeMessages).toEqual([
-      {
-        type: 'assistant',
-        message: { content: 'hello' },
+    expect(runtimeEventCountsAtWrite).toEqual([1])
+    expect(runtimeEnvelopes).toHaveLength(1)
+    expect(runtimeEnvelopes[0]).toMatchObject({
+      kind: 'event',
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      payload: {
+        type: 'headless.sdk_message',
+        payload: {
+          type: 'assistant',
+          message: { content: 'hello' },
+        },
       },
-    ])
+    })
   })
 })

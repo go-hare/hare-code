@@ -18,7 +18,10 @@ import type {
   StdoutMessage,
 } from '../entrypoints/sdk/controlTypes.js'
 import type { SDKResultSuccess } from '../entrypoints/sdk/coreTypes.js'
-import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
+import type {
+  KernelRuntimeEnvelopeBase,
+  KernelRuntimeEventSink,
+} from '../runtime/contracts/events.js'
 import { logEvent } from '../services/analytics/index.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import type { Message } from '../types/message.js'
@@ -27,7 +30,8 @@ import { logForDebugging } from '../utils/debug.js'
 import { rcLog } from './rcDebugLog.js'
 import { stripDisplayTagsAllowEmpty } from '../utils/displayTags.js'
 import { errorMessage } from '../utils/errors.js'
-import { consumeKernelRuntimeEventMessage } from '../utils/kernelRuntimeEventMessage.js'
+import { getKernelRuntimeEnvelopeFromMessage } from '../utils/kernelRuntimeEventMessage.js'
+import { getKernelEventFromEnvelope } from '../runtime/core/events/KernelRuntimeEventFacade.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import type { ReplBridgeTransport } from './replBridgeTransport.js'
@@ -234,7 +238,7 @@ export function handleIngressMessage(
   onRuntimeEvent?: KernelRuntimeEventSink,
 ): void {
   try {
-    const parsed: unknown = normalizeControlMessageKeys(jsonParse(data))
+    let parsed: unknown = normalizeControlMessageKeys(jsonParse(data))
 
     // control_response is not an SDKMessage — check before the type guard
     if (isSDKControlResponse(parsed)) {
@@ -253,16 +257,23 @@ export function handleIngressMessage(
       return
     }
 
-    if (!isSDKMessage(parsed)) return
-
-    if (
-      consumeKernelRuntimeEventMessage(
-        parsed as StdoutMessage,
-        onRuntimeEvent,
-      )
-    ) {
-      return
+    const runtimeEnvelope = getKernelRuntimeEnvelopeFromMessage(
+      parsed as StdoutMessage,
+    )
+    if (runtimeEnvelope) {
+      try {
+        onRuntimeEvent?.(runtimeEnvelope)
+      } catch {
+        // Runtime event observation must not affect legacy transport behavior.
+      }
+      const sdkMessage = getSDKMessageFromRuntimeEnvelope(runtimeEnvelope)
+      if (!sdkMessage) {
+        return
+      }
+      parsed = sdkMessage
     }
+
+    if (!isSDKMessage(parsed)) return
 
     // Check for UUID to detect echoes of our own messages
     const uuid =
@@ -310,6 +321,16 @@ export function handleIngressMessage(
       `[bridge:repl] Failed to parse ingress message: ${errorMessage(err)}`,
     )
   }
+}
+
+function getSDKMessageFromRuntimeEnvelope(
+  envelope: KernelRuntimeEnvelopeBase,
+): SDKMessage | undefined {
+  const event = getKernelEventFromEnvelope(envelope)
+  if (event?.type !== 'headless.sdk_message') {
+    return undefined
+  }
+  return isSDKMessage(event.payload) ? event.payload : undefined
 }
 
 // ─── Server-initiated control requests ───────────────────────────────────────

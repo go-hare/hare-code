@@ -97,6 +97,21 @@ describe('kernel runtime wire transports', () => {
       },
       { timeout: 30_000 },
     )
+
+    test(
+      `isolates concurrent conversations over ${transportName}`,
+      async () => {
+        const harness = createHarness(transportName)
+
+        try {
+          await runMultiConversationIsolationContract(harness)
+          expect(harness.stderr.join('')).toBe('')
+        } finally {
+          await Promise.resolve(harness.client.close())
+        }
+      },
+      { timeout: 30_000 },
+    )
   }
 })
 
@@ -226,6 +241,126 @@ async function runTransportContract(harness: RuntimeHarness): Promise<void> {
   await waitForEvent(harness.events, envelope => {
     return eventType(envelope) === 'host.disconnected'
   })
+}
+
+async function runMultiConversationIsolationContract(
+  harness: RuntimeHarness,
+): Promise<void> {
+  const conversationA = `conversation-${harness.name}-a`
+  const conversationB = `conversation-${harness.name}-b`
+  const turnA = `turn-${harness.name}-a`
+  const turnB = `turn-${harness.name}-b`
+
+  await harness.client.createConversation({
+    conversationId: conversationA,
+    workspacePath: repoRoot,
+  })
+  await harness.client.createConversation({
+    conversationId: conversationB,
+    workspacePath: repoRoot,
+  })
+
+  await harness.client.runTurn({
+    conversationId: conversationA,
+    turnId: turnA,
+    prompt: `hello ${conversationA}`,
+  })
+  await harness.client.runTurn({
+    conversationId: conversationB,
+    turnId: turnB,
+    prompt: `hello ${conversationB}`,
+  })
+
+  await waitForEvent(
+    harness.events,
+    envelope =>
+      eventType(envelope) === 'turn.started' &&
+      envelope.conversationId === conversationA &&
+      envelope.turnId === turnA,
+  )
+  await waitForEvent(
+    harness.events,
+    envelope =>
+      eventType(envelope) === 'turn.started' &&
+      envelope.conversationId === conversationB &&
+      envelope.turnId === turnB,
+  )
+
+  const busyBeforeAbort = await harness.client.runTurn({
+    conversationId: conversationA,
+    turnId: `${turnA}-next`,
+    prompt: 'should be busy',
+  })
+  expect(busyBeforeAbort).toMatchObject({
+    kind: 'error',
+    conversationId: conversationA,
+    turnId: turnA,
+    error: {
+      code: 'busy',
+      retryable: true,
+    },
+  })
+
+  const beforeAbortBEvents = harness.events.length
+  const abortA = await harness.client.abortTurn({
+    conversationId: conversationA,
+    turnId: turnA,
+    reason: 'targeted_abort',
+  })
+  expect(abortA).toMatchObject({
+    kind: 'ack',
+    conversationId: conversationA,
+    turnId: turnA,
+    payload: {
+      state: 'aborting',
+      stopReason: 'targeted_abort',
+    },
+  })
+
+  await waitForEvent(
+    harness.events,
+    envelope =>
+      eventType(envelope) === 'turn.abort_requested' &&
+      envelope.conversationId === conversationA &&
+      envelope.turnId === turnA,
+  )
+  expect(
+    harness.events
+      .slice(beforeAbortBEvents)
+      .some(
+        envelope =>
+          eventType(envelope) === 'turn.abort_requested' &&
+          envelope.conversationId === conversationB,
+      ),
+  ).toBe(false)
+
+  const busyAfterTargetedAbort = await harness.client.runTurn({
+    conversationId: conversationB,
+    turnId: `${turnB}-next`,
+    prompt: 'conversation B should still be busy',
+  })
+  expect(busyAfterTargetedAbort).toMatchObject({
+    kind: 'error',
+    conversationId: conversationB,
+    turnId: turnB,
+    error: {
+      code: 'busy',
+      retryable: true,
+    },
+  })
+
+  await harness.client.abortTurn({
+    conversationId: conversationB,
+    turnId: turnB,
+    reason: 'cleanup_abort',
+  })
+  await waitForEvent(
+    harness.events,
+    envelope =>
+      eventType(envelope) === 'turn.abort_requested' &&
+      envelope.conversationId === conversationB &&
+      envelope.turnId === turnB,
+  )
 }
 
 async function waitForEvent(

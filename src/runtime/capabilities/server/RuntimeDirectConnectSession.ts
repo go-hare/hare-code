@@ -16,7 +16,11 @@ import type {
   KernelRuntimeEnvelopeBase,
   KernelRuntimeEventSink,
 } from '../../contracts/events.js'
-import { getKernelRuntimeEnvelopeFromMessage } from '../../../utils/kernelRuntimeEventMessage.js'
+import {
+  createKernelRuntimeEventFacade,
+  type KernelRuntimeEventFacade,
+  type KernelRuntimeEventReplayRequest,
+} from '../../core/events/KernelRuntimeEventFacade.js'
 import { jsonParse } from '../../../utils/slowOperations.js'
 
 const MAX_BACKLOG_LINES = 500
@@ -28,7 +32,7 @@ export class RuntimeDirectConnectSession implements RuntimeManagedSession {
   readonly closed: Promise<void>
 
   private readonly backlog: string[] = []
-  private readonly runtimeEnvelopeBacklog: KernelRuntimeEnvelopeBase[] = []
+  private readonly runtimeEventFacade: KernelRuntimeEventFacade
   private readonly sinks = new Set<SessionRuntimeSink>()
   private readonly createdAt = Date.now()
 
@@ -43,6 +47,10 @@ export class RuntimeDirectConnectSession implements RuntimeManagedSession {
     private readonly onStopped: (session: RuntimeManagedSession) => void,
   ) {
     this.persistenceOwner = createSessionPersistenceOwner(runtime.sessionId)
+    this.runtimeEventFacade = createKernelRuntimeEventFacade({
+      runtimeId: `direct-connect:${runtime.sessionId}`,
+      maxReplayEvents: MAX_RUNTIME_ENVELOPE_BACKLOG,
+    })
     this.info = {
       id: runtime.sessionId,
       status: 'starting',
@@ -112,11 +120,14 @@ export class RuntimeDirectConnectSession implements RuntimeManagedSession {
   }
 
   getRuntimeEnvelopeBacklog(): readonly KernelRuntimeEnvelopeBase[] {
-    return [...this.runtimeEnvelopeBacklog]
+    return this.runtimeEventFacade.replay()
   }
 
-  replayRuntimeEnvelopeBacklog(sink: KernelRuntimeEventSink): void {
-    for (const envelope of this.runtimeEnvelopeBacklog) {
+  replayRuntimeEnvelopeBacklog(
+    sink: KernelRuntimeEventSink,
+    request?: KernelRuntimeEventReplayRequest,
+  ): void {
+    for (const envelope of this.runtimeEventFacade.replay(request)) {
       try {
         sink(envelope)
       } catch {
@@ -216,23 +227,14 @@ export class RuntimeDirectConnectSession implements RuntimeManagedSession {
     }
     this.backlog.push(line)
 
-    const envelope = this.extractRuntimeEnvelope(line)
-    if (!envelope) {
-      return
-    }
-    if (this.runtimeEnvelopeBacklog.length >= MAX_RUNTIME_ENVELOPE_BACKLOG) {
-      this.runtimeEnvelopeBacklog.shift()
-    }
-    this.runtimeEnvelopeBacklog.push(envelope)
+    this.ingestRuntimeEnvelope(line)
   }
 
-  private extractRuntimeEnvelope(
-    line: string,
-  ): KernelRuntimeEnvelopeBase | undefined {
+  private ingestRuntimeEnvelope(line: string): void {
     try {
-      return getKernelRuntimeEnvelopeFromMessage(jsonParse(line))
+      this.runtimeEventFacade.ingestMessage(jsonParse(line))
     } catch {
-      return undefined
+      // Compatibility stdout may contain non-JSON diagnostic lines.
     }
   }
 

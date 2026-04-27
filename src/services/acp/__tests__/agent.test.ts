@@ -53,10 +53,15 @@ const mockGetMainLoopModel = mock(() => 'claude-sonnet-4-6')
 const mockDeserializeMessages = mock((msgs: unknown[]) => msgs)
 const mockGetLastSessionLog = mock(async () => null)
 const mockSessionIdExists = mock(() => false)
+let mockQueryEngineMessages: unknown[] = []
 
 mock.module('../runtimeDeps.js', () => ({
   QueryEngine: class MockQueryEngine {
-    submitMessage = mock(async function* () {})
+    submitMessage = mock(async function* () {
+      for (const message of mockQueryEngineMessages) {
+        yield message
+      }
+    })
     interrupt = mock(() => {})
     resetAbortController = mock(() => {})
     getAbortSignal = mock(() => new AbortController().signal)
@@ -127,6 +132,7 @@ describe('AcpAgent', () => {
     mockSetModel.mockClear()
     mockGetMainLoopModel.mockClear()
     mockGetDefaultAppState.mockClear()
+    mockQueryEngineMessages = []
   })
 
   afterEach(() => {
@@ -265,6 +271,63 @@ describe('AcpAgent', () => {
         prompt: [{ type: 'text', text: 'hello' }],
       } as any)
       expect(res.stopReason).toBe('end_turn')
+    })
+
+    test('passes QueryEngine output through runtime envelopes', async () => {
+      mockQueryEngineMessages = [
+        {
+          type: 'assistant',
+          uuid: 'sdk-agent-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hello from runtime' }],
+          },
+        },
+        {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          stop_reason: null,
+        },
+      ]
+      const observedEnvelopes: unknown[] = []
+      ;(forwardSessionUpdates as ReturnType<typeof mock>).mockImplementationOnce(
+        async (_sessionId: string, messages: AsyncIterable<unknown>) => {
+          for await (const message of messages) {
+            observedEnvelopes.push(message)
+          }
+          return { stopReason: 'end_turn' }
+        },
+      )
+
+      const agent = new AcpAgent(makeConn())
+      const { sessionId } = await agent.newSession({ cwd: '/tmp' } as any)
+      const res = await agent.prompt({
+        sessionId,
+        prompt: [{ type: 'text', text: 'hello' }],
+      } as any)
+
+      expect(res.stopReason).toBe('end_turn')
+      expect(
+        observedEnvelopes.map(
+          envelope =>
+            (envelope as { payload?: { type?: string } }).payload?.type,
+        ),
+      ).toEqual([
+        'turn.started',
+        'headless.sdk_message',
+        'headless.sdk_message',
+        'turn.completed',
+      ])
+      expect(observedEnvelopes[1]).toMatchObject({
+        payload: {
+          type: 'headless.sdk_message',
+          payload: {
+            type: 'assistant',
+            uuid: 'sdk-agent-1',
+          },
+        },
+      })
     })
 
     test('cancel before prompt does not block next prompt', async () => {

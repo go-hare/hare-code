@@ -8,6 +8,7 @@ import {
   RuntimeConversationSnapshotJournal,
   type RuntimeConversationSnapshotJournalEntry,
 } from '../RuntimeConversationSnapshotJournal.js'
+import { KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION } from '../../../contracts/wire.js'
 
 function createConversationSnapshot(
   overrides: Partial<
@@ -35,6 +36,22 @@ function createTurnSnapshot(
     turnId: 'turn-1',
     state: 'running',
     startedAt: '2026-04-26T00:00:01.000Z',
+    ...overrides,
+  }
+}
+
+function createRunTurnCommand(
+  overrides: Partial<
+    NonNullable<RuntimeConversationSnapshotJournalEntry['activeExecution']>
+  > = {},
+): NonNullable<RuntimeConversationSnapshotJournalEntry['activeExecution']> {
+  return {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'run_turn',
+    requestId: 'run-1',
+    conversationId: 'conversation-1',
+    turnId: 'turn-1',
+    prompt: 'hello',
     ...overrides,
   }
 }
@@ -127,6 +144,31 @@ describe('RuntimeConversationSnapshotJournal', () => {
       expect(await journal.readLatest('conversation-1')).toEqual(firstEntry)
       expect(await journal.readLatest('conversation-2')).toEqual(secondEntry)
       expect(await journal.readLatest('missing-conversation')).toBeUndefined()
+    } finally {
+      await removeJournalDir(journalPath)
+    }
+  })
+
+  test('persists active execution commands for durable turn resume', async () => {
+    const journalPath = await createJournalPath()
+    const journal = new RuntimeConversationSnapshotJournal(journalPath)
+    const entry: RuntimeConversationSnapshotJournalEntry = {
+      conversation: createConversationSnapshot({
+        state: 'running',
+        activeTurnId: 'turn-1',
+      }),
+      activeTurn: createTurnSnapshot(),
+      activeExecution: createRunTurnCommand({
+        prompt: [{ type: 'text', text: 'hello' }],
+        attachments: [{ type: 'file', path: '/tmp/a.txt' }],
+        metadata: { reason: 'test' },
+      }),
+    }
+
+    try {
+      await journal.append(entry)
+
+      expect(await journal.readLatest('conversation-1')).toEqual(entry)
     } finally {
       await removeJournalDir(journalPath)
     }

@@ -1,17 +1,13 @@
-import type { Command } from "../commands.js";
-import type { MCPServerConnection } from "../services/mcp/types.js";
 import type { Message as MessageType } from "../types/message.js";
 import type { GlobalConfig } from "../utils/config.js";
-import uniqBy from "lodash-es/uniqBy.js";
-import { dedupeToolsByName, type Tool } from "../Tool.js";
+export {
+	createRuntimeInteractiveStartupService,
+	createRuntimeInteractiveStartupMcpMessages as createInteractiveStartupMcpMessages,
+	mergeRuntimeInteractiveStartupMcpState as mergeStartupMcpState,
+	type RuntimeInteractiveStartupMcpState as StartupMcpState,
+} from "../runtime/capabilities/execution/RuntimeInteractiveStartupService.js";
 
 export type SetupTrigger = "init" | "maintenance" | null;
-
-export type StartupMcpState = {
-	clients: MCPServerConnection[];
-	tools: Tool[];
-	commands: Command[];
-};
 
 export type SessionTurnUploader = (messages: MessageType[]) => void;
 
@@ -249,26 +245,6 @@ export function runSessionStartupSideEffects(options: {
 			}
 		});
 	});
-}
-
-export function mergeStartupMcpState(
-	local: StartupMcpState,
-	claudeai: StartupMcpState,
-): StartupMcpState {
-	return {
-		clients: [...local.clients, ...claudeai.clients],
-		tools: dedupeToolsByName([...local.tools, ...claudeai.tools]),
-		commands: uniqBy([...local.commands, ...claudeai.commands], "name"),
-	};
-}
-
-export function createInteractiveStartupMcpMessages<T>(options: {
-	mcpPromise: Promise<StartupMcpState>;
-	onError: (error: unknown) => T;
-}): Promise<T[]> {
-	return options.mcpPromise.then(() => []).catch((error) => [
-		options.onError(error),
-	]);
 }
 
 export function runStartupPrefetches(options: {

@@ -1114,6 +1114,13 @@ describe('KernelRuntimeWireRouter', () => {
         turnId: 'turn-1',
         state: 'running',
       },
+      activeExecution: {
+        type: 'run_turn',
+        requestId: 'run-1',
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        prompt: 'hello',
+      },
     })
 
     const second = createRouter({ conversationSnapshotStore: store })
@@ -1190,6 +1197,118 @@ describe('KernelRuntimeWireRouter', () => {
         stopReason: 'after_crash',
       },
     })
+  })
+
+  test('resumes recovered active turn execution from the persisted run command', async () => {
+    const snapshots: KernelRuntimeWireConversationRecoverySnapshot[] = []
+    const store: KernelRuntimeWireConversationSnapshotStore = {
+      readLatest(conversationId) {
+        for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+          const snapshot = snapshots[index]
+          if (snapshot?.conversation.conversationId === conversationId) {
+            return snapshot
+          }
+        }
+        return undefined
+      },
+      append(snapshot) {
+        snapshots.push(snapshot)
+      },
+    }
+    const stalledExecutor: KernelRuntimeWireTurnExecutor =
+      async function* stalled() {
+        await new Promise<never>(() => {})
+      }
+    const first = createRouter({
+      conversationSnapshotStore: store,
+      runTurnExecutor: stalledExecutor,
+    })
+    await first.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-1',
+      conversationId: 'conversation-1',
+      workspacePath: '/tmp/workspace',
+    })
+    await first.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_turn',
+      requestId: 'run-1',
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      prompt: 'resume me',
+    })
+
+    expect(snapshots.at(-1)).toMatchObject({
+      activeTurn: {
+        turnId: 'turn-1',
+        state: 'running',
+      },
+      activeExecution: {
+        type: 'run_turn',
+        requestId: 'run-1',
+        prompt: 'resume me',
+      },
+    })
+
+    const resumedCommands: unknown[] = []
+    const second = createRouter({
+      conversationSnapshotStore: store,
+      runTurnExecutor: async function* resumed(context) {
+        resumedCommands.push(context.command)
+        yield {
+          type: 'output',
+          payload: { text: 'resumed output' },
+        }
+        yield { type: 'completed', stopReason: 'end_turn' }
+      },
+    })
+    const [recovered] = await second.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-2',
+      conversationId: 'conversation-1',
+      workspacePath: '/tmp/workspace',
+    })
+
+    expect(recovered).toMatchObject({
+      kind: 'ack',
+      requestId: 'create-2',
+      payload: {
+        state: 'detached',
+        activeTurnId: 'turn-1',
+      },
+    })
+    await waitForObserved(
+      second.observed,
+      envelope =>
+        (envelope as { payload?: { type?: string } }).payload?.type ===
+        'turn.output_delta',
+    )
+    await waitForObserved(
+      second.observed,
+      envelope =>
+        (envelope as { payload?: { type?: string } }).payload?.type ===
+        'turn.completed',
+    )
+
+    expect(resumedCommands).toMatchObject([
+      {
+        type: 'run_turn',
+        requestId: 'run-1',
+        conversationId: 'conversation-1',
+        turnId: 'turn-1',
+        prompt: 'resume me',
+      },
+    ])
+    expect(snapshots.at(-1)).toMatchObject({
+      conversation: {
+        conversationId: 'conversation-1',
+        state: 'ready',
+      },
+    })
+    expect(snapshots.at(-1)?.activeTurn).toBeUndefined()
+    expect(snapshots.at(-1)?.activeExecution).toBeUndefined()
   })
 
   test('returns not_found for commands targeting missing conversations', async () => {

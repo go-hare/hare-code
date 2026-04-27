@@ -612,6 +612,7 @@ export type KernelRuntimeWireConversation = {
 export type KernelRuntimeWireConversationRecoverySnapshot = {
   conversation: KernelConversationSnapshot
   activeTurn?: KernelTurnSnapshot
+  activeExecution?: KernelRuntimeRunTurnCommand
 }
 
 export type KernelRuntimeWireConversationSnapshotStore = {

@@ -51,6 +51,9 @@ import type { Message } from '../types/message.js'
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
 import type {
+  KernelRuntimeEventSink,
+} from '../runtime/contracts/events.js'
+import type {
   SDKControlRequest,
   SDKControlResponse,
 } from '../entrypoints/sdk/controlTypes.js'
@@ -190,6 +193,7 @@ export type BridgeCoreParams = {
   initialMessages?: Message[]
   previouslyFlushedUUIDs?: Set<string>
   onInboundMessage?: (msg: SDKMessage) => void
+  onRuntimeEvent?: KernelRuntimeEventSink
   onPermissionResponse?: (response: SDKControlResponse) => void
   onInterrupt?: () => void
   onSetModel?: (model: string | undefined) => void
@@ -300,6 +304,7 @@ export async function initBridgeCore(
     initialMessages,
     previouslyFlushedUUIDs,
     onInboundMessage,
+    onRuntimeEvent,
     onPermissionResponse,
     onInterrupt,
     onSetModel,
@@ -1385,11 +1390,12 @@ export async function initBridgeCore(
             onInboundMessage,
             onPermissionResponse,
             onServerControlRequest,
-            envelope => {
-              logForDebugging(
-                `[bridge:repl] Received runtime envelope kind=${envelope.kind} eventId=${envelope.eventId ?? ''}`,
-              )
-            },
+            onRuntimeEvent ??
+              (envelope => {
+                logForDebugging(
+                  `[bridge:repl] Received runtime envelope kind=${envelope.kind} eventId=${envelope.eventId ?? ''}`,
+                )
+              }),
           )
         })
 

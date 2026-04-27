@@ -117,9 +117,37 @@ describe('bridge ingress runtime envelopes', () => {
     expect(onRuntimeEvent).toHaveBeenCalledWith(message.envelope)
     expect(onInboundMessage).not.toHaveBeenCalled()
   })
+
+  test('falls back headless.sdk_message payloads into the SDK ingress path', () => {
+    const onInboundMessage = mock((_message: unknown) => {})
+    const onRuntimeEvent = mock((_envelope: KernelRuntimeEnvelopeBase) => {})
+    const sdkMessage = {
+      type: 'user',
+      uuid: 'runtime-user-1',
+      session_id: 'session-1',
+      message: {
+        role: 'user',
+        content: 'hello through runtime',
+      },
+    }
+    const message = createRuntimeEventMessage(sdkMessage)
+
+    handleIngressMessage(
+      JSON.stringify(message),
+      new BoundedUUIDSet(10),
+      new BoundedUUIDSet(10),
+      onInboundMessage,
+      undefined,
+      undefined,
+      onRuntimeEvent,
+    )
+
+    expect(onRuntimeEvent).toHaveBeenCalledWith(message.envelope)
+    expect(onInboundMessage).toHaveBeenCalledWith(sdkMessage)
+  })
 })
 
-function createRuntimeEventMessage() {
+function createRuntimeEventMessage(sdkMessage?: unknown) {
   return {
     type: 'kernel_runtime_event',
     uuid: 'message-1',
@@ -137,6 +165,7 @@ function createRuntimeEventMessage() {
       payload: {
         type: 'headless.sdk_message',
         replayable: true,
+        ...(sdkMessage === undefined ? {} : { payload: sdkMessage }),
       },
     },
   } as const

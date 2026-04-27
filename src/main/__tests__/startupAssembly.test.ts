@@ -5,6 +5,7 @@ import {
 	createCliSessionConfig,
 	createDeferredSessionTurnUploader,
 	createInteractiveStartupMcpMessages,
+	createRuntimeInteractiveStartupService,
 	createResumeContext,
 	createStartupModes,
 	determineSetupTrigger,
@@ -452,6 +453,112 @@ describe("createInteractiveStartupMcpMessages", () => {
 
 		expect(messages).toEqual(["warning:Error: duplicate MCP tool"]);
 		expect(onError).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("createRuntimeInteractiveStartupService", () => {
+	test("starts MCP prefetches and startup hooks through one runtime service", async () => {
+		const localState = {
+			clients: [createTestClient("local")],
+			tools: [createTestTool({ name: "local_tool", description: "local" })],
+			commands: [createTestCommand("local")],
+		};
+		const claudeAiState = {
+			clients: [createTestClient("claudeai")],
+			tools: [
+				createTestTool({
+					name: "claudeai_tool",
+					description: "claudeai",
+				}),
+			],
+			commands: [createTestCommand("claudeai")],
+		};
+		const prefetchAllMcpResources = mock(
+			async (configs: Record<string, unknown>) =>
+				"claudeai" in configs ? claudeAiState : localState,
+		);
+		const hookMessage = { type: "system", content: "hook" } as never;
+		const processSessionStartHooks = mock(async () => [hookMessage]);
+
+		const service = createRuntimeInteractiveStartupService(
+			{
+				isNonInteractiveSession: false,
+				regularMcpConfigs: {
+					local: { type: "stdio", command: "local", scope: "local" },
+				} as never,
+				claudeaiConfigPromise: Promise.resolve({
+					claudeai: {
+						type: "stdio",
+						command: "claudeai",
+						scope: "local",
+					},
+				} as never),
+				runStartupHooks: true,
+				startupHookContext: {
+					agentType: "general",
+					model: "claude-sonnet",
+				},
+				onMcpStartupError: error =>
+					({ type: "system", content: String(error) }) as never,
+			},
+			{
+				prefetchAllMcpResources,
+				processSessionStartHooks,
+			},
+		);
+
+		const startup = service.start();
+		const mcpState = await startup.mcpPromise;
+
+		expect(mcpState.clients.map(client => client.name)).toEqual([
+			"local",
+			"claudeai",
+		]);
+		expect(mcpState.commands.map(command => command.name)).toEqual([
+			"local",
+			"claudeai",
+		]);
+		expect(await startup.hooksPromise).toEqual([hookMessage]);
+		expect(await startup.pendingStartupMessages).toEqual([]);
+		expect(prefetchAllMcpResources).toHaveBeenCalledTimes(2);
+		expect(processSessionStartHooks).toHaveBeenCalledWith("startup", {
+			agentType: "general",
+			model: "claude-sonnet",
+		});
+	});
+
+	test("skips MCP and hooks for non-interactive startup", async () => {
+		const prefetchAllMcpResources = mock(async () => ({
+			clients: [],
+			tools: [],
+			commands: [],
+		}));
+		const processSessionStartHooks = mock(async () => []);
+
+		const startup = createRuntimeInteractiveStartupService(
+			{
+				isNonInteractiveSession: true,
+				regularMcpConfigs: {},
+				claudeaiConfigPromise: Promise.resolve({}),
+				runStartupHooks: false,
+				onMcpStartupError: error =>
+					({ type: "system", content: String(error) }) as never,
+			},
+			{
+				prefetchAllMcpResources,
+				processSessionStartHooks,
+			},
+		).start();
+
+		expect(await startup.mcpPromise).toEqual({
+			clients: [],
+			tools: [],
+			commands: [],
+		});
+		expect(startup.hooksPromise).toBeNull();
+		expect(await startup.pendingStartupMessages).toEqual([]);
+		expect(prefetchAllMcpResources).toHaveBeenCalledTimes(0);
+		expect(processSessionStartHooks).toHaveBeenCalledTimes(0);
 	});
 });
 

@@ -8,6 +8,7 @@ import type { SDKControlReloadPluginsResponse } from '../../../../entrypoints/sd
 import type { AppState } from '../../../../state/AppStateStore.js'
 import { getCommands } from '../../../../commands.js'
 import { logError } from '../../../../utils/log.js'
+import { setupPluginHookHotReload } from '../../../../utils/plugins/loadPluginHooks.js'
 import { loadAllPluginsCacheOnly } from '../../../../utils/plugins/pluginLoader.js'
 import { refreshActivePlugins } from '../../../../utils/plugins/refresh.js'
 import type { RuntimeHeadlessMcpService } from '../../mcp/RuntimeHeadlessMcpService.js'
@@ -18,6 +19,7 @@ export type HeadlessRuntimeCapabilityBundle = {
   getAgents(): AgentDefinition[]
   setCommands(commands: Command[]): void
   refreshCommands(): Promise<Command[]>
+  refresh(): Promise<SDKControlReloadPluginsResponse>
   refreshPlugins(): Promise<SDKControlReloadPluginsResponse>
   applyPluginMcpDiff(): Promise<void>
 }
@@ -29,6 +31,7 @@ export type HeadlessRuntimeCapabilityBundleDeps = {
   ): ReturnType<typeof refreshActivePlugins>
   loadAllPluginsCacheOnly(): ReturnType<typeof loadAllPluginsCacheOnly>
   applyPluginMcpDiffRuntime: typeof applyPluginMcpDiffRuntime
+  setupPluginHookHotReload(): void
   logError(error: unknown): void
 }
 
@@ -37,6 +40,7 @@ const defaultDeps: HeadlessRuntimeCapabilityBundleDeps = {
   refreshActivePlugins,
   loadAllPluginsCacheOnly,
   applyPluginMcpDiffRuntime,
+  setupPluginHookHotReload,
   logError,
 }
 
@@ -63,7 +67,7 @@ export function createHeadlessRuntimeCapabilityBundle(options: {
     })
   }
 
-  async function refreshPlugins(): Promise<SDKControlReloadPluginsResponse> {
+  async function refresh(): Promise<SDKControlReloadPluginsResponse> {
     const refreshed = await deps.refreshActivePlugins(options.setAppState)
     const sdkAgents = currentAgents.filter(
       agent => agent.source === 'flagSettings',
@@ -95,6 +99,7 @@ export function createHeadlessRuntimeCapabilityBundle(options: {
     } else {
       deps.logError(pluginsResult.reason)
     }
+    deps.setupPluginHookHotReload()
 
     return {
       commands: currentCommands
@@ -123,7 +128,8 @@ export function createHeadlessRuntimeCapabilityBundle(options: {
       currentCommands = commands
     },
     refreshCommands,
-    refreshPlugins,
+    refresh,
+    refreshPlugins: refresh,
     applyPluginMcpDiff,
   }
 }

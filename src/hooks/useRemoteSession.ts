@@ -12,6 +12,11 @@ import {
   createToolStub,
 } from '../remote/remotePermissionBridge.js'
 import {
+  handleKernelRuntimeHostEvent,
+  KernelRuntimeOutputDeltaDedupe,
+  KernelRuntimeSDKMessageDedupe,
+} from '../remote/kernelRuntimeHostEvents.js'
+import {
   convertSDKMessage,
   isSessionEndMessage,
 } from '../remote/sdkMessageAdapter.js'
@@ -57,6 +62,8 @@ type UseRemoteSessionProps = {
   setStreamMode?: React.Dispatch<React.SetStateAction<SpinnerMode>>
   setInProgressToolUseIDs?: (f: (prev: Set<string>) => Set<string>) => void
   onRuntimeEvent?: KernelRuntimeEventSink
+  onRuntimeOutputDelta?: (text: string) => void
+  onRuntimeTurnTerminal?: (envelope: Parameters<KernelRuntimeEventSink>[0]) => void
 }
 
 type UseRemoteSessionResult = {
@@ -89,6 +96,8 @@ export function useRemoteSession({
   setStreamMode,
   setInProgressToolUseIDs,
   onRuntimeEvent,
+  onRuntimeOutputDelta,
+  onRuntimeTurnTerminal,
 }: UseRemoteSessionProps): UseRemoteSessionResult {
   const isRemoteMode = !!config
 
@@ -125,6 +134,8 @@ export function useRemoteSession({
   const isCompactingRef = useRef(false)
 
   const managerRef = useRef<RemoteSessionManager | null>(null)
+  const sdkMessageDedupeRef = useRef(new KernelRuntimeSDKMessageDedupe())
+  const outputDeltaDedupeRef = useRef(new KernelRuntimeOutputDeltaDedupe())
 
   // Track whether we've already updated the session title (for no-initial-prompt sessions)
   const hasUpdatedTitleRef = useRef(false)
@@ -158,189 +169,197 @@ export function useRemoteSession({
     logForDebugging(
       `[useRemoteSession] Initializing for session ${config.sessionId}`,
     )
+    sdkMessageDedupeRef.current.clear()
+    outputDeltaDedupeRef.current.clear()
 
-    const manager = new RemoteSessionManager(config, {
-      onMessage: sdkMessage => {
-        const parts = [`type=${sdkMessage.type}`]
-        if ('subtype' in sdkMessage)
-          parts.push(`subtype=${sdkMessage.subtype as string}`)
-        if (sdkMessage.type === 'user') {
-          const c = (sdkMessage.message as { content?: unknown } | undefined)
-            ?.content
-          parts.push(
-            `content=${Array.isArray(c) ? c.map(b => b.type).join(',') : typeof c}`,
-          )
-        }
-        logForDebugging(`[useRemoteSession] Received ${parts.join(' ')}`)
+    const handleSDKMessage = (sdkMessage: Parameters<typeof convertSDKMessage>[0]) => {
+      if (!sdkMessageDedupeRef.current.shouldProcess(sdkMessage)) {
+        return
+      }
 
-        // Clear response timeout on any message received — including the WS
-        // echo of our own POST, which acts as a heartbeat. This must run
-        // BEFORE the echo filter, or slow-to-stream agents (compaction, cold
-        // start) spuriously trip the 60s unresponsive warning + reconnect.
-        if (responseTimeoutRef.current) {
-          clearTimeout(responseTimeoutRef.current)
-          responseTimeoutRef.current = null
-        }
+      const parts = [`type=${sdkMessage.type}`]
+      if ('subtype' in sdkMessage)
+        parts.push(`subtype=${sdkMessage.subtype as string}`)
+      if (sdkMessage.type === 'user') {
+        const c = (sdkMessage.message as { content?: unknown } | undefined)
+          ?.content
+        parts.push(
+          `content=${Array.isArray(c) ? c.map(b => b.type).join(',') : typeof c}`,
+        )
+      }
+      logForDebugging(`[useRemoteSession] Received ${parts.join(' ')}`)
 
-        // Echo filter: drop user messages we already added locally before POST.
-        // The server and/or worker round-trip our own send back on the WS with
-        // the same uuid we passed to sendEventToRemoteSession. DO NOT delete on
-        // match — the same uuid can echo more than once (server broadcast +
-        // worker echo), and BoundedUUIDSet already caps growth via its ring.
-        if (
-          sdkMessage.type === 'user' &&
-          sdkMessage.uuid &&
-          sentUUIDsRef.current.has(sdkMessage.uuid as string)
-        ) {
-          logForDebugging(
-            `[useRemoteSession] Dropping echoed user message ${sdkMessage.uuid as string}`,
-          )
+      // Clear response timeout on any message received — including the WS
+      // echo of our own POST, which acts as a heartbeat. This must run
+      // BEFORE the echo filter, or slow-to-stream agents (compaction, cold
+      // start) spuriously trip the 60s unresponsive warning + reconnect.
+      if (responseTimeoutRef.current) {
+        clearTimeout(responseTimeoutRef.current)
+        responseTimeoutRef.current = null
+      }
+
+      // Echo filter: drop user messages we already added locally before POST.
+      // The server and/or worker round-trip our own send back on the WS with
+      // the same uuid we passed to sendEventToRemoteSession. DO NOT delete on
+      // match — the same uuid can echo more than once (server broadcast +
+      // worker echo), and BoundedUUIDSet already caps growth via its ring.
+      if (
+        sdkMessage.type === 'user' &&
+        sdkMessage.uuid &&
+        sentUUIDsRef.current.has(sdkMessage.uuid as string)
+      ) {
+        logForDebugging(
+          `[useRemoteSession] Dropping echoed user message ${sdkMessage.uuid as string}`,
+        )
+        return
+      }
+      // Handle init message - extract available slash commands
+      if (
+        sdkMessage.type === 'system' &&
+        sdkMessage.subtype === 'init' &&
+        onInit
+      ) {
+        const slashCommands = sdkMessage.slash_commands as string[]
+        logForDebugging(
+          `[useRemoteSession] Init received with ${slashCommands.length} slash commands`,
+        )
+        onInit(slashCommands)
+      }
+
+      // Track remote subagent lifecycle for the "N in background" counter.
+      // All task types (Agent/teammate/workflow/bash) flow through
+      // registerTask() → task_started, and complete via task_notification.
+      // Return early — these are status signals, not renderable messages.
+      if (sdkMessage.type === 'system') {
+        if (sdkMessage.subtype === 'task_started') {
+          runningTaskIdsRef.current.add(sdkMessage.task_id as string)
+          writeTaskCount()
           return
         }
-        // Handle init message - extract available slash commands
-        if (
-          sdkMessage.type === 'system' &&
-          sdkMessage.subtype === 'init' &&
-          onInit
-        ) {
-          const slashCommands = sdkMessage.slash_commands as string[]
-          logForDebugging(
-            `[useRemoteSession] Init received with ${slashCommands.length} slash commands`,
-          )
-          onInit(slashCommands)
+        if (sdkMessage.subtype === 'task_notification') {
+          runningTaskIdsRef.current.delete(sdkMessage.task_id as string)
+          writeTaskCount()
+          return
         }
-
-        // Track remote subagent lifecycle for the "N in background" counter.
-        // All task types (Agent/teammate/workflow/bash) flow through
-        // registerTask() → task_started, and complete via task_notification.
-        // Return early — these are status signals, not renderable messages.
-        if (sdkMessage.type === 'system') {
-          if (sdkMessage.subtype === 'task_started') {
-            runningTaskIdsRef.current.add(sdkMessage.task_id as string)
-            writeTaskCount()
+        if (sdkMessage.subtype === 'task_progress') {
+          return
+        }
+        // Track compaction state. The CLI emits status='compacting' at
+        // the start and status=null when done; compact_boundary also
+        // signals completion. Repeated 'compacting' status messages
+        // (keep-alive ticks) update the ref but don't append to messages.
+        if (sdkMessage.subtype === 'status') {
+          const wasCompacting = isCompactingRef.current
+          isCompactingRef.current = sdkMessage.status === 'compacting'
+          if (wasCompacting && isCompactingRef.current) {
             return
-          }
-          if (sdkMessage.subtype === 'task_notification') {
-            runningTaskIdsRef.current.delete(sdkMessage.task_id as string)
-            writeTaskCount()
-            return
-          }
-          if (sdkMessage.subtype === 'task_progress') {
-            return
-          }
-          // Track compaction state. The CLI emits status='compacting' at
-          // the start and status=null when done; compact_boundary also
-          // signals completion. Repeated 'compacting' status messages
-          // (keep-alive ticks) update the ref but don't append to messages.
-          if (sdkMessage.subtype === 'status') {
-            const wasCompacting = isCompactingRef.current
-            isCompactingRef.current = sdkMessage.status === 'compacting'
-            if (wasCompacting && isCompactingRef.current) {
-              return
-            }
-          }
-          if (sdkMessage.subtype === 'compact_boundary') {
-            isCompactingRef.current = false
           }
         }
-
-        // Check if session ended
-        if (isSessionEndMessage(sdkMessage)) {
+        if (sdkMessage.subtype === 'compact_boundary') {
           isCompactingRef.current = false
-          setIsLoading(false)
         }
+      }
 
-        // Clear in-progress tool_use IDs when their tool_result arrives.
-        // Must read the RAW sdkMessage: in non-viewerOnly mode,
-        // convertSDKMessage returns {type:'ignored'} for user messages, so the
-        // delete would never fire post-conversion. Mirrors the add site below
-        // and inProcessRunner.ts; without this the set grows unbounded for the
-        // session lifetime (BQ: CCR cohort shows 5.2x higher RSS slope).
-        if (setInProgressToolUseIDs && sdkMessage.type === 'user') {
-          const content = (
-            sdkMessage.message as { content?: unknown } | undefined
-          )?.content
-          if (Array.isArray(content)) {
-            const resultIds: string[] = []
-            for (const block of content) {
-              if (block.type === 'tool_result') {
-                resultIds.push(block.tool_use_id)
+      // Check if session ended
+      if (isSessionEndMessage(sdkMessage)) {
+        isCompactingRef.current = false
+        setIsLoading(false)
+      }
+
+      // Clear in-progress tool_use IDs when their tool_result arrives.
+      // Must read the RAW sdkMessage: in non-viewerOnly mode,
+      // convertSDKMessage returns {type:'ignored'} for user messages, so the
+      // delete would never fire post-conversion. Mirrors the add site below
+      // and inProcessRunner.ts; without this the set grows unbounded for the
+      // session lifetime (BQ: CCR cohort shows 5.2x higher RSS slope).
+      if (setInProgressToolUseIDs && sdkMessage.type === 'user') {
+        const content = (
+          sdkMessage.message as { content?: unknown } | undefined
+        )?.content
+        if (Array.isArray(content)) {
+          const resultIds: string[] = []
+          for (const block of content) {
+            if (block.type === 'tool_result') {
+              resultIds.push(block.tool_use_id)
+            }
+          }
+          if (resultIds.length > 0) {
+            setInProgressToolUseIDs(prev => {
+              const next = new Set(prev)
+              for (const id of resultIds) next.delete(id)
+              return next.size === prev.size ? prev : next
+            })
+          }
+        }
+      }
+
+      // Convert SDK message to REPL message. In viewerOnly mode, the
+      // remote agent runs BriefTool (SendUserMessage) — its tool_use block
+      // renders empty (userFacingName() === ''), actual content is in the
+      // tool_result. So we must convert tool_results to render them.
+      const converted = convertSDKMessage(
+        sdkMessage,
+        config.viewerOnly
+          ? { convertToolResults: true, convertUserTextMessages: true }
+          : undefined,
+      )
+
+      if (converted.type === 'message') {
+        // When we receive a complete message, clear streaming tool uses
+        // since the complete message replaces the partial streaming state
+        setStreamingToolUses?.(prev => (prev.length > 0 ? [] : prev))
+
+        // Mark tool_use blocks as in-progress so the UI shows the correct
+        // spinner state instead of "Waiting…" (queued). In local sessions,
+        // toolOrchestration.ts handles this, but remote sessions receive
+        // pre-built assistant messages without running local tool execution.
+        if (
+          setInProgressToolUseIDs &&
+          converted.message.type === 'assistant'
+        ) {
+          const contentArr = Array.isArray(converted.message.message?.content)
+            ? converted.message.message.content
+            : []
+          const toolUseIds = contentArr
+            .filter(block => block.type === 'tool_use')
+            .map(block => (block as { id: string }).id)
+          if (toolUseIds.length > 0) {
+            setInProgressToolUseIDs(prev => {
+              const next = new Set(prev)
+              for (const id of toolUseIds) {
+                next.add(id)
               }
-            }
-            if (resultIds.length > 0) {
-              setInProgressToolUseIDs(prev => {
-                const next = new Set(prev)
-                for (const id of resultIds) next.delete(id)
-                return next.size === prev.size ? prev : next
-              })
-            }
+              return next
+            })
           }
         }
 
-        // Convert SDK message to REPL message. In viewerOnly mode, the
-        // remote agent runs BriefTool (SendUserMessage) — its tool_use block
-        // renders empty (userFacingName() === ''), actual content is in the
-        // tool_result. So we must convert tool_results to render them.
-        const converted = convertSDKMessage(
-          sdkMessage,
-          config.viewerOnly
-            ? { convertToolResults: true, convertUserTextMessages: true }
-            : undefined,
-        )
-
-        if (converted.type === 'message') {
-          // When we receive a complete message, clear streaming tool uses
-          // since the complete message replaces the partial streaming state
-          setStreamingToolUses?.(prev => (prev.length > 0 ? [] : prev))
-
-          // Mark tool_use blocks as in-progress so the UI shows the correct
-          // spinner state instead of "Waiting…" (queued). In local sessions,
-          // toolOrchestration.ts handles this, but remote sessions receive
-          // pre-built assistant messages without running local tool execution.
-          if (
-            setInProgressToolUseIDs &&
-            converted.message.type === 'assistant'
-          ) {
-            const contentArr = Array.isArray(converted.message.message?.content)
-              ? converted.message.message.content
-              : []
-            const toolUseIds = contentArr
-              .filter(block => block.type === 'tool_use')
-              .map(block => (block as { id: string }).id)
-            if (toolUseIds.length > 0) {
-              setInProgressToolUseIDs(prev => {
-                const next = new Set(prev)
-                for (const id of toolUseIds) {
-                  next.add(id)
-                }
-                return next
-              })
-            }
-          }
-
-          setMessages(prev => [...prev, converted.message])
-          // Note: Don't stop loading on assistant messages - the agent may still be
-          // working (tool use loops). Loading stops only on session end or permission request.
-        } else if (converted.type === 'stream_event') {
-          // Process streaming events to update UI in real-time
-          if (setStreamingToolUses && setStreamMode) {
-            handleMessageFromStream(
-              converted.event,
-              message => setMessages(prev => [...prev, message]),
-              () => {
-                // No-op for response length - remote sessions don't track this
-              },
-              setStreamMode,
-              setStreamingToolUses,
-            )
-          } else {
-            logForDebugging(
-              `[useRemoteSession] Stream event received but streaming callbacks not provided`,
-            )
-          }
+        setMessages(prev => [...prev, converted.message])
+        // Note: Don't stop loading on assistant messages - the agent may still be
+        // working (tool use loops). Loading stops only on session end or permission request.
+      } else if (converted.type === 'stream_event') {
+        // Process streaming events to update UI in real-time
+        if (setStreamingToolUses && setStreamMode) {
+          handleMessageFromStream(
+            converted.event,
+            message => setMessages(prev => [...prev, message]),
+            () => {
+              // No-op for response length - remote sessions don't track this
+            },
+            setStreamMode,
+            setStreamingToolUses,
+          )
+        } else {
+          logForDebugging(
+            `[useRemoteSession] Stream event received but streaming callbacks not provided`,
+          )
         }
-        // 'ignored' messages are silently dropped
-      },
+      }
+      // 'ignored' messages are silently dropped
+    }
+
+    const manager = new RemoteSessionManager(config, {
+      onMessage: handleSDKMessage,
       onPermissionRequest: (request, requestId) => {
         logForDebugging(
           `[useRemoteSession] Permission request for tool: ${request.tool_name}`,
@@ -464,7 +483,29 @@ export function useRemoteSession({
       onError: error => {
         logForDebugging(`[useRemoteSession] Error: ${error.message}`)
       },
-      onRuntimeEvent,
+      onRuntimeEvent: envelope => {
+        handleKernelRuntimeHostEvent(envelope, {
+          onRuntimeEvent,
+          onSDKMessage: handleSDKMessage,
+          onRuntimeHeartbeat: () => {
+            if (responseTimeoutRef.current) {
+              clearTimeout(responseTimeoutRef.current)
+              responseTimeoutRef.current = null
+            }
+          },
+          onOutputDelta: delta => {
+            if (!outputDeltaDedupeRef.current.shouldProcess(envelope)) {
+              return
+            }
+            onRuntimeOutputDelta?.(delta.text)
+          },
+          onTurnTerminal: () => {
+            isCompactingRef.current = false
+            setIsLoading(false)
+            onRuntimeTurnTerminal?.(envelope)
+          },
+        })
+      },
     })
 
     managerRef.current = manager
@@ -490,6 +531,8 @@ export function useRemoteSession({
     setStreamMode,
     setInProgressToolUseIDs,
     onRuntimeEvent,
+    onRuntimeOutputDelta,
+    onRuntimeTurnTerminal,
     setConnStatus,
     writeTaskCount,
   ])

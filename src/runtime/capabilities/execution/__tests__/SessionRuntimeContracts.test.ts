@@ -28,6 +28,7 @@ describe('SessionRuntime contracts', () => {
     expect(content).toContain(
       'export interface RuntimeExecutionSession extends RuntimeSessionLifecycle',
     )
+    expect(content).toContain('submitRuntimeTurn(')
     expect(content).toContain('export type ExecutionSessionFactory')
     expect(content).toContain('export const createExecutionSessionRuntime')
   })
@@ -99,6 +100,26 @@ describe('SessionRuntime contracts', () => {
         uuid: 'result-1',
       } as const
     })
+    const submitRuntimeTurn = mock(async function* (
+      prompt: string | unknown[],
+      options?: { uuid?: string; isMeta?: boolean },
+    ) {
+      for await (const message of submitMessage(prompt, options)) {
+        yield {
+          schemaVersion: 'kernel.runtime.v1',
+          messageId: 'runtime-message-1',
+          sequence: 1,
+          timestamp: '2026-04-27T00:00:00.000Z',
+          source: 'kernel_runtime',
+          kind: 'event',
+          payload: {
+            type: 'headless.sdk_message',
+            replayable: true,
+            payload: message,
+          },
+        }
+      }
+    })
 
     const createSessionRuntime = mock((config: Record<string, unknown>) => {
       expect(config.readFileCache).not.toBe(initialCache)
@@ -107,6 +128,7 @@ describe('SessionRuntime contracts', () => {
         id: 'session-1',
         workDir: process.cwd(),
         isLive: true,
+        submitRuntimeTurn,
         submitMessage,
         getReadFileState: () => nextCache,
         stopAndWait,
@@ -133,6 +155,7 @@ describe('SessionRuntime contracts', () => {
     }
 
     expect(createSessionRuntime).toHaveBeenCalledTimes(1)
+    expect(submitRuntimeTurn).toHaveBeenCalledTimes(1)
     expect(submitMessage).toHaveBeenCalledTimes(1)
     expect(setReadFileCache).toHaveBeenCalledWith(nextCache)
     expect(stopAndWait).toHaveBeenCalledWith(true)

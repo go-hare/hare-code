@@ -9,6 +9,10 @@ import {
   materializeRuntimeCommandAssembly,
   materializeRuntimeToolSet,
   materializeRuntimeHeadlessEnvironment,
+  preloadRuntimeCommandAssembly,
+  refreshRuntimeAgentDefinitions,
+  refreshRuntimeCommands,
+  resolvePreloadedRuntimeCommandAssembly,
   type HeadlessCapabilityMaterializerDeps,
 } from '../headlessCapabilityMaterializer.js'
 
@@ -48,10 +52,13 @@ function createDeps(): HeadlessCapabilityMaterializerDeps {
   return {
     primeCommandSources: mock((_entrypoint?: string) => {}),
     getCommands: mock(async (_cwd: string) => [promptCommand]),
+    clearCommandsCache: mock(() => {}),
+    clearCommandMemoizationCaches: mock(() => {}),
     getTools: mock((_context: ToolPermissionContext) => [baseTool]),
     getAgentDefinitionsWithOverrides: mock(
       async (_cwd: string) => agentDefinitions,
     ),
+    clearAgentDefinitionsCache: mock(() => {}),
     getActiveAgentsFromList: mock((agents: AgentDefinition[]) => agents),
     applyCoordinatorToolFilter: mock((_tools: Tools) => [filteredTool]),
   }
@@ -212,6 +219,114 @@ describe('materializeRuntimeCommandAssembly', () => {
     expect(result).toEqual({
       commands: [promptCommand],
       agentDefinitionsResult: preloadedAgentDefinitions,
+    })
+  })
+
+  test('preloads interactive command assembly through runtime sources', async () => {
+    const deps = createDeps()
+
+    const preloaded = preloadRuntimeCommandAssembly(
+      {
+        cwd: '/pre',
+        enabled: true,
+      },
+      deps,
+    )
+    const result = await resolvePreloadedRuntimeCommandAssembly(
+      {
+        currentCwd: '/repo',
+        preloaded,
+      },
+      deps,
+    )
+
+    expect(deps.getCommands).toHaveBeenCalledWith('/pre')
+    expect(deps.getAgentDefinitionsWithOverrides).toHaveBeenCalledWith('/pre')
+    expect(deps.getCommands).toHaveBeenCalledTimes(1)
+    expect(deps.getAgentDefinitionsWithOverrides).toHaveBeenCalledTimes(1)
+    expect(result.commands).toEqual([promptCommand])
+    expect(result.agentDefinitionsResult).toEqual({
+      activeAgents: [builtInAgent],
+      allAgents: [builtInAgent],
+    })
+  })
+
+  test('falls back to current cwd when interactive preload is disabled', async () => {
+    const deps = createDeps()
+
+    const preloaded = preloadRuntimeCommandAssembly(
+      {
+        cwd: '/pre',
+        enabled: false,
+      },
+      deps,
+    )
+    const result = await resolvePreloadedRuntimeCommandAssembly(
+      {
+        currentCwd: '/repo',
+        preloaded,
+      },
+      deps,
+    )
+
+    expect(deps.getCommands).toHaveBeenCalledWith('/repo')
+    expect(deps.getAgentDefinitionsWithOverrides).toHaveBeenCalledWith('/repo')
+    expect(result.commands).toEqual([promptCommand])
+  })
+})
+
+describe('runtime capability refresh helpers', () => {
+  test('refreshes commands through the runtime full-cache path', async () => {
+    const deps = createDeps()
+
+    const commands = await refreshRuntimeCommands(
+      {
+        cwd: '/repo',
+        mode: 'full',
+      },
+      deps,
+    )
+
+    expect(deps.clearCommandsCache).toHaveBeenCalled()
+    expect(deps.clearCommandMemoizationCaches).not.toHaveBeenCalled()
+    expect(deps.getCommands).toHaveBeenCalledWith('/repo')
+    expect(commands).toEqual([promptCommand])
+  })
+
+  test('refreshes commands through the runtime memoized path', async () => {
+    const deps = createDeps()
+
+    const commands = await refreshRuntimeCommands(
+      {
+        cwd: '/repo',
+        mode: 'memoized',
+      },
+      deps,
+    )
+
+    expect(deps.clearCommandsCache).not.toHaveBeenCalled()
+    expect(deps.clearCommandMemoizationCaches).toHaveBeenCalled()
+    expect(deps.getCommands).toHaveBeenCalledWith('/repo')
+    expect(commands).toEqual([promptCommand])
+  })
+
+  test('refreshes resumed agent definitions through runtime ownership', async () => {
+    const deps = createDeps()
+
+    const definitions = await refreshRuntimeAgentDefinitions(
+      {
+        cwd: '/repo',
+        activeFromAll: true,
+      },
+      deps,
+    )
+
+    expect(deps.clearAgentDefinitionsCache).toHaveBeenCalled()
+    expect(deps.getAgentDefinitionsWithOverrides).toHaveBeenCalledWith('/repo')
+    expect(deps.getActiveAgentsFromList).toHaveBeenCalledWith([builtInAgent])
+    expect(definitions).toEqual({
+      activeAgents: [builtInAgent],
+      allAgents: [builtInAgent],
     })
   })
 })

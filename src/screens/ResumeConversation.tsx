@@ -52,6 +52,7 @@ import {
 } from '../utils/sessionStorage.js'
 import type { ThinkingConfig } from '../utils/thinking.js'
 import type { ContentReplacementRecord } from '../utils/toolResultStorage.js'
+import { refreshRuntimeAgentDefinitions } from '../runtime/capabilities/execution/headlessCapabilityMaterializer.js'
 import { REPL } from './REPL.js'
 
 function parsePrIdentifier(value: string): number | null {
@@ -248,21 +249,13 @@ export function ResumeConversation({
         /* eslint-enable @typescript-eslint/no-require-imports */
         const warning = coordinatorModule.matchSessionMode(result.mode)
         if (warning) {
-          /* eslint-disable @typescript-eslint/no-require-imports */
-          const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
-            require('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js')
-          /* eslint-enable @typescript-eslint/no-require-imports */
-          getAgentDefinitionsWithOverrides.cache.clear?.()
-          const freshAgentDefs = await getAgentDefinitionsWithOverrides(
-            getOriginalCwd(),
-          )
+          const freshAgentDefs = await refreshRuntimeAgentDefinitions({
+            cwd: getOriginalCwd(),
+            activeFromAll: true,
+          })
           setAppState(prev => ({
             ...prev,
-            agentDefinitions: {
-              ...freshAgentDefs,
-              allAgents: freshAgentDefs.allAgents,
-              activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
-            },
+            agentDefinitions: freshAgentDefs,
           }))
           result.messages.push(createSystemMessage(warning, 'warning'))
         }

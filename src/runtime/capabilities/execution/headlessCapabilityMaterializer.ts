@@ -7,7 +7,11 @@ import {
   getAgentDefinitionsWithOverrides,
 } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { Command } from '../../../commands.js'
-import { getCommands } from '../../../commands.js'
+import {
+  clearCommandMemoizationCaches,
+  clearCommandsCache,
+  getCommands,
+} from '../../../commands.js'
 import type {
   MCPServerConnection,
   McpSdkServerConfig,
@@ -62,10 +66,17 @@ export type RuntimeCommandAssemblyInput = {
   agentDefinitionsResult?: AgentDefinitionsResult
 }
 
+export type RuntimeCommandAssemblyPreload = {
+  commandsPromise: Promise<Command[]> | null
+  agentDefinitionsPromise: Promise<AgentDefinitionsResult> | null
+}
+
 export type RuntimeCommandAssemblyResult = {
   commands: Command[]
   agentDefinitionsResult: AgentDefinitionsResult
 }
+
+export type RuntimeCommandRefreshMode = 'full' | 'memoized'
 
 export type RuntimeToolSetInput = {
   tools?: Tools
@@ -77,8 +88,11 @@ export type RuntimeToolSetInput = {
 export type HeadlessCapabilityMaterializerDeps = {
   primeCommandSources(entrypoint?: string): void
   getCommands(cwd: string): Promise<Command[]>
+  clearCommandsCache(): void
+  clearCommandMemoizationCaches(): void
   getTools(permissionContext: ToolPermissionContext): Tools
   getAgentDefinitionsWithOverrides(cwd: string): Promise<AgentDefinitionsResult>
+  clearAgentDefinitionsCache(): void
   getActiveAgentsFromList(agents: AgentDefinition[]): AgentDefinition[]
   applyCoordinatorToolFilter(tools: Tools): Tools
 }
@@ -86,8 +100,12 @@ export type HeadlessCapabilityMaterializerDeps = {
 const defaultDeps: HeadlessCapabilityMaterializerDeps = {
   primeCommandSources: primeRuntimeCommandSources,
   getCommands,
+  clearCommandsCache,
+  clearCommandMemoizationCaches,
   getTools,
   getAgentDefinitionsWithOverrides,
+  clearAgentDefinitionsCache: () =>
+    getAgentDefinitionsWithOverrides.cache.clear?.(),
   getActiveAgentsFromList,
   applyCoordinatorToolFilter,
 }
@@ -199,6 +217,102 @@ export async function materializeRuntimeCommandAssembly(
     commands,
     agentDefinitionsResult,
   }
+}
+
+export function preloadRuntimeCommandAssembly(
+  options: {
+    cwd: string
+    enabled: boolean
+  },
+  deps: Pick<
+    HeadlessCapabilityMaterializerDeps,
+    'getCommands' | 'getAgentDefinitionsWithOverrides'
+  > = defaultDeps,
+): RuntimeCommandAssemblyPreload {
+  const commandsPromise = options.enabled ? deps.getCommands(options.cwd) : null
+  const agentDefinitionsPromise = options.enabled
+    ? deps.getAgentDefinitionsWithOverrides(options.cwd)
+    : null
+
+  commandsPromise?.catch(() => {})
+  agentDefinitionsPromise?.catch(() => {})
+
+  return {
+    commandsPromise,
+    agentDefinitionsPromise,
+  }
+}
+
+export async function refreshRuntimeCommands(
+  options: {
+    cwd: string
+    mode: RuntimeCommandRefreshMode
+  },
+  deps: Pick<
+    HeadlessCapabilityMaterializerDeps,
+    'clearCommandsCache' | 'clearCommandMemoizationCaches' | 'getCommands'
+  > = defaultDeps,
+): Promise<Command[]> {
+  if (options.mode === 'full') {
+    deps.clearCommandsCache()
+  } else {
+    deps.clearCommandMemoizationCaches()
+  }
+
+  return deps.getCommands(options.cwd)
+}
+
+export async function refreshRuntimeAgentDefinitions(
+  options: {
+    cwd: string
+    activeFromAll?: boolean
+  },
+  deps: Pick<
+    HeadlessCapabilityMaterializerDeps,
+    | 'clearAgentDefinitionsCache'
+    | 'getAgentDefinitionsWithOverrides'
+    | 'getActiveAgentsFromList'
+  > = defaultDeps,
+): Promise<AgentDefinitionsResult> {
+  deps.clearAgentDefinitionsCache()
+  const definitions = await deps.getAgentDefinitionsWithOverrides(options.cwd)
+
+  if (!options.activeFromAll) {
+    return definitions
+  }
+
+  return {
+    ...definitions,
+    allAgents: definitions.allAgents,
+    activeAgents: deps.getActiveAgentsFromList(definitions.allAgents),
+  }
+}
+
+export async function resolvePreloadedRuntimeCommandAssembly(
+  options: {
+    currentCwd: string
+    preloaded: RuntimeCommandAssemblyPreload
+  },
+  deps: Pick<
+    HeadlessCapabilityMaterializerDeps,
+    'primeCommandSources' | 'getCommands' | 'getAgentDefinitionsWithOverrides'
+  > = defaultDeps,
+): Promise<RuntimeCommandAssemblyResult> {
+  const { currentCwd, preloaded } = options
+  const [commands, agentDefinitionsResult] = await Promise.all([
+    preloaded.commandsPromise ?? deps.getCommands(currentCwd),
+    preloaded.agentDefinitionsPromise ??
+      deps.getAgentDefinitionsWithOverrides(currentCwd),
+  ])
+
+  return materializeRuntimeCommandAssembly(
+    {
+      cwd: currentCwd,
+      commands,
+      agentDefinitionsResult,
+    },
+    deps,
+  )
 }
 
 export function materializeRuntimeToolSet(

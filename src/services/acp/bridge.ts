@@ -1,6 +1,8 @@
 /**
- * Bridge module: converts Claude Code's SDKMessage stream events from
- * QueryEngine.submitMessage() into ACP SessionUpdate notifications.
+ * Bridge module: converts Claude Code runtime envelopes into ACP
+ * SessionUpdate notifications. Legacy SDKMessage streams are accepted only as
+ * compatibility input and are wrapped into headless.sdk_message envelopes
+ * before ACP handling.
  *
  * Handles all SDKMessage types:
  *  - system (compact_boundary, api_retry, local_command_output)
@@ -24,6 +26,18 @@ import type {
   ToolKind,
 } from '@agentclientprotocol/sdk'
 import type { SDKMessage } from '../../entrypoints/sdk/coreTypes.generated.js'
+import type {
+  KernelEvent,
+  KernelRuntimeEnvelopeBase,
+} from '../../runtime/contracts/events.js'
+import { isKernelRuntimeEnvelope } from '../../runtime/core/events/KernelRuntimeEventFacade.js'
+import { RuntimeEventBus } from '../../runtime/core/events/RuntimeEventBus.js'
+import {
+  handleKernelRuntimeHostEvent,
+  KernelRuntimeOutputDeltaDedupe,
+  KernelRuntimeSDKMessageDedupe,
+  type KernelRuntimeTextOutputDelta,
+} from '../../remote/kernelRuntimeHostEvents.js'
 import { toDisplayPath, markdownEscape } from './utils.js'
 
 // ── ToolUseCache ──────────────────────────────────────────────────
@@ -47,6 +61,36 @@ export type SessionUsage = {
 }
 
 type StreamedAssistantContentKind = 'image' | 'text' | 'thinking'
+type ForwardSessionUpdateMessage = SDKMessage | KernelRuntimeEnvelopeBase
+
+type LegacySDKRuntimeEnvelopeAdapter = {
+  toEnvelope(message: SDKMessage): KernelRuntimeEnvelopeBase
+}
+
+export function createLegacySDKRuntimeEnvelopeAdapter(
+  sessionId: string,
+): LegacySDKRuntimeEnvelopeAdapter {
+  const eventBus = new RuntimeEventBus({
+    runtimeId: `acp:${sessionId}`,
+  })
+  const turnId = `${sessionId}:acp-forward`
+
+  return {
+    toEnvelope(message) {
+      return eventBus.emit({
+        conversationId: sessionId,
+        turnId,
+        type: 'headless.sdk_message',
+        replayable: true,
+        payload: cloneSDKMessageForRuntimeEnvelope(message),
+      })
+    },
+  }
+}
+
+function cloneSDKMessageForRuntimeEnvelope(message: SDKMessage): SDKMessage {
+  return JSON.parse(JSON.stringify(message)) as SDKMessage
+}
 
 // ── Tool info conversion ──────────────────────────────────────────
 
@@ -543,13 +587,15 @@ export function promptToQueryContent(
 // ── Main forwarding function ──────────────────────────────────────
 
 /**
- * Iterates SDKMessages from QueryEngine.submitMessage(), converts each
- * to ACP SessionUpdate notifications, and sends them via conn.sessionUpdate().
+ * Iterates runtime envelopes, converts each to ACP SessionUpdate notifications,
+ * and sends them via conn.sessionUpdate(). Legacy SDKMessage inputs are first
+ * wrapped into headless.sdk_message runtime envelopes so ACP uses the same
+ * runtime-first host event path.
  * Returns the final StopReason and accumulated usage for the prompt turn.
  */
 export async function forwardSessionUpdates(
   sessionId: string,
-  sdkMessages: AsyncGenerator<SDKMessage, void, unknown>,
+  sdkMessages: AsyncIterable<ForwardSessionUpdateMessage>,
   conn: AgentSideConnection,
   abortSignal: AbortSignal,
   toolUseCache: ToolUseCache,
@@ -574,6 +620,10 @@ export async function forwardSessionUpdates(
     Set<StreamedAssistantContentKind>
   >()
   const scopeToStreamedMessageId = new Map<string, string>()
+  const sdkMessageDedupe = new KernelRuntimeSDKMessageDedupe()
+  const outputDeltaDedupe = new KernelRuntimeOutputDeltaDedupe()
+  const sdkMessageIterator = sdkMessages[Symbol.asyncIterator]()
+  const legacySdkAdapter = createLegacySDKRuntimeEnvelopeAdapter(sessionId)
 
   try {
     while (!abortSignal.aborted) {
@@ -581,8 +631,8 @@ export async function forwardSessionUpdates(
       // immediately when cancelled, even if the generator is waiting for
       // a slow API response.
       const nextResult = await Promise.race([
-        sdkMessages.next(),
-        new Promise<IteratorResult<SDKMessage, void>>((resolve) => {
+        sdkMessageIterator.next(),
+        new Promise<IteratorResult<ForwardSessionUpdateMessage, void>>((resolve) => {
           if (abortSignal.aborted) {
             resolve({ done: true, value: undefined })
             return
@@ -596,9 +646,48 @@ export async function forwardSessionUpdates(
 
       if (msg == null) continue
 
-      const type = msg.type as string
+      const messagesToProcess: SDKMessage[] = []
+      const runtimeEnvelope = isKernelRuntimeEnvelope(msg)
+        ? msg
+        : legacySdkAdapter.toEnvelope(msg)
+      {
+        const runtimeOutputDeltas: KernelRuntimeTextOutputDelta[] = []
+        const runtimeTerminalEvents: KernelEvent[] = []
+        handleKernelRuntimeHostEvent(runtimeEnvelope, {
+          onSDKMessage: message => {
+            messagesToProcess.push(message as SDKMessage)
+          },
+          onOutputDelta: delta => {
+            if (outputDeltaDedupe.shouldProcess(runtimeEnvelope)) {
+              runtimeOutputDeltas.push(delta)
+            }
+          },
+          onTurnTerminal: (_envelope, event) => {
+            runtimeTerminalEvents.push(event)
+          },
+        })
+        for (const delta of runtimeOutputDeltas) {
+          await conn.sessionUpdate({
+            sessionId,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: { type: 'text', text: delta.text },
+            },
+          })
+        }
+        for (const event of runtimeTerminalEvents) {
+          stopReason = stopReasonFromKernelRuntimeTerminalEvent(event)
+        }
+      }
 
-      switch (type) {
+      for (const msg of messagesToProcess) {
+        if (!sdkMessageDedupe.shouldProcess(msg)) {
+          continue
+        }
+
+        const type = msg.type as string
+
+        switch (type) {
         // ── System messages ────────────────────────────────────────
         case 'system': {
           const subtype = msg.subtype as string | undefined
@@ -892,6 +981,7 @@ export async function forwardSessionUpdates(
         default:
           // Ignore unknown message types
           break
+        }
       }
     }
 
@@ -907,6 +997,52 @@ export async function forwardSessionUpdates(
   }
 
   return { stopReason, usage: accumulatedUsage }
+}
+
+function stopReasonFromKernelRuntimeTerminalEvent(
+  event: KernelEvent,
+): StopReason {
+  const payload = isObjectRecord(event.payload) ? event.payload : undefined
+  const runtimeStopReason =
+    typeof payload?.stopReason === 'string'
+      ? payload.stopReason
+      : undefined
+
+  if (runtimeStopReason === 'max_tokens') {
+    return 'max_tokens'
+  }
+  if (
+    runtimeStopReason === 'max_turn_requests' ||
+    runtimeStopReason === 'max_turns' ||
+    runtimeStopReason === 'error_max_turns'
+  ) {
+    return 'max_turn_requests'
+  }
+  if (isRuntimeAbortStopReason(runtimeStopReason)) {
+    return 'cancelled'
+  }
+  if (event.type === 'turn.failed') {
+    return 'end_turn'
+  }
+  return 'end_turn'
+}
+
+function isRuntimeAbortStopReason(value: string | undefined): boolean {
+  if (!value) {
+    return false
+  }
+  const normalized = value.toLowerCase()
+  return (
+    normalized === 'interrupt' ||
+    normalized === 'cancelled' ||
+    normalized === 'canceled' ||
+    normalized === 'abort' ||
+    normalized === 'aborted'
+  )
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 // ── Assistant message conversion ──────────────────────────────────

@@ -29,7 +29,8 @@ function createRuntimeHandle() {
 
 function createRuntimeEnvelope(
   sequence = 1,
-): KernelRuntimeEnvelopeBase<{ type: string }> {
+  overrides: Partial<KernelRuntimeEnvelopeBase> = {},
+): KernelRuntimeEnvelopeBase {
   return {
     schemaVersion: 'kernel.runtime.v1',
     messageId: `runtime-message-${sequence}`,
@@ -38,8 +39,16 @@ function createRuntimeEnvelope(
     timestamp: '2026-04-26T00:00:00.000Z',
     source: 'kernel_runtime',
     kind: 'event',
+    runtimeId: 'runtime-1',
     conversationId: 'conversation-1',
-    payload: { type: 'headless.sdk_message' },
+    payload: {
+      runtimeId: 'runtime-1',
+      conversationId: 'conversation-1',
+      eventId: `runtime-event-${sequence}`,
+      type: 'headless.sdk_message',
+      replayable: true,
+    },
+    ...overrides,
   }
 }
 
@@ -118,6 +127,52 @@ describe('RuntimeDirectConnectSession', () => {
 
     session.attachSink(socket)
     expect(socket.send).toHaveBeenCalledWith(rawLine)
+  })
+
+  test('indexes runtime envelope replay through the shared facade semantics', async () => {
+    const runtime = createRuntimeHandle()
+    const logger = {
+      debug: mock(() => {}),
+      info: mock(() => {}),
+      warn: mock(() => {}),
+      error: mock(() => {}),
+    }
+    const onStopped = mock(() => {})
+    const session = new RuntimeDirectConnectSession(runtime, logger, 0, onStopped)
+    const first = createRuntimeEnvelope(1)
+    const second = createRuntimeEnvelope(2)
+    const duplicateSecond = { ...second }
+    const transient = createRuntimeEnvelope(3, {
+      messageId: 'runtime-message-3',
+      eventId: 'runtime-event-3',
+      payload: {
+        runtimeId: 'runtime-1',
+        conversationId: 'conversation-1',
+        eventId: 'runtime-event-3',
+        type: 'turn.output_delta',
+        replayable: false,
+      },
+    })
+
+    for (const envelope of [first, second, duplicateSecond, transient]) {
+      runtime.stdout.write(
+        `${JSON.stringify({
+          type: 'kernel_runtime_event',
+          uuid: envelope.messageId,
+          session_id: 'session-1',
+          envelope,
+        })}\n`,
+      )
+    }
+    await waitForAsyncIO()
+
+    expect(session.getRuntimeEnvelopeBacklog()).toEqual([first, second])
+
+    const replayed: KernelRuntimeEnvelopeBase[] = []
+    session.replayRuntimeEnvelopeBacklog(envelope => {
+      replayed.push(envelope)
+    }, { sinceEventId: first.eventId })
+    expect(replayed).toEqual([second])
   })
 
   test('force stop waits for process close and notifies onStopped', async () => {

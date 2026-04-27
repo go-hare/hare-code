@@ -43,6 +43,7 @@ import { randomUUID, type UUID } from 'node:crypto'
 import type { Message } from '../../types/message.js'
 import type { PermissionMode } from '../../types/permissions.js'
 import type { Command } from '../../types/command.js'
+import type { SDKMessage } from '../../entrypoints/agentSdkTypes.js'
 import { setOriginalCwd } from './bootstrapState.js'
 import { getCommands } from './commandSource.js'
 import { enableConfigs } from './configBootstrap.js'
@@ -73,6 +74,7 @@ import {
 import type { AppState, QueryEngineConfig, Tools } from './runtimeDeps.js'
 import { createRuntimePermissionService } from '../../runtime/capabilities/permissions/RuntimePermissionService.js'
 import { RuntimeEventBus } from '../../runtime/core/events/RuntimeEventBus.js'
+import type { KernelRuntimeEnvelopeBase } from '../../runtime/contracts/events.js'
 
 // ── Session state ─────────────────────────────────────────────────
 
@@ -91,6 +93,7 @@ type AcpSession = {
   clientCapabilities?: ClientCapabilities
   appState: AppState
   commands: Command[]
+  runtimeEventBus: RuntimeEventBus
 }
 
 // ── Agent class ───────────────────────────────────────────────────
@@ -279,10 +282,15 @@ export class AcpAgent implements Agent {
       session.queryEngine.resetAbortController()
 
       const sdkMessages = session.queryEngine.submitMessage(promptInput)
+      const runtimeMessages = sdkMessagesToRuntimeEnvelopes(
+        params.sessionId,
+        sdkMessages,
+        session.runtimeEventBus,
+      )
 
       const { stopReason, usage } = await forwardSessionUpdates(
         params.sessionId,
-        sdkMessages,
+        runtimeMessages,
         this.conn,
         session.queryEngine.getAbortSignal(),
         session.toolUseCache,
@@ -583,6 +591,7 @@ export class AcpAgent implements Agent {
       clientCapabilities: this.clientCapabilities,
       appState,
       commands,
+      runtimeEventBus,
       sessionFingerprint: computeSessionFingerprint({
         cwd,
         mcpServers: params.mcpServers as Array<{ name: string; [key: string]: unknown }> | undefined,
@@ -774,6 +783,109 @@ export class AcpAgent implements Agent {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+async function* sdkMessagesToRuntimeEnvelopes(
+  sessionId: string,
+  sdkMessages: AsyncIterable<SDKMessage>,
+  runtimeEventBus: RuntimeEventBus,
+): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown> {
+  const turnId = randomUUID()
+  yield runtimeEventBus.emit({
+    conversationId: sessionId,
+    turnId,
+    type: 'turn.started',
+    replayable: true,
+    payload: {
+      conversationId: sessionId,
+      turnId,
+      state: 'running',
+    },
+  })
+
+  let sawTerminalResult = false
+  try {
+    for await (const message of sdkMessages) {
+      yield runtimeEventBus.emit({
+        conversationId: sessionId,
+        turnId,
+        type: 'headless.sdk_message',
+        replayable: true,
+        payload: cloneSDKMessageForRuntimeEvent(message),
+      })
+
+      if (message.type === 'result') {
+        sawTerminalResult = true
+        const stopReason = stopReasonFromSDKResultMessage(message)
+        yield runtimeEventBus.emit({
+          conversationId: sessionId,
+          turnId,
+          type: isErrorSDKResultMessage(message)
+            ? 'turn.failed'
+            : 'turn.completed',
+          replayable: true,
+          payload: {
+            conversationId: sessionId,
+            turnId,
+            state: isErrorSDKResultMessage(message) ? 'failed' : 'completed',
+            stopReason,
+          },
+        })
+      }
+    }
+    if (!sawTerminalResult) {
+      yield runtimeEventBus.emit({
+        conversationId: sessionId,
+        turnId,
+        type: 'turn.completed',
+        replayable: true,
+        payload: {
+          conversationId: sessionId,
+          turnId,
+          state: 'completed',
+          stopReason: null,
+        },
+      })
+    }
+  } catch (error) {
+    yield runtimeEventBus.emit({
+      conversationId: sessionId,
+      turnId,
+      type: 'turn.failed',
+      replayable: true,
+      payload: {
+        conversationId: sessionId,
+        turnId,
+        state: 'failed',
+        stopReason: error instanceof Error ? error.message : String(error),
+      },
+    })
+    throw error
+  }
+}
+
+function cloneSDKMessageForRuntimeEvent(message: SDKMessage): SDKMessage {
+  return JSON.parse(JSON.stringify(message)) as SDKMessage
+}
+
+function isErrorSDKResultMessage(message: SDKMessage): boolean {
+  const record = message as Record<string, unknown>
+  return record.is_error === true
+}
+
+function stopReasonFromSDKResultMessage(message: SDKMessage): string | null {
+  const record = message as Record<string, unknown>
+  if (typeof record.stop_reason === 'string') {
+    return record.stop_reason
+  }
+  switch (record.subtype) {
+    case 'error_max_budget_usd':
+    case 'error_max_turns':
+    case 'error_max_structured_output_retries':
+      return 'max_turn_requests'
+    default:
+      return null
+  }
+}
 
 /** Extract prompt text from ACP ContentBlock array for QueryEngine input */
 function promptToQueryInput(

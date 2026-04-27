@@ -49,11 +49,10 @@ import { determineMainLaunchMode } from './main/modeDispatch.js'
 import {
 	createCliSessionConfig,
 	createDeferredSessionTurnUploader,
-	createInteractiveStartupMcpMessages,
+	createRuntimeInteractiveStartupService,
 	createResumeContext,
 	createStartupModes,
 	determineSetupTrigger,
-	mergeStartupMcpState,
 	recordStartupAndScheduleTelemetry,
 	runSessionStartupSideEffects,
 	runStartupPrefetches,
@@ -195,7 +194,6 @@ import {
 } from "./interactiveHelpers.js";
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { checkQuotaStatus } from "./services/claudeAiLimits.js";
-import { prefetchAllMcpResources } from "./services/mcp/client.js";
 import {
 	getActiveAgentsFromList,
 	isBuiltInAgent,
@@ -3550,46 +3548,30 @@ async function run(): Promise<CommanderCommand> {
 
 			profileCheckpoint("action_mcp_configs_loaded");
 
-			// Prefetch MCP resources after trust dialog (this is where execution happens).
-			// Interactive mode only: print mode defers connects until headlessStore exists
-			// and pushes per-server (below), so ToolSearch's pending-client handling works
-			// and one slow server doesn't block the batch.
-			const localMcpPromise = isNonInteractiveSession
-				? Promise.resolve({ clients: [], tools: [], commands: [] })
-				: prefetchAllMcpResources(regularMcpConfigs);
-			const claudeaiMcpPromise = isNonInteractiveSession
-				? Promise.resolve({ clients: [], tools: [], commands: [] })
-				: claudeaiConfigPromise.then((configs) =>
-						Object.keys(configs).length > 0
-							? prefetchAllMcpResources(configs)
-							: { clients: [], tools: [], commands: [] },
-					);
-			// Merge with dedup by name: each prefetchAllMcpResources call independently
-			// adds helper tools (ListMcpResourcesTool, ReadMcpResourceTool) via
-			// local dedup flags, so merging two calls can yield duplicates. print.ts
-			// already uniqBy's the final tool pool, but dedup here keeps appState clean.
-			const mcpPromise = Promise.all([
-				localMcpPromise,
-				claudeaiMcpPromise,
-			]).then(([local, claudeai]) => mergeStartupMcpState(local, claudeai));
-
-			// Start hooks early so they run in parallel with MCP connections.
-			// Skip for initOnly/init/maintenance (handled separately), non-interactive
-			// (handled via setupTrigger), and resume/continue (conversationRecovery.ts
-			// fires 'resume' instead — without this guard, hooks fire TWICE on /resume
-			// and the second systemMessage clobbers the first. gh-30825)
-			const hooksPromise =
-				initOnly ||
-				init ||
-				maintenance ||
-				isNonInteractiveSession ||
-				options.continue ||
-				options.resume
-					? null
-					: processSessionStartHooks("startup", {
-							agentType: mainThreadAgentDefinition?.agentType,
-							model: resolvedInitialModel,
-						});
+			const interactiveStartup = createRuntimeInteractiveStartupService({
+				isNonInteractiveSession,
+				regularMcpConfigs,
+				claudeaiConfigPromise,
+				runStartupHooks: !(
+					initOnly ||
+					init ||
+					maintenance ||
+					isNonInteractiveSession ||
+					options.continue ||
+					options.resume
+				),
+				startupHookContext: {
+					agentType: mainThreadAgentDefinition?.agentType,
+					model: resolvedInitialModel,
+				},
+				onMcpStartupError: (error) =>
+					createSystemMessage(
+						`MCP startup prefetch failed: ${errorMessage(error)}`,
+						"warning",
+					),
+			}).start();
+			const { mcpPromise, hooksPromise, pendingStartupMessages } =
+				interactiveStartup;
 
 			// MCP never blocks REPL render OR turn 1 TTFT. useManageMCPConnections
 			// populates appState.mcp async as servers connect (connectToServer is
@@ -3599,14 +3581,6 @@ async function run(): Promise<CommanderCommand> {
 			// Slow servers populate for turn 2+. Matches interactive-no-prompt
 			// behavior. Print mode: per-server push into headlessStore (below).
 			const hookMessages: Awaited<NonNullable<typeof hooksPromise>> = [];
-			const pendingStartupMessages = createInteractiveStartupMcpMessages({
-				mcpPromise,
-				onError: (error) =>
-					createSystemMessage(
-						`MCP startup prefetch failed: ${errorMessage(error)}`,
-						"warning",
-					),
-			});
 
 			const mcpClients: Awaited<typeof mcpPromise>["clients"] = [];
 			const mcpTools: Awaited<typeof mcpPromise>["tools"] = [];

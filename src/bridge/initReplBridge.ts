@@ -73,9 +73,11 @@ import type { BridgeState, ReplBridgeHandle } from './replBridge.js'
 import { initBridgeCore } from './replBridge.js'
 import { setCseShimGate } from './sessionIdCompat.js'
 import type { BridgeWorkerType } from './types.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
 
 export type InitBridgeOptions = {
   onInboundMessage?: (msg: SDKMessage) => void | Promise<void>
+  onRuntimeEvent?: KernelRuntimeEventSink
   onPermissionResponse?: (response: SDKControlResponse) => void
   onInterrupt?: () => void
   onSetModel?: (model: string | undefined) => void
@@ -114,6 +116,7 @@ export async function initReplBridge(
 ): Promise<ReplBridgeHandle | null> {
   const {
     onInboundMessage,
+    onRuntimeEvent,
     onPermissionResponse,
     onInterrupt,
     onSetModel,
@@ -445,6 +448,7 @@ export async function initReplBridge(
       // v1 handles this by calling previouslyFlushedUUIDs.clear() on fresh
       // session creation (replBridge.ts:768); v2 skips the param entirely.
       onInboundMessage,
+      onRuntimeEvent,
       onUserMessage,
       onPermissionResponse,
       onInterrupt,
@@ -539,6 +543,7 @@ export async function initReplBridge(
     initialMessages,
     previouslyFlushedUUIDs,
     onInboundMessage,
+    onRuntimeEvent,
     onPermissionResponse,
     onInterrupt,
     onSetModel,

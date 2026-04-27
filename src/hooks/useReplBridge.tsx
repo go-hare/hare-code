@@ -25,6 +25,7 @@ import type {
   SDKMessage,
 } from '../entrypoints/agentSdkTypes.js'
 import type { SDKControlResponse } from '../entrypoints/sdk/controlTypes.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
 import { Text } from '@anthropic/ink'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
@@ -96,6 +97,7 @@ export function useReplBridge(
   abortControllerRef: React.RefObject<AbortController | null>,
   commands: readonly Command[],
   mainLoopModel: string,
+  onRuntimeEvent?: KernelRuntimeEventSink,
 ): { sendBridgeResult: () => void } {
   const handleRef = useRef<ReplBridgeHandle | null>(null)
   const teardownPromiseRef = useRef<Promise<void> | undefined>(undefined)
@@ -494,6 +496,7 @@ export function useReplBridge(
             outboundOnly,
             tags: outboundOnly ? ['ccr-mirror'] : undefined,
             onInboundMessage: handleInboundMessage,
+            onRuntimeEvent,
             onPermissionResponse: handlePermissionResponse,
             onInterrupt() {
               handleRemoteInterrupt(abortControllerRef.current)
@@ -860,6 +863,7 @@ export function useReplBridge(
     setAppState,
     setMessages,
     addNotification,
+    onRuntimeEvent,
   ])
 
   // Write new messages as they appear.

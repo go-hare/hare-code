@@ -275,6 +275,7 @@ import {
 } from '../runtime/capabilities/execution/internal/replQueryRuntime.js';
 import { createRuntimePermissionService } from '../runtime/capabilities/permissions/RuntimePermissionService.js';
 import type { KernelRuntimeEnvelopeBase } from '../runtime/contracts/events.js';
+import { createKernelRuntimeEventFacade } from '../runtime/core/events/KernelRuntimeEventFacade.js';
 import { RuntimeEventBus } from '../runtime/core/events/RuntimeEventBus.js';
 import {
   finalizeReplCompletedTurnHostShell,
@@ -292,7 +293,10 @@ import { runReplBackgroundQueryController } from './repl/controllers/runReplBack
 import { runReplInitialMessageController } from './repl/controllers/runReplInitialMessageController.js';
 import { runReplQueryTurnController } from './repl/controllers/runReplQueryTurnController.js';
 import { runReplForegroundQueryController } from './repl/controllers/runReplForegroundQueryController.js';
-import { materializeRuntimeToolSet } from '../runtime/capabilities/execution/headlessCapabilityMaterializer.js';
+import {
+  materializeRuntimeToolSet,
+  refreshRuntimeAgentDefinitions,
+} from '../runtime/capabilities/execution/headlessCapabilityMaterializer.js';
 import type { AgentDefinition } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { resumeAgentBackground } from '@go-hare/builtin-tools/tools/AgentTool/resumeAgent.js';
 import { useMainLoopModel } from '../hooks/useMainLoopModel.js';
@@ -1599,58 +1603,23 @@ export function REPL({
 
   const [inProgressToolUseIDs, setInProgressToolUseIDs] = useState<Set<string>>(new Set());
   const hasInterruptibleToolInProgressRef = useRef(false);
-  const transportRuntimeEventsRef = useRef<KernelRuntimeEnvelopeBase[]>([]);
-  const handleTransportRuntimeEvent = useCallback(
-    (envelope: KernelRuntimeEnvelopeBase) => {
-      transportRuntimeEventsRef.current.push(envelope);
-      if (transportRuntimeEventsRef.current.length > 512) {
-        transportRuntimeEventsRef.current.shift();
-      }
-      logForDebugging(
-        `[REPL:runtime-event] kind=${envelope.kind} type=${getRuntimeEventTypeForLog(envelope)} conversationId=${envelope.conversationId ?? ''} eventId=${envelope.eventId ?? ''}`,
-      );
-    },
+  const transportRuntimeEventFacade = useMemo(
+    () =>
+      createKernelRuntimeEventFacade({
+        runtimeId: `repl-transport:${getSessionId()}`,
+        maxReplayEvents: 512,
+      }),
     [],
   );
-
-  // Remote session hook - manages WebSocket connection and message handling for --remote mode
-  const remoteSession = useRemoteSession({
-    config: remoteSessionConfig,
-    setMessages,
-    setIsLoading: setIsExternalLoading,
-    onInit: handleRemoteInit,
-    setToolUseConfirmQueue,
-    tools: transportTools,
-    setStreamingToolUses,
-    setStreamMode,
-    setInProgressToolUseIDs,
-    onRuntimeEvent: handleTransportRuntimeEvent,
-  });
-
-  // Direct connect hook - manages WebSocket to a claude server for `claude connect` mode
-  const directConnect = useDirectConnect({
-    config: directConnectConfig,
-    setMessages,
-    setIsLoading: setIsExternalLoading,
-    setToolUseConfirmQueue,
-    tools: transportTools,
-    onRuntimeEvent: handleTransportRuntimeEvent,
-  });
-
-  // SSH session hook - manages ssh child process for `claude ssh` mode.
-  // Same callback shape as useDirectConnect; only the transport under the
-  // hood differs (ChildProcess stdin/stdout vs WebSocket).
-  const sshRemote = useSSHSession({
-    session: sshSession,
-    setMessages,
-    setIsLoading: setIsExternalLoading,
-    setToolUseConfirmQueue,
-    tools: transportTools,
-    onRuntimeEvent: handleTransportRuntimeEvent,
-  });
-
-  // Use whichever remote mode is active
-  const activeRemote = sshRemote.isRemoteMode ? sshRemote : directConnect.isRemoteMode ? directConnect : remoteSession;
+  const handleTransportRuntimeEvent = useCallback(
+    (envelope: KernelRuntimeEnvelopeBase) => {
+      const accepted = transportRuntimeEventFacade.ingestEnvelope(envelope);
+      logForDebugging(
+        `[REPL:runtime-event] kind=${envelope.kind} accepted=${accepted ? 'yes' : 'duplicate'} type=${getRuntimeEventTypeForLog(envelope)} conversationId=${envelope.conversationId ?? ''} eventId=${envelope.eventId ?? ''}`,
+      );
+    },
+    [transportRuntimeEventFacade],
+  );
 
   const [pastedContents, setPastedContents] = useState<Record<number, PastedContent>>({});
   const [submitCount, setSubmitCount] = useState(0);
@@ -1709,6 +1678,69 @@ export function REPL({
   // immediately hides the streaming preview.
   const visibleStreamingText =
     streamingText && showStreamingText ? streamingText.substring(0, streamingText.lastIndexOf('\n') + 1) || null : null;
+
+  const runtimeOutputBufferRef = useRef('');
+  const handleRuntimeOutputDelta = useCallback(
+    (text: string) => {
+      if (text.length === 0) return;
+      runtimeOutputBufferRef.current += text;
+      setResponseLength(length => length + text.length);
+      onStreamingText(current => (current ?? '') + text);
+    },
+    [setResponseLength, onStreamingText],
+  );
+  const handleRuntimeTurnTerminal = useCallback(() => {
+    const text = runtimeOutputBufferRef.current;
+    runtimeOutputBufferRef.current = '';
+    if (!text) return;
+    setStreamingText(null);
+    setMessages(prev => [...prev, createAssistantMessage({ content: text })]);
+  }, [setMessages]);
+
+  // Remote session hook - manages WebSocket connection and message handling for --remote mode
+  const remoteSession = useRemoteSession({
+    config: remoteSessionConfig,
+    setMessages,
+    setIsLoading: setIsExternalLoading,
+    onInit: handleRemoteInit,
+    setToolUseConfirmQueue,
+    tools: transportTools,
+    setStreamingToolUses,
+    setStreamMode,
+    setInProgressToolUseIDs,
+    onRuntimeEvent: handleTransportRuntimeEvent,
+    onRuntimeOutputDelta: handleRuntimeOutputDelta,
+    onRuntimeTurnTerminal: handleRuntimeTurnTerminal,
+  });
+
+  // Direct connect hook - manages WebSocket to a claude server for `claude connect` mode
+  const directConnect = useDirectConnect({
+    config: directConnectConfig,
+    setMessages,
+    setIsLoading: setIsExternalLoading,
+    setToolUseConfirmQueue,
+    tools: transportTools,
+    onRuntimeEvent: handleTransportRuntimeEvent,
+    onRuntimeOutputDelta: handleRuntimeOutputDelta,
+    onRuntimeTurnTerminal: handleRuntimeTurnTerminal,
+  });
+
+  // SSH session hook - manages ssh child process for `claude ssh` mode.
+  // Same callback shape as useDirectConnect; only the transport under the
+  // hood differs (ChildProcess stdin/stdout vs WebSocket).
+  const sshRemote = useSSHSession({
+    session: sshSession,
+    setMessages,
+    setIsLoading: setIsExternalLoading,
+    setToolUseConfirmQueue,
+    tools: transportTools,
+    onRuntimeEvent: handleTransportRuntimeEvent,
+    onRuntimeOutputDelta: handleRuntimeOutputDelta,
+    onRuntimeTurnTerminal: handleRuntimeTurnTerminal,
+  });
+
+  // Use whichever remote mode is active
+  const activeRemote = sshRemote.isRemoteMode ? sshRemote : directConnect.isRemoteMode ? directConnect : remoteSession;
 
   const [lastQueryCompletionTime, setLastQueryCompletionTime] = useState(0);
   const [spinnerMessage, setSpinnerMessage] = useState<string | null>(null);
@@ -2060,20 +2092,14 @@ export function REPL({
           if (warning) {
             // Re-derive agent definitions after mode switch so built-in agents
             // reflect the new coordinator/normal mode
-            /* eslint-disable @typescript-eslint/no-require-imports */
-            const { getAgentDefinitionsWithOverrides, getActiveAgentsFromList } =
-              require('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js') as typeof import('@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js');
-            /* eslint-enable @typescript-eslint/no-require-imports */
-            getAgentDefinitionsWithOverrides.cache.clear?.();
-            const freshAgentDefs = await getAgentDefinitionsWithOverrides(getOriginalCwd());
+            const freshAgentDefs = await refreshRuntimeAgentDefinitions({
+              cwd: getOriginalCwd(),
+              activeFromAll: true,
+            });
 
             setAppState(prev => ({
               ...prev,
-              agentDefinitions: {
-                ...freshAgentDefs,
-                allAgents: freshAgentDefs.allAgents,
-                activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
-              },
+              agentDefinitions: freshAgentDefs,
             }));
             messages.push(createSystemMessage(warning, 'warning'));
           }
@@ -4207,7 +4233,14 @@ export function REPL({
 
   // REPL Bridge: replicate user/assistant messages to the bridge session
   // for remote access via claude.ai. No-op in external builds or when not enabled.
-  const { sendBridgeResult } = useReplBridge(messages, setMessages, abortControllerRef, commands, mainLoopModel);
+  const { sendBridgeResult } = useReplBridge(
+    messages,
+    setMessages,
+    abortControllerRef,
+    commands,
+    mainLoopModel,
+    handleTransportRuntimeEvent,
+  );
   sendBridgeResultRef.current = sendBridgeResult;
 
   useAfterFirstRender();

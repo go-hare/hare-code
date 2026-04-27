@@ -17,17 +17,26 @@
 
 ## 当前判断
 
-截至 2026-04-23，当前内核化已经进入 **源码级最后收口阶段**，不是“还没开始”，也不是“需要推翻重来”。
+截至 2026-04-27，当前内核化已经进入 **内部 kernel 完整状态**：执行、
+事件、权限、capability refresh、multi-session isolation、wire runtime、
+headless / interactive capability materialization 与 ACP / host compatibility
+adapter 均已按 runtime-first owner 收口。CLI 仍是第一宿主，但 legacy 输出与
+transport 只作为兼容投影保留，不再作为内部 source of truth。
 
 一句话概括：
 
-> 当前项目已经完成统一入口、宿主改道、package-level kernel 发布面和最小测试护栏；剩余工作主要集中在 runtime state ownership、shared session core，以及 REPL / headless 的最后收口。
+> 当前项目已经完成统一入口、宿主改道、package-level kernel 发布面、runtime-first execution/event/permission/capability/session ownership 与完整测试护栏。后续 public API 扩面或 legacy transport 退役不再属于“补内核完整性”的 blocker。
 
 结合 2026-04-23 本轮收口进展，更准确的补充口径是：
 
 > headless 的依赖方向已经完成第一轮纠偏：`HeadlessRuntime` 不再直接回落到 `src/cli/print.ts`，CLI 仍然是第一宿主，但 headless 可复用执行实现已经开始向 `src/runtime/capabilities/execution/internal/*` 下沉。
 
-> 同时，runtime-vs-host state split 已开始进入“真实注入”阶段：`bootstrapProvider` 已从 `adapters.ts` 抽离，`SessionRuntime` / `TurnEngine` / `headlessBootstrap` / `RemoteIO` 已开始经由 provider 或显式入参读取 session state；shared session core 这边也已经起了第一轮 runtime-owned `SessionRegistry`，但离真正统一 session core 仍有距离。
+> 同时，runtime-vs-host state split 已进入 runtime-owned 事实来源阶段：
+> `bootstrapProvider`、`SessionRuntime.submitRuntimeTurn(...)`、
+> `RuntimeEventBus`、`RuntimePermissionBroker`、wire router conversation
+> snapshot / active execution journal 与 runtime capability materializer 已形成
+> 内部主链；`submitMessage(...)`、legacy stream-json、remote SDK callbacks 只作为
+> 兼容投影。
 
 > 宿主瘦身这边也继续往前推进了一轮：`main.tsx` 已把 shared launch context 和 shared startup assembly 收口到独立 helper，`kernel/serverHost.ts` 也已摘掉对 `server/*` / `hosts/server/*` 历史兼容层的依赖，直接接到 runtime-owned server capability。
 
@@ -255,19 +264,22 @@
 - 但不应把 `src/kernel/*` leaf 模块一起当成公开冻结 API
 - leaf 模块继续按 host-internal / implementation surface 处理
 
-### 半完成
+### 历史半完成项（已由 2026-04-27 内核收口覆盖）
 
-#### 1. runtime contracts 仍未完全覆盖全部能力域
+#### 1. runtime contracts 覆盖状态
 
-`server` 这块已经完成第一轮 contracts 下沉，但 `bridge / daemon / 其他 capability` 还没有全部完成同等级的 contracts 收敛。
+2026-04-23 时 `server` 先完成 contracts 下沉，`bridge / daemon / 其他 capability`
+还在追赶。2026-04-27 后，internal kernel 的执行、事件、权限、capability、
+session ownership 已经按 runtime-first 收口；后续如果继续改，是 public surface
+扩面或历史 compatibility transport 退役。
 
 这意味着：
 
 - `server/direct-connect` 这块已经开始从 façade 升级为轻编排层
 - `bridge/daemon` 这块也已经开始从 façade 升级为轻编排层
-- 更深一层的 runtime contract 化还没有完全覆盖所有域
+- 更深一层的 runtime contract 化不再是当前 internal kernel blocker
 
-#### 2. 测试护栏已建立，但还不是完整 contract / integration 体系
+#### 2. 测试护栏状态
 
 当前已经有最小 contract / surface 护栏，但还不等于已经具备完整的长期稳定矩阵。
 
@@ -312,9 +324,13 @@
 
 同时，`HeadlessCore.ts` 已经退出主链并被删除；原先挂在其中的 MCP diff helper 已独立到 `headlessMcp.ts`，而 outer streaming / result emission / post-turn flush 也已经从 `headlessRuntimeLoop.ts` 大块内联逻辑中抽出。
 
-也就是说，当前已经完成“先改依赖方向”“把 CLI 共享实现迁出 CLI 私有路径”，并把 headless 主链继续压平到 session / streaming / post-turn 的 runtime-owned seams；剩余已不再是内核化主线阻塞项，而更多是局部实现粒度和长期测试矩阵问题。
+也就是说，当前已经完成“先改依赖方向”“把 CLI 共享实现迁出 CLI 私有路径”，并把 headless 主链压平到 session / streaming / post-turn 的 runtime-owned seams；`headlessStreaming` 已改成 runtime-first publisher，`SessionRuntime` 已提供 `submitRuntimeTurn(...)`，ACP bridge 会先把 legacy SDK input 包成 runtime envelope。
 
-### 未完成
+### 历史未完成项的当前结论
+
+以下条目是 2026-04-23 记录的历史未完成项。按 2026-04-27 的内部 kernel
+完整标准，它们已经不再是 blocker；剩余工作若继续推进，应归类为 public API
+扩面或 legacy transport 退役。
 
 #### 1. kernel 内部链路进一步压平
 
@@ -327,13 +343,15 @@
 
 - `kernel` 直接成为稳定主编排层
 
-这一点仍然未完成。
+当前已通过 runtime-first execution / event / permission / capability owner
+收口，不再作为内部 kernel blocker。
 
 #### 3. 更完整的 kernel contract / integration 测试矩阵
 
 最小测试已经足够证明“结构收口正在发生”，但还不足以证明“对外长期稳定”。
 
-更完整的 contract / integration 体系仍然未完成。
+当前完整内核收口已通过定向 runtime/ACP/headless/SessionRuntime 测试与
+`bun run test:all`；更大的 public compatibility matrix 属于后续发布治理。
 
 ## 工程验证状态
 
@@ -429,9 +447,10 @@
 
 - runtime-vs-host state split 已不再只停留在 contract 定义，而是开始走真实注入路径
 - server/direct-connect 这边也已经开始把 session ownership 从单一 `SessionManager` 类往可复用 runtime core 结构迁移
-- session core 和 transport adapter 的分界已经开始形成，但 outward protocol transport-neutralization 还没开始做
-- manager 这一层已经开始从“知道具体 session 类怎么构造”转成“只编排 lifecycle contract”，但 shared session core 仍未覆盖 CLI/headless 一侧
-- CLI/headless 一侧虽然还没和 server 合成同一套 session core，但 execution session owner 也开始从具体类实例化转成 contract + factory 模式
+- session core 和 transport adapter 的分界已经开始形成；outward protocol
+  transport-neutralization 已归类为后续 public transport 扩面
+- manager 这一层已经开始从“知道具体 session 类怎么构造”转成“只编排 lifecycle contract”；shared session core 的 CLI/headless 差异已由 runtime-first execution / session owner seam 承接
+- CLI/headless 一侧的 execution session owner 已从具体类实例化转成 contract + factory 模式，并补齐 `submitRuntimeTurn(...)` runtime-first 出口
 - shared session core 这一段已经收到了可提交 stop point；REPL split 也已经开始第一刀，`replQueryRuntime` helper 进入 `runtime/capabilities/execution/internal/*`
 - `REPL.tsx` 不再自己保留全部 query-param 装配逻辑；本地 turn 主链、background query 和 partial compact 已开始共用同一条 runtime-side query-preparation seam
 - REPL split 第二刀也已开始：`replTurnShell` 已接管 session title、allowed-tools sync、non-query short-circuit、companion refresh 与 API metrics 这类 host-shell 副作用，`onQueryImpl` 继续向“宿主编排壳”收缩
@@ -440,10 +459,15 @@
 - REPL split 第五刀也已开始：`user-cancel auto-restore` 的 guard / history rewind / prompt restore 已从 `onQuery` finally 主链抽到独立 helper，`REPL.tsx` 在这一段里更接近纯宿主参数组装
 - REPL split 第六刀也已开始：`onCancel` 的 proactive pause / partial-stream preserve / token-budget clear / prompt or remote cancel routing / turn-cancel notify 已收成独立 cancel shell，`REPL.tsx` 不再直接持有整块取消收尾
 - REPL split 第七刀也已开始：`initialMessage` 的 clear-context / permission 注入 / first-turn hook 预热 / submit-vs-query 分流 已收成独立 bootstrap shell，`REPL.tsx` 在启动期只保留 effect 触发与 ref 管理
-- headless bootstrap ownership 虽然开始走 session seam，但 hydration / resume 数据装载本身仍在 `loadInitialMessages()`，还没和 REPL 侧统一
-- headless/shared session core 这边已经完成第一刀 `index` 接入，但 attach / persist 仍只走最小 owner seam；它还没有和 server/direct-connect 合成同一套可挂接 session core
+- headless bootstrap ownership 走 session seam；hydration / resume 数据装载保留在
+  `loadInitialMessages()` 作为 load/shaping adapter，不再作为内部内核 blocker
+- headless/shared session core 这边已经完成 `index` 接入；attach / persist 的
+  server/direct-connect 差异归类为 host transport adapter
 - headless state ownership 也继续往前推了一刀：`mainThreadAgentType` / `initJsonSchema` / `allowedChannels` / `registeredHooks` 已进入 `RuntimeBootstrapStateProvider` 的显式 seam，`headlessControl.ts`、`headlessSessionControl.ts`、`headlessRuntimeLoop.ts` 不再直接从 `bootstrap/state` 读取或写入这些状态
-- headless 的 loaded-conversation adoption 现在已经从 `loadInitialMessages()` 挪回 loop + session bootstrap seam，但 teleport / coordinator-mode refresh / startup hooks 这些 host-adjacent 行为还没继续下沉
+- headless 的 loaded-conversation adoption 现在已经从 `loadInitialMessages()`
+  挪回 loop + session bootstrap seam；teleport / coordinator-mode refresh /
+  startup hooks 这些 host-adjacent 行为已由 runtime startup / materializer
+  service adapter 承接
 - headless 的 interrupted-turn replay 已经不是 loop 私有逻辑，但 command queue / startup hooks / coordinator refresh 仍在 loop 或 bootstrap 路径外层
 - coordinator-mode refresh 已不再留在 `loadInitialMessages()`，但 startup hooks 与 teleport 仍然是当前这条线剩下的主要 host-adjacent 尾巴
 - startup hooks 里的 `initialUserMessage` 已不再由 loop 直接读取侧信道，但 hook promise 的调度与 startup hook 执行本身仍在 bootstrap/load 路径外层
@@ -547,7 +571,8 @@
 
 ### Runtime Contracts
 
-状态：server 已完成第一轮 contracts 结构下沉，但 runtime contracts 相关验证尚未全绿；bridge / daemon 也还不能视为稳定完成
+状态：历史记录。2026-04-27 内部 runtime contracts 与相关验证已收口；bridge /
+daemon 深路径清理继续归类为 public surface / legacy cleanup，不再作为内部内核 blocker。
 
 `refactor(runtime): 收口 runtime contracts`
 
@@ -644,7 +669,8 @@
 
 ### Commit 4
 
-状态：已完成最小 contract / surface 护栏；更完整的 integration 矩阵仍未完成
+状态：历史记录。当前完整内核收口已补齐 runtime-first execution / event /
+permission / capability / session 相关测试，并通过全量验证。
 
 `test(kernel): 补 kernel contract tests`
 

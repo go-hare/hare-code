@@ -47,10 +47,43 @@
 - 旧显式注入路径保留：测试、SDK-like 内部调用或特殊 host 仍可传入 `commands/tools/agents`，materializer 不会覆盖显式输入。
 - CLI 专属能力不移除：`--agents` 以 `agentOverrides` 进入 materializer，coordinator tool filter 以 host intent 进入 materializer，structured output 的 synthetic tool 以 `extraTools` 追加。
 - `main/commandAssembly.ts` 的 bundled skills / builtin plugins 预热已下沉到 `src/runtime/capabilities/commands/RuntimeCommandSources.ts`，CLI 继续复用同一入口，避免外部 headless 路径漏掉 bundled command sources。
-- headless refresh 已收进 `src/runtime/capabilities/execution/internal/headlessRuntimeCapabilityBundle.ts`：`refreshCommands()`、`refreshPlugins()` 和 plugin MCP diff 由同一个 runtime bundle 处理。
+- headless refresh 已收进 `src/runtime/capabilities/execution/internal/headlessRuntimeCapabilityBundle.ts`：`refresh()` 统一处理 plugin reload、command / agent materialization、plugin MCP diff 与 hook hot-reload setup；`refreshPlugins()` 仅作为旧调用兼容别名保留。
 - MCP runtime ownership 已收进 `src/runtime/capabilities/mcp/RuntimeHeadlessMcpService.ts`：SDK seed、dynamic server、connect / reconnect / status 与 `mcp_set_servers` state mutation 不再散在 headless loop helper 中。
 - interactive MCP connection lifecycle 已收进 `src/runtime/capabilities/mcp/RuntimeInteractiveMcpService.ts`：config load、pending reconciliation、stale cleanup、two-phase connect、manual reconnect、enable / disable、automatic reconnect、channel notification handler 注册 / 卸载与 `tools/prompts/resources list_changed` refresh 不再由 React hook 自持；channel allowlist 也改为 host option 注入，runtime service 不再直接 import `bootstrap/state`；`useManageMCPConnections(...)` 只保留 AppState batching、elicitation UI 写入、channel message 入队、channel permission resolve、blocked toast 与 bootstrap-backed allowlist 读取这些 interactive host callback。
 - hook / plugin 初装配已新增 runtime service adapter：`src/runtime/capabilities/hooks/RuntimeHookService.ts` 负责 plugin hook reload / count / cache lifecycle，`src/runtime/capabilities/plugins/RuntimePluginService.ts` 负责 interactive REPL 初始 plugin commands / agents / hooks / MCP / LSP materialization。`useManagePlugins(...)` 只保留 React notification / telemetry adapter 职责。
+- interactive CLI 启动期 command / agent preload 已下沉到 runtime
+  materializer：`preloadRuntimeCommandAssembly(...)` 与
+  `resolvePreloadedRuntimeCommandAssembly(...)` 拥有 `getCommands()` /
+  `getAgentDefinitionsWithOverrides()` 的预加载与 fallback 语义；
+  `main/commandAssembly.ts` 只保留 CLI wrapper。
+- interactive CLI 运行期 command / agent refresh 已收口到同一 materializer：
+  `refreshRuntimeCommands(...)` 覆盖 skill watcher full refresh 与 GrowthBook
+  memoized refresh，`refreshRuntimeAgentDefinitions(...)` 覆盖 resume /
+  coordinator mode switch 后的 cache clear、reload 和 active agent recompute；
+  `useSkillsChange.ts`、`REPL.tsx` 与 `ResumeConversation.tsx` 不再直接 import
+  command / agent source loader。
+- interactive CLI 启动期 MCP prefetch 与 startup hook warmup 已收进
+  `RuntimeInteractiveStartupService`：runtime service 负责 local / Claude.ai
+  MCP prefetch merge、startup hook promise 和 MCP startup warning message，
+  `main.tsx` 只提供 host 条件与 warning renderer。
+- 本地 OpenAI-compatible endpoint deep smoke 已通过：
+  `http://127.0.0.1:8317/v1` 的 `/models` 可见 `gpt-5.4`，CLI pipe 在
+  `CLAUDE_CODE_USE_OPENAI=1`、`OPENAI_BASE_URL`、`OPENAI_MODEL=gpt-5.4` 下走
+  真实 endpoint 返回预期 JSON。
+- `SessionRuntime` 已补齐 runtime-first 执行出口：
+  `submitRuntimeTurn(...)` 输出 `turn.started`、`headless.sdk_message`、
+  `turn.completed` / `turn.failed` runtime envelope；`submitMessage(...)` 与
+  `ask(...)` 只保留为 SDK-compatible 投影，不再是唯一内部执行接口。
+- headless stream 输出已改成 runtime-first publisher：
+  `createHeadlessRuntimeStreamPublisher(...)` 先把 SDK payload 写入
+  `RuntimeEventBus`，legacy `stream-json` stdout 再作为兼容写出。
+- ACP prompt path 已开始走 runtime event envelope：`AcpAgent.prompt(...)` 把
+  `QueryEngine.submitMessage(...)` 的 legacy SDK stream 先写入会话级
+  `RuntimeEventBus`，再交给 ACP bridge 消费；`forwardSessionUpdates(...)`
+  对直接传入的 legacy `SDKMessage` 也会先包成 `headless.sdk_message`
+  runtime envelope，其中 `headless.sdk_message` 复用原 ACP 转换逻辑，纯
+  `turn.output_delta` 输出 ACP 文本 chunk，`turn.completed` / `turn.failed`
+  收敛 stopReason，避免 ACP 停留在 SDK-first execution stream。
 
 这一步的边界是“runtime 拥有 headless 默认能力装配，CLI 是第一个 host”。它不声明新的外部 public surface，也不删除 CLI 现有路径。
 
@@ -396,9 +429,10 @@ export type KernelResolvedRuntimeCapabilities = {
   intent 会映射到 resolver `requireCapability(...)`，成功后产生
   `capabilities.required` runtime event；package declaration 已暴露
   `KernelRuntimeWireCapabilityResolver` 注入点。headless eager assembly 已迁入
-  runtime materializer / refresh bundle；剩余是继续把 interactive REPL 的 MCP
-  connection manager 和更细的 command merge UI adapter 迁到同一 capability
-  snapshot。
+  runtime materializer / refresh bundle；interactive MCP lifecycle、
+  startup warmup、command / agent preload、skill / GrowthBook command refresh
+  与 resume agent refresh 已进入 runtime-owned service / materializer。当前
+  `src/hooks` / `src/screens` 不再直接拥有 command / agent source loader。
 
 ### 8.1 Capability lazy loading
 
@@ -824,9 +858,27 @@ export type KernelEvent =
   覆盖 permission audit、conversation / turn lifecycle 和
   `headless.sdk_message`；direct-connect、remote、SSH、bridge ingress 已接入
   runtime envelope adapter。direct-connect 已在保留 raw NDJSON backlog 的同时
-  提供 runtime envelope sidecar backlog / replay facade；RCS bridge normalize
-  与 WS outbound / worker SSE path 已把 `kernel_runtime_event.envelope` 作为
-  first-class 字段保真传递。`@go-hare/hare-code/kernel` 已开放
+  通过 runtime-owned `KernelRuntimeEventFacade` 提供 runtime envelope sidecar
+  backlog / replay facade；REPL transport ingress 也使用同一个 facade 进行
+  ingest / dedupe / replay 语义归一。remote / direct-connect / SSH host hooks
+  已开始直接消费 `turn.completed` / `turn.failed` 作为 terminal loading
+  signal，并把 runtime event 作为 remote timeout heartbeat；`headless.sdk_message`
+  也会进入同一个 host-side SDK render handler，按稳定 `uuid` / assistant
+  message id 去重，避免 compatibility stream 与 runtime event 双写 UI。
+  对不携带 SDK payload 的纯 semantic `turn.output_delta`，REPL transport
+  host 也已通过同一 host adapter 做文本预览与 terminal 落盘。bridge core
+  现在正式暴露 `onRuntimeEvent` sink，`headless.sdk_message` payload 会回落到
+  legacy SDK ingress，避免 envelope 到 bridge 后只 log 或静默吞掉。
+  ACP bridge 也已进入同一 event model：ACP prompt producer 会通过会话级
+  `RuntimeEventBus` 生成 `turn.started`、`headless.sdk_message` 与 terminal
+  turn envelope，ACP forwarding 层消费 runtime envelope 并按稳定 SDK
+  `uuid` / assistant message id 去重，保留旧 ACP `session/update` 输出语义。
+  direct-connect print host (`runConnectHeadlessRuntime`) 也已接入同一 helper：
+  `headless.sdk_message` 可作为 SDK result fallback，纯 `turn.output_delta`
+  可在 terminal event 后生成文本输出。RCS bridge normalize 与 WS outbound /
+  worker SSE path 已把
+  `kernel_runtime_event.envelope` 作为 first-class 字段保真传递。
+  `@go-hare/hare-code/kernel` 已开放
   `createKernelRuntimeEventFacade(...)`、`toKernelRuntimeEventMessage(...)`、
   `getKernelRuntimeEnvelopeFromMessage(...)` 与
   `consumeKernelRuntimeEventMessage(...)`，host 可以把这些 compatibility
@@ -956,14 +1008,18 @@ export type KernelEvent =
   recovery 已新增 opt-in journal，可用
   `HARE_KERNEL_RUNTIME_CONVERSATION_JOURNAL` 或 `conversationJournalPath` 在
   重启后恢复 latest conversation snapshot、归一化 `detached` 状态并保留
-  active turn lock；
+  active turn lock；conversation snapshot journal 也会持久化 active
+  `run_turn` command，恢复 running active turn 时自动重启 executor，hard kill
+  后 durable model/tool execution resume 已有 integration 覆盖；
   multi transport wrapper 已新增 `createKernelRuntimeWireClient()`、
   `createKernelRuntimeInProcessWireTransport()` 与
   `createKernelRuntimeStdioWireTransport()`，并用同一条 host conversation
   contract 覆盖 `in-process` / `stdio`；transport wrapper 已覆盖
   client-local live subscription scope，`create_conversation` 已覆盖
-  `sessionId` / `workspacePath` reuse guard，`capabilityIntent` 已覆盖
-  resolver demand-load；
+  `sessionId` / `workspacePath` reuse guard，transport integration 已覆盖
+  in-process / stdio 下两个 conversation 同时 active、targeted `abort_turn`
+  只中断目标 turn、另一个 conversation 仍保持 busy active lock，
+  `capabilityIntent` 已覆盖 resolver demand-load；
   source-level `kernel-runtime` runner 已覆盖 stdin/stdout smoke；package
   root 已导出 wire runner / default router / command schema version，package
   bin 已覆盖。
@@ -972,7 +1028,7 @@ export type KernelEvent =
 - CLI parity：CLI 使用 public kernel capability 后，原有 commands/tools/hooks/skills/plugins/MCP/agents/pet/Kairos 行为不回退。
 - host isolation：desktop/worker 测试只能依赖 `@go-hare/hare-code/kernel`，不能 import `claude-code/src/*`。
 - surface guard：每新增一个 public export，必须同步更新 `src/kernel/__tests__/surface.test.ts`、`src/kernel/__tests__/packageEntry.test.ts`、`tests/integration/kernel-package-smoke.test.ts` 的导出集合。
-- concurrency：多 conversation、并发 `run_turn`、duplicate `abort_turn`、host reconnect / process-level event replay recovery / conversation snapshot recovery 必须有 contract 测试；router-level event replay gap、host reconnect/disconnect、长 turn executor abort streaming、process-backed executor runner smoke、event journal after restart smoke、conversation snapshot after hard kill smoke 与 cross-transport host conversation smoke 已有 contract 测试。
+- concurrency：多 conversation、并发 `run_turn`、duplicate `abort_turn`、host reconnect / process-level event replay recovery / conversation snapshot recovery / active execution durable resume 必须有 contract 测试；router-level event replay gap、host reconnect/disconnect、长 turn executor abort streaming、process-backed executor runner smoke、event journal after restart smoke、conversation snapshot after hard kill smoke、durable execution resume after hard kill、cross-transport host conversation smoke 与 cross-transport multi-conversation targeted abort smoke 已有 contract 测试。
 - security：permission timeout、deny、policy conflict、secret redaction、MCP/plugin trust 降级必须有 contract 测试；REPL / bridge compatibility adapter 必须覆盖 host allow / deny 元数据不丢失。
 
 ### hare-code-desktop

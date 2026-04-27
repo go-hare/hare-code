@@ -4,6 +4,7 @@ import { dirname } from 'node:path'
 import type { KernelConversationSnapshot } from '../../contracts/conversation.js'
 import type { KernelConversationId } from '../../contracts/conversation.js'
 import type { KernelTurnSnapshot } from '../../contracts/turn.js'
+import type { KernelRuntimeRunTurnCommand } from '../../contracts/wire.js'
 
 type JsonPrimitive = boolean | null | number | string
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
@@ -11,6 +12,7 @@ type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 export type RuntimeConversationSnapshotJournalEntry = {
   conversation: KernelConversationSnapshot
   activeTurn?: KernelTurnSnapshot
+  activeExecution?: KernelRuntimeRunTurnCommand
 }
 
 export type RuntimeConversationSnapshotJournalOptions = {
@@ -153,6 +155,26 @@ function isTurnSnapshot(value: unknown): value is KernelTurnSnapshot {
   )
 }
 
+function isRunTurnCommand(value: unknown): value is KernelRuntimeRunTurnCommand {
+  if (!isPlainRecord(value)) {
+    return false
+  }
+
+  return (
+    typeof value.schemaVersion === 'string' &&
+    value.type === 'run_turn' &&
+    typeof value.requestId === 'string' &&
+    typeof value.conversationId === 'string' &&
+    typeof value.turnId === 'string' &&
+    (typeof value.prompt === 'string' ||
+      (Array.isArray(value.prompt) && isJsonValue(value.prompt))) &&
+    (value.attachments === undefined ||
+      (Array.isArray(value.attachments) && isJsonValue(value.attachments))) &&
+    (value.metadata === undefined ||
+      (isPlainRecord(value.metadata) && isJsonValue(value.metadata)))
+  )
+}
+
 function isJournalEntry(
   value: unknown,
 ): value is RuntimeConversationSnapshotJournalEntry {
@@ -160,21 +182,36 @@ function isJournalEntry(
     return false
   }
 
-  if (value.activeTurn === undefined) {
+  if (value.activeTurn !== undefined && !isTurnSnapshot(value.activeTurn)) {
+    return false
+  }
+
+  if (
+    value.activeTurn !== undefined &&
+    value.activeTurn.conversationId !== value.conversation.conversationId
+  ) {
+    return false
+  }
+
+  if (
+    value.activeTurn !== undefined &&
+    value.conversation.activeTurnId !== undefined &&
+    value.conversation.activeTurnId !== value.activeTurn.turnId
+  ) {
+    return false
+  }
+
+  if (value.activeExecution === undefined) {
     return true
   }
 
-  if (!isTurnSnapshot(value.activeTurn)) {
-    return false
-  }
-
-  if (value.activeTurn.conversationId !== value.conversation.conversationId) {
-    return false
-  }
-
   return (
-    value.conversation.activeTurnId === undefined ||
-    value.conversation.activeTurnId === value.activeTurn.turnId
+    isRunTurnCommand(value.activeExecution) &&
+    value.activeTurn !== undefined &&
+    value.activeExecution.conversationId ===
+      value.conversation.conversationId &&
+    value.activeExecution.turnId === value.activeTurn.turnId &&
+    value.conversation.activeTurnId === value.activeExecution.turnId
   )
 }
 

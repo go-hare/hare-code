@@ -74,6 +74,7 @@ import type {
 import type { StdoutMessage } from '../entrypoints/sdk/controlTypes.js'
 import type { SDKResultSuccess } from '../entrypoints/sdk/coreTypes.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
 import { setSessionMetadataChangedListener } from '../utils/sessionState.js'
 
 /**
@@ -118,6 +119,7 @@ export type EnvLessBridgeParams = {
   initialHistoryCap: number
   initialMessages?: Message[]
   onInboundMessage?: (msg: SDKMessage) => void | Promise<void>
+  onRuntimeEvent?: KernelRuntimeEventSink
   /**
    * Fired on each title-worthy user message seen in writeMessages() until
    * the callback returns true (done). Mirrors replBridge.ts's onUserMessage —
@@ -166,6 +168,7 @@ export async function initEnvLessBridgeCore(
     initialHistoryCap,
     initialMessages,
     onInboundMessage,
+    onRuntimeEvent,
     onUserMessage,
     onPermissionResponse,
     onInterrupt,
@@ -472,11 +475,12 @@ export async function initEnvLessBridgeCore(
             onSetPermissionMode,
             outboundOnly,
           }),
-        envelope => {
-          logForDebugging(
-            `[remote-bridge] Received runtime envelope kind=${envelope.kind} eventId=${envelope.eventId ?? ''}`,
-          )
-        },
+        onRuntimeEvent ??
+          (envelope => {
+            logForDebugging(
+              `[remote-bridge] Received runtime envelope kind=${envelope.kind} eventId=${envelope.eventId ?? ''}`,
+            )
+          }),
       )
     })
 

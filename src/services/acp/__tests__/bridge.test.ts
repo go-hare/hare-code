@@ -4,10 +4,15 @@ import {
   toolUpdateFromToolResult,
   toolUpdateFromEditToolResponse,
   forwardSessionUpdates,
+  createLegacySDKRuntimeEnvelopeAdapter,
 } from '../bridge.js'
 import { markdownEscape, toDisplayPath } from '../utils.js'
 import type { AgentSideConnection, ToolKind } from '@agentclientprotocol/sdk'
 import type { SDKMessage } from '../../../entrypoints/sdk/coreTypes.js'
+import type {
+  KernelEvent,
+  KernelRuntimeEnvelopeBase,
+} from '../../../runtime/contracts/events.js'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -21,6 +26,72 @@ function makeConn(overrides: Partial<AgentSideConnection> = {}): AgentSideConnec
 
 async function* makeStream(msgs: SDKMessage[]): AsyncGenerator<SDKMessage, void, unknown> {
   for (const m of msgs) yield m
+}
+
+async function* makeRuntimeStream(
+  msgs: Array<SDKMessage | KernelRuntimeEnvelopeBase>,
+): AsyncGenerator<SDKMessage | KernelRuntimeEnvelopeBase, void, unknown> {
+  for (const m of msgs) yield m
+}
+
+let runtimeEnvelopeSequence = 0
+
+describe('legacy SDK runtime envelope adapter', () => {
+  test('wraps legacy SDKMessage input as a runtime envelope before ACP handling', () => {
+    const adapter = createLegacySDKRuntimeEnvelopeAdapter('session-1')
+    const envelope = adapter.toEnvelope({
+      type: 'assistant',
+      uuid: 'sdk-1',
+      optionalField: undefined,
+    } as unknown as SDKMessage)
+
+    expect(envelope).toMatchObject({
+      schemaVersion: 'kernel.runtime.v1',
+      source: 'kernel_runtime',
+      kind: 'event',
+      conversationId: 'session-1',
+      turnId: 'session-1:acp-forward',
+      payload: {
+        type: 'headless.sdk_message',
+        payload: {
+          type: 'assistant',
+          uuid: 'sdk-1',
+        },
+      },
+    })
+  })
+})
+
+function makeRuntimeEnvelope(
+  type: string,
+  payload?: unknown,
+  overrides: Partial<KernelRuntimeEnvelopeBase<KernelEvent>> = {},
+): KernelRuntimeEnvelopeBase<KernelEvent> {
+  runtimeEnvelopeSequence += 1
+  const eventId = `event-${runtimeEnvelopeSequence}`
+  const event: KernelEvent = {
+    runtimeId: 'runtime-1',
+    conversationId: 's1',
+    turnId: 'turn-1',
+    type,
+    eventId,
+    replayable: true,
+    payload,
+  }
+  return {
+    schemaVersion: 'kernel.runtime.v1',
+    messageId: `message-${runtimeEnvelopeSequence}`,
+    eventId,
+    runtimeId: 'runtime-1',
+    conversationId: 's1',
+    turnId: 'turn-1',
+    sequence: runtimeEnvelopeSequence,
+    timestamp: '2026-04-27T00:00:00.000Z',
+    source: 'kernel_runtime',
+    kind: 'event',
+    payload: event,
+    ...overrides,
+  }
 }
 
 // ── toolInfoFromToolUse ────────────────────────────────────────────
@@ -536,6 +607,116 @@ describe('forwardSessionUpdates', () => {
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Hello!' } },
     })
     expect(result.stopReason).toBe('end_turn')
+  })
+
+  test('forwards headless.sdk_message runtime envelopes through SDK conversion', async () => {
+    const conn = makeConn()
+    const sdkMessage = {
+      type: 'assistant',
+      uuid: 'sdk-runtime-1',
+      message: { content: [{ type: 'text', text: 'Runtime hello!' }], role: 'assistant' },
+    } as unknown as SDKMessage
+
+    const result = await forwardSessionUpdates(
+      's1',
+      makeRuntimeStream([
+        makeRuntimeEnvelope('headless.sdk_message', sdkMessage),
+      ]),
+      conn,
+      new AbortController().signal,
+      {},
+    )
+
+    expect(result.stopReason).toBe('end_turn')
+    expect((conn.sessionUpdate as ReturnType<typeof mock>).mock.calls).toEqual([
+      [
+        {
+          sessionId: 's1',
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Runtime hello!' },
+          },
+        },
+      ],
+    ])
+  })
+
+  test('dedupes SDK messages repeated through runtime envelopes', async () => {
+    const conn = makeConn()
+    const sdkMessage = {
+      type: 'assistant',
+      uuid: 'sdk-duplicate-1',
+      message: { content: [{ type: 'text', text: 'Only once' }], role: 'assistant' },
+    } as unknown as SDKMessage
+
+    await forwardSessionUpdates(
+      's1',
+      makeRuntimeStream([
+        sdkMessage,
+        makeRuntimeEnvelope('headless.sdk_message', sdkMessage),
+      ]),
+      conn,
+      new AbortController().signal,
+      {},
+    )
+
+    const chunkCalls = (conn.sessionUpdate as ReturnType<typeof mock>).mock.calls.filter(
+      (call: unknown[]) =>
+        ((call[0] as { update?: { sessionUpdate?: string } }).update?.sessionUpdate) ===
+        'agent_message_chunk',
+    )
+    expect(chunkCalls).toHaveLength(1)
+    expect(chunkCalls[0]?.[0]).toMatchObject({
+      sessionId: 's1',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Only once' },
+      },
+    })
+  })
+
+  test('forwards semantic runtime output deltas and terminal events', async () => {
+    const conn = makeConn()
+
+    const result = await forwardSessionUpdates(
+      's1',
+      makeRuntimeStream([
+        makeRuntimeEnvelope('turn.output_delta', { text: 'semantic text' }),
+        makeRuntimeEnvelope('turn.completed', { state: 'completed', stopReason: null }),
+      ]),
+      conn,
+      new AbortController().signal,
+      {},
+    )
+
+    expect(result.stopReason).toBe('end_turn')
+    expect((conn.sessionUpdate as ReturnType<typeof mock>).mock.calls).toEqual([
+      [
+        {
+          sessionId: 's1',
+          update: {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'semantic text' },
+          },
+        },
+      ],
+    ])
+  })
+
+  test('maps runtime abort terminal events to cancelled stopReason', async () => {
+    const conn = makeConn()
+
+    const result = await forwardSessionUpdates(
+      's1',
+      makeRuntimeStream([
+        makeRuntimeEnvelope('turn.failed', { state: 'failed', stopReason: 'interrupt' }),
+      ]),
+      conn,
+      new AbortController().signal,
+      {},
+    )
+
+    expect(result.stopReason).toBe('cancelled')
   })
 
   test('does not duplicate assistant text already emitted by stream_event', async () => {

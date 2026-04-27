@@ -116,13 +116,30 @@
 - Headless eager `commands/tools/agents/sdkMcpConfigs` assembly 已改为 runtime
   materializer / runtime service：`headlessCapabilityMaterializer.ts` 负责
   commands/tools/agents materialization，`headlessRuntimeCapabilityBundle.ts`
-  负责 commands/plugin refresh 与 plugin MCP diff，`RuntimeHeadlessMcpService`
-  负责 SDK seed / dynamic MCP server / status / reconnect state。
+  的 `refresh()` 负责 commands / agents、plugin reload、plugin MCP diff 与
+  hook hot-reload setup，`refreshPlugins()` 仅作为旧调用兼容别名保留；
+  `RuntimeHeadlessMcpService` 负责 SDK seed / dynamic MCP server / status /
+  reconnect state。
 - Interactive CLI 已开始吃同一套 internal materializer：
   `main/commandAssembly.ts` 的 command / agent resolution 进入
   `materializeRuntimeCommandAssembly(...)`，`REPL.tsx` 的 local tools 使用
   `materializeRuntimeToolSet(...)`，不再在 REPL 内直接调用 builtin tool
-  catalog。
+  catalog。interactive command / agent startup preload 也已下沉到
+  `preloadRuntimeCommandAssembly(...)` 与
+  `resolvePreloadedRuntimeCommandAssembly(...)`；`main/commandAssembly.ts`
+  现在只是 CLI 兼容 wrapper，不再直接 import `getCommands()` 或
+  `getAgentDefinitionsWithOverrides()`。
+- Interactive command / agent refresh 也已进入 runtime ownership：
+  `refreshRuntimeCommands(...)` 负责 skill watcher 的 full cache refresh 与
+  GrowthBook refresh 的 memoized refresh；`refreshRuntimeAgentDefinitions(...)`
+  负责 resume / coordinator mode switch 后的 agent definition cache clear、
+  reload 与 active agent recompute。`useSkillsChange.ts`、`REPL.tsx` 与
+  `ResumeConversation.tsx` 不再直接 import command / agent source loader。
+- Interactive CLI startup warmup 已新增 runtime service：
+  `RuntimeInteractiveStartupService` 负责 interactive MCP prefetch 合并、
+  startup hook kick-off 与 MCP startup warning message 生成。`main.tsx`
+  只传入 host 条件、`claudeaiConfigPromise` 与 warning renderer，不再自持
+  local / Claude.ai MCP promise 合并和 hook promise 分支。
 - Hook / plugin runtime service adapter 已落地：
   `RuntimeHookService` 包住 plugin hook reload / cache / count lifecycle，
   `RuntimePluginService` 包住 REPL 初始 plugin commands / agents / hooks /
@@ -172,27 +189,84 @@
   client-local live subscription scope，订阅某个 conversation 后不会继续收到
   其它 conversation 的 live events；`create_conversation` 已拒绝同
   `conversationId` 下不同 `sessionId` / `workspacePath` 的复用，snapshot
-  recovery 遇到 `sessionId` 不匹配时会跳过旧记录。
+  recovery 遇到 `sessionId` 不匹配时会跳过旧记录。transport integration
+  已覆盖 in-process / stdio 下两个 conversation 同时 active、targeted
+  `abort_turn` 只中断目标 turn、另一个 conversation 仍保持 busy active lock。
+  conversation snapshot journal 已新增 `activeExecution`，`run_turn` 会持久化
+  原始 run command；`create_conversation` 恢复到 running active turn 时会自动
+  重启对应 executor。`tests/integration/kernel-runtime-wire-crash-recovery.test.ts`
+  已覆盖 hard kill 后 durable model/tool execution resume，并确认 resumed turn
+  完成后 active lock 释放、后续 turn 可继续运行。
+- 本地 OpenAI-compatible deep smoke 已跑通：`http://127.0.0.1:8317/v1`
+  `/models` 返回 `gpt-5.4`，CLI pipe 通过 `CLAUDE_CODE_USE_OPENAI=1`、
+  `OPENAI_BASE_URL`、`OPENAI_MODEL=gpt-5.4` 走真实 endpoint 返回预期 JSON。
+- `SessionRuntime` 已有 runtime-first turn stream：
+  `submitRuntimeTurn(...)` 产出 `turn.started`、`headless.sdk_message`、
+  `turn.completed` / `turn.failed` envelope；`ask(...)` 已改为消费 runtime
+  envelope 再投影回 legacy `SDKMessage`，`submitMessage(...)` 只保留为
+  SDK-compatible projection。
+- headless stream publisher 已 runtime-first：
+  `createHeadlessRuntimeStreamPublisher(...)` 先写 `RuntimeEventBus`，legacy
+  `stream-json` stdout 后写；测试覆盖 legacy write 发生时 runtime replay
+  已经有对应 `headless.sdk_message`。
 
-尚未完成的 Lane B integration：
+Lane B 当前兼容边界：
 
 - headless stream-json verbose 已双写 `headless.sdk_message` runtime
-  envelope；旧 `SDKMessage` 输出仍保留为 compatibility stream。尚未把所有
-  SDK message 类型替换成只通过 unified `KernelEvent` 语义输出。
+  envelope；旧 `SDKMessage` 输出仍保留为 compatibility stream。当前内部执行
+  已先产 runtime envelope，legacy 输出只作为外层兼容投影保留，避免现有 CLI /
+  SDK / remote host 功能衰减；这不是内部 kernel blocker。
 - direct-connect backlog 仍保存 raw NDJSON line 作为 compatibility replay；
-  同时已新增 `RuntimeDirectConnectSession.getRuntimeEnvelopeBacklog()` /
-  `replayRuntimeEnvelopeBacklog(...)` sidecar facade，能从 raw line 中索引
-  `kernel_runtime_event` envelope，host 不再只能重新解析 stdout backlog。
+  同时 `RuntimeDirectConnectSession.getRuntimeEnvelopeBacklog()` /
+  `replayRuntimeEnvelopeBacklog(...)` 已改为使用 runtime-owned
+  `KernelRuntimeEventFacade`，按统一 replayable / dedupe / since-event
+  语义从 raw line 中索引 `kernel_runtime_event` envelope，host 不再只能
+  重新解析 stdout backlog。
 - bridge / remote / direct-connect / SSH ingress 已接入
   `kernel_runtime_event` adapter；RCS bridge schema 仍保留旧 `SDKMessage` /
   `control_*` compatibility schema，但 `kernel_runtime_event` 已作为
   first-class envelope payload 在 normalize、WS outbound path 与 worker SSE
-  `client_event` 中保真传递。
-- direct-connect / bridge 的 runtime event 输出已有 package-level unified
-  event facade，可被 host 统一 ingest / subscribe / replay；后续剩余是把更多
-  host 调用点显式改成使用该 facade，而不是只暴露 helper。
+  `client_event` 中保真传递。bridge core 参数面已正式暴露
+  `onRuntimeEvent`，REPL bridge 会把 runtime envelope ingest 到
+  runtime-owned event facade；`headless.sdk_message` payload 也会回落到旧
+  SDK ingress，避免 bridge 收到 envelope 后只记录日志或无 sink 时静默丢失。
+- direct-connect / bridge 的 runtime event 输出已有 unified event facade；
+  facade 实现已从 `src/kernel/events.ts` 下沉到
+  `src/runtime/core/events/KernelRuntimeEventFacade.ts`，`kernel/events.ts`
+  只负责 package-level re-export。REPL transport ingress 也已从本地数组缓存
+  改为 `KernelRuntimeEventFacade.ingestEnvelope(...)`，旧 host 入口不再自持
+  一套 replay/dedupe 语义。
+- remote / direct-connect / SSH host hooks 已接入
+  `src/remote/kernelRuntimeHostEvents.ts`：`turn.completed` /
+  `turn.failed` 现在直接作为 runtime terminal signal 收 loading，remote
+  WebSocket timeout 也会把任意 runtime event 视为 heartbeat 清理超时。
+  旧 `SDKMessage` render stream 仍保留，避免 UI 双写和 compatibility 断裂。
+- `headless.sdk_message` 已进入同一个 host-side SDK message handler：
+  remote / direct-connect / SSH hooks 会把 runtime event 中的 SDK payload
+  复用现有 `convertSDKMessage(...)` 渲染路径，同时通过
+  `KernelRuntimeSDKMessageDedupe` 按稳定 `uuid` / assistant message id 去重。
+  因此 runtime event 先到或 legacy `SDKMessage` 先到都只渲染一次；没有
+  稳定 key 的 streaming delta 不做 fingerprint，避免误吞合法重复文本 delta。
+- `turn.output_delta` 已补 host-side semantic output path：remote /
+  direct-connect / SSH hooks 会把不携带 SDK payload 的纯文本 delta 交给 REPL
+  runtime output buffer，用 streaming text 预览并在 `turn.completed` /
+  `turn.failed` 时落成 assistant message；携带 SDK payload 的 output delta
+  仍由 `headless.sdk_message` / legacy SDK path 渲染，避免重复。
+- direct-connect print host 也已消费 runtime events：
+  `runConnectHeadlessRuntime(...)` 现在用同一 host event helper 处理
+  `headless.sdk_message` result fallback 与纯 semantic `turn.output_delta`
+  terminal fallback，不再只依赖 legacy `onMessage(result)`。
+- ACP prompt path 已接入 runtime envelope producer / consumer：
+  `AcpAgent.prompt(...)` 会把 `QueryEngine.submitMessage(...)` 的
+  `SDKMessage` stream 包进会话级 `RuntimeEventBus`，输出 `turn.started`、
+  `headless.sdk_message` 与 `turn.completed` / `turn.failed` envelope；
+  `forwardSessionUpdates(...)` 现在对 legacy `SDKMessage` 输入也会先包成
+  `headless.sdk_message` runtime envelope，再走同一个 host event handler；
+  纯 `turn.output_delta` 走 ACP 文本 chunk，terminal turn event 只收敛
+  stopReason。该 path 使用 `KernelRuntimeSDKMessageDedupe` 避免 runtime
+  envelope 与 compatibility stream 双写。
 
-尚未完成的 Lane C integration：
+Lane C 当前状态：
 
 - `decide_permission` wire command 已进入 `KernelRuntimeWireProtocol`，默认
   runner 创建共享 `RuntimePermissionBroker`，host 可通过
@@ -217,16 +291,17 @@
   `toolUseID` 与 decision classification；direct-connect manager 已补
   requestId -> permission request ledger 和 cancel callback。
 - package-level `createKernelPermissionBroker(...)` 已把 public host decision
-  surface 正式化为可导入 facade；尚未完全替换 REPL permission prompt queue
-  UI，当前策略是保留现有 UI 与
-  callback 语义，只把 permission source of truth 旁路收敛到 runtime broker。
+  surface 正式化为可导入 facade；REPL permission prompt queue UI 保留为
+  interactive host adapter，permission source of truth 已收敛到 runtime
+  broker。
 - ACP / bridge response path 已补齐 `toolUseID` 与临时/永久/拒绝分类，
   bridge remote reject 不再走 abort 型 ask；REPL local queue 与 bridge remote
   permission source 已接入 broker-first compatibility adapter。ACP session
-  现在也给 `QueryEngine` 注入会话级 `ToolUseContext.runtimePermission`，避免
-  ACP path 绕过统一 permission source。
+  现在也给 `QueryEngine` 注入会话级 `ToolUseContext.runtimePermission`，并复用
+  同一个会话级 `RuntimeEventBus` 产出 prompt runtime envelope，避免 ACP path
+  绕过统一 permission source 或继续自持 SDK-only execution stream。
 
-尚未完成的 Lane G integration：
+Lane G 当前状态：
 
 - 当前 router 支持多 conversation map、单 conversation busy guard、host
   connect/reconnect/disconnect policy，以及 opt-in event journal 的进程重启后
@@ -238,9 +313,9 @@
   统一 requestId、ack/error/pong 关联与 scoped event fan-out；`in-process` /
   `stdio` transport 共用同一 host conversation contract，并维护
   client-local live subscription scope。
-- 尚未完成 process crash 后 active model/tool execution 的 durable resume；当前
-  journal 只保证 public event replay 与 conversation / active turn state
-  recovery，不恢复正在运行的 tool 或模型流。
+- process crash 后 active model/tool execution 的 durable resume 已完成第一层：
+  active execution command 会随 conversation snapshot 持久化，恢复 conversation
+  时重启 executor，恢复后的 terminal event 会正常释放 active lock。
 
 ## 2. 并行原则
 
@@ -423,11 +498,17 @@ flowchart TB
 - replay since-event-id test。
 - event payload JSON serializable test。
 - headless SDK message -> runtime envelope test。
-- direct-connect raw backlog -> runtime envelope sidecar replay test。
+- direct-connect raw backlog -> runtime-owned event facade sidecar replay test。
 - direct-connect / remote / SSH / bridge ingress runtime envelope routing test。
+- host runtime event adapter terminal signal test。
+- host runtime event `headless.sdk_message` -> SDK render handler dedupe test。
+- host runtime event `turn.output_delta` -> semantic output buffer test。
+- bridge core `onRuntimeEvent` sink + `headless.sdk_message` fallback ingress test。
+- direct-connect print host runtime event result / output delta fallback test。
 - RCS normalize / WS outbound `kernel_runtime_event.envelope` preservation test。
 - RCS worker SSE `kernel_runtime_event.envelope` preservation test。
-- package-level event facade import / emit / ingest / replay test。
+- runtime-owned event facade import / emit / ingest / replay test。
+- REPL transport ingress 使用 runtime-owned event facade。
 - `bun run typecheck`
 
 ## 7. Lane C：Permission Contract
@@ -629,12 +710,15 @@ flowchart TB
 - `createHeadlessPermissionRuntime` 已支持注入共享 `RuntimeEventBus`，
   避免 permission audit event 和 turn event 分裂成两套 runtime stream。
 
-剩余缺口：
+兼容边界：
 
-- 尚未把 SDK control `interrupt` 明确建模成 public wire-level
-  `abort_turn` command。
-- 尚未实现 multi-conversation headless host；当前 conversation id 仍复用
-  session id。
+- legacy headless `-p` / SDK compatibility stream 仍会输出旧 `SDKMessage`；
+  runtime envelope 已作为内部先行事件，remote/direct/SSH/bridge/ACP host
+  已消费 runtime-owned event。旧 `SDKMessage` 保留为外部兼容投影，不再作为
+  内部 execution source of truth。
+- event journal、conversation snapshot、active turn lock 和 active execution
+  command 均可在 hard kill 后恢复；恢复后的 executor terminal event 会释放
+  active lock，host 不需要手动 `abort_turn` 才能继续下一轮。
 
 ### 10.4 不做
 
@@ -646,7 +730,8 @@ flowchart TB
 
 - `bun test src/kernel/__tests__/headless.test.ts`
 - `bun test tests/integration/kernel-headless-smoke.test.ts`
-- abort race focused tests。
+- `bun test tests/integration/kernel-runtime-wire-transport.test.ts`
+- abort race / multi-conversation isolation focused tests。
 - `bun run typecheck`
 
 ## 11. Lane G：Wire Protocol Runner
@@ -758,9 +843,8 @@ flowchart TB
   `tests/integration/kernel-runtime-wire-transport.test.ts` 使用同一条 host
   conversation contract 覆盖 `in-process` 和 `stdio` 两种 transport。
 
-剩余：
+非当前内核 blocker：
 
-- process crash 后 active model/tool execution 的 durable resume。
 - 非 NDJSON transport 实现（IPC / WebSocket / Unix socket）仍未落地，但它们
   应复用同一个 `KernelRuntimeWireTransport` contract，而不是扩展私有 schema。
 

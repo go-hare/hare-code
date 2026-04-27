@@ -4,7 +4,10 @@ import {
   registerProcessOutputErrorHandlers,
   writeToStdout,
 } from '../../../utils/process.js'
-import type { SDKResultMessage } from '../../../entrypoints/agentSdkTypes.js'
+import type {
+  SDKMessage,
+  SDKResultMessage,
+} from '../../../entrypoints/agentSdkTypes.js'
 import type {
   DirectConnectConfig,
   ServerConfig,
@@ -15,6 +18,11 @@ import {
   DirectConnectSessionManager,
 } from '../../../server/directConnectManager.js'
 import type { RemotePermissionResponse } from '../../../remote/RemoteSessionManager.js'
+import {
+  handleKernelRuntimeHostEvent,
+  KernelRuntimeOutputDeltaDedupe,
+  KernelRuntimeSDKMessageDedupe,
+} from '../../../remote/kernelRuntimeHostEvents.js'
 
 type ServerSocketData = {
   sessionId: string
@@ -188,6 +196,9 @@ export async function runConnectHeadlessRuntime(
   let settled = false
   let connectError: Error | null = null
   let finalResult: SDKResultMessage | null = null
+  let semanticOutput = ''
+  const sdkMessageDedupe = new KernelRuntimeSDKMessageDedupe()
+  const outputDeltaDedupe = new KernelRuntimeOutputDeltaDedupe()
 
   let connectedResolve!: () => void
   let connectedReject!: (error: Error) => void
@@ -201,18 +212,31 @@ export async function runConnectHeadlessRuntime(
     doneResolve = resolve
   })
 
-  const manager = new DirectConnectSessionManager(config, {
-    onMessage: sdkMessage => {
-      if (outputFormat === 'stream-json') {
-        writeToStdout(`${jsonStringify(sdkMessage)}\n`)
-      }
+  const settle = (): void => {
+    if (settled) {
+      return
+    }
+    settled = true
+    doneResolve()
+  }
 
-      if (sdkMessage.type === 'result') {
-        finalResult = sdkMessage as SDKResultMessage
-        settled = true
-        doneResolve()
-      }
-    },
+  const handleSdkMessage = (sdkMessage: SDKMessage): void => {
+    if (!sdkMessageDedupe.shouldProcess(sdkMessage)) {
+      return
+    }
+
+    if (outputFormat === 'stream-json') {
+      writeToStdout(`${jsonStringify(sdkMessage)}\n`)
+    }
+
+    if (sdkMessage.type === 'result') {
+      finalResult = sdkMessage as SDKResultMessage
+      settle()
+    }
+  }
+
+  const manager = new DirectConnectSessionManager(config, {
+    onMessage: handleSdkMessage,
     onPermissionRequest: (request, requestId) => {
       const response: RemotePermissionResponse = {
         behavior: 'deny',
@@ -228,8 +252,7 @@ export async function runConnectHeadlessRuntime(
     },
     onDisconnected: () => {
       if (!settled) {
-        settled = true
-        doneResolve()
+        settle()
       }
     },
     onError: error => {
@@ -237,9 +260,34 @@ export async function runConnectHeadlessRuntime(
       if (!connected) {
         connectedReject(error)
       } else if (!settled) {
-        settled = true
-        doneResolve()
+        settle()
       }
+    },
+    onRuntimeEvent: envelope => {
+      handleKernelRuntimeHostEvent(envelope, {
+        onSDKMessage: handleSdkMessage,
+        onOutputDelta: delta => {
+          if (!outputDeltaDedupe.shouldProcess(envelope)) {
+            return
+          }
+          semanticOutput += delta.text
+        },
+        onTurnTerminal: (_terminalEnvelope, event) => {
+          if (!finalResult && semanticOutput) {
+            finalResult = {
+              type: 'result',
+              subtype: event.type === 'turn.failed' ? 'error' : 'success',
+              is_error: event.type === 'turn.failed',
+              result: semanticOutput,
+              errors:
+                event.type === 'turn.failed'
+                  ? [errorMessage(event.payload)]
+                  : undefined,
+            } as SDKResultMessage
+          }
+          settle()
+        },
+      })
     },
   })
 

@@ -17,6 +17,11 @@ import {
   createToolStub,
 } from '../remote/remotePermissionBridge.js'
 import {
+  handleKernelRuntimeHostEvent,
+  KernelRuntimeOutputDeltaDedupe,
+  KernelRuntimeSDKMessageDedupe,
+} from '../remote/kernelRuntimeHostEvents.js'
+import {
   convertSDKMessage,
   isSessionEndMessage,
 } from '../remote/sdkMessageAdapter.js'
@@ -51,6 +56,8 @@ type UseSSHSessionProps = {
   setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>
   tools: Tool[]
   onRuntimeEvent?: KernelRuntimeEventSink
+  onRuntimeOutputDelta?: (text: string) => void
+  onRuntimeTurnTerminal?: (envelope: Parameters<KernelRuntimeEventSink>[0]) => void
 }
 
 export function useSSHSession({
@@ -60,12 +67,16 @@ export function useSSHSession({
   setToolUseConfirmQueue,
   tools,
   onRuntimeEvent,
+  onRuntimeOutputDelta,
+  onRuntimeTurnTerminal,
 }: UseSSHSessionProps): UseSSHSessionResult {
   const isRemoteMode = !!session
 
   const managerRef = useRef<SSHSessionManager | null>(null)
   const hasReceivedInitRef = useRef(false)
   const isConnectedRef = useRef(false)
+  const sdkMessageDedupeRef = useRef(new KernelRuntimeSDKMessageDedupe())
+  const outputDeltaDedupeRef = useRef(new KernelRuntimeOutputDeltaDedupe())
 
   const toolsRef = useRef(tools)
   useEffect(() => {
@@ -76,27 +87,35 @@ export function useSSHSession({
     if (!session) return
 
     hasReceivedInitRef.current = false
+    sdkMessageDedupeRef.current.clear()
+    outputDeltaDedupeRef.current.clear()
     logForDebugging('[useSSHSession] wiring SSH session manager')
 
+    const handleSDKMessage = (sdkMessage: Parameters<typeof convertSDKMessage>[0]) => {
+      if (!sdkMessageDedupeRef.current.shouldProcess(sdkMessage)) {
+        return
+      }
+
+      if (isSessionEndMessage(sdkMessage)) {
+        setIsLoading(false)
+      }
+
+      // Skip duplicate init messages (one per turn from stream-json mode).
+      if (sdkMessage.type === 'system' && sdkMessage.subtype === 'init') {
+        if (hasReceivedInitRef.current) return
+        hasReceivedInitRef.current = true
+      }
+
+      const converted = convertSDKMessage(sdkMessage, {
+        convertToolResults: true,
+      })
+      if (converted.type === 'message') {
+        setMessages(prev => [...prev, converted.message])
+      }
+    }
+
     const manager = session.createManager({
-      onMessage: sdkMessage => {
-        if (isSessionEndMessage(sdkMessage)) {
-          setIsLoading(false)
-        }
-
-        // Skip duplicate init messages (one per turn from stream-json mode).
-        if (sdkMessage.type === 'system' && sdkMessage.subtype === 'init') {
-          if (hasReceivedInitRef.current) return
-          hasReceivedInitRef.current = true
-        }
-
-        const converted = convertSDKMessage(sdkMessage, {
-          convertToolResults: true,
-        })
-        if (converted.type === 'message') {
-          setMessages(prev => [...prev, converted.message])
-        }
-      },
+      onMessage: handleSDKMessage,
       onPermissionRequest: (request, requestId) => {
         logForDebugging(
           `[useSSHSession] permission request: ${request.tool_name}`,
@@ -221,7 +240,22 @@ export function useSSHSession({
       onError: error => {
         logForDebugging(`[useSSHSession] error: ${error.message}`)
       },
-      onRuntimeEvent,
+      onRuntimeEvent: envelope => {
+        handleKernelRuntimeHostEvent(envelope, {
+          onRuntimeEvent,
+          onSDKMessage: handleSDKMessage,
+          onOutputDelta: delta => {
+            if (!outputDeltaDedupeRef.current.shouldProcess(envelope)) {
+              return
+            }
+            onRuntimeOutputDelta?.(delta.text)
+          },
+          onTurnTerminal: () => {
+            setIsLoading(false)
+            onRuntimeTurnTerminal?.(envelope)
+          },
+        })
+      },
     })
 
     managerRef.current = manager
@@ -239,6 +273,8 @@ export function useSSHSession({
     setIsLoading,
     setToolUseConfirmQueue,
     onRuntimeEvent,
+    onRuntimeOutputDelta,
+    onRuntimeTurnTerminal,
   ])
 
   const sendMessage = useCallback(

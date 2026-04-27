@@ -4,10 +4,19 @@ import type { SDKMessage } from 'src/entrypoints/agentSdkTypes.js'
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
 import { jsonParse, jsonStringify } from 'src/utils/slowOperations.js'
 import type { HeadlessRuntimeOptions } from '../HeadlessRuntime.js'
+import type { KernelRuntimeEnvelopeBase } from '../../../contracts/events.js'
+import type { RuntimeEventBus } from '../../../core/events/RuntimeEventBus.js'
 import type { StructuredIO } from './io/structuredIO.js'
 
-type HeadlessStreamRuntimeEvents = {
-  emitSdkMessage(message: SDKMessage): void
+type HeadlessRuntimeStreamPublisherOptions = {
+  eventBus: Pick<RuntimeEventBus, 'emit'>
+  conversationId: string
+  getTurnId(): string | undefined
+  onPublishError?(error: unknown): void
+}
+
+type HeadlessRuntimeStreamPublisher = {
+  publishSdkMessage(message: SDKMessage): KernelRuntimeEnvelopeBase | undefined
 }
 
 function shouldTrackHeadlessResultMessage(message: SDKMessage): boolean {
@@ -29,9 +38,30 @@ function shouldTrackHeadlessResultMessage(message: SDKMessage): boolean {
   )
 }
 
+export function createHeadlessRuntimeStreamPublisher(
+  options: HeadlessRuntimeStreamPublisherOptions,
+): HeadlessRuntimeStreamPublisher {
+  return {
+    publishSdkMessage(message) {
+      try {
+        return options.eventBus.emit({
+          conversationId: options.conversationId,
+          turnId: options.getTurnId(),
+          type: 'headless.sdk_message',
+          replayable: true,
+          payload: sanitizeSdkMessageForRuntimeEvent(message),
+        })
+      } catch (error) {
+        options.onPublishError?.(error)
+        return undefined
+      }
+    },
+  }
+}
+
 export function createHeadlessStreamCollector(
   options: Pick<HeadlessRuntimeOptions, 'outputFormat' | 'verbose'>,
-  runtimeEvents?: HeadlessStreamRuntimeEvents,
+  runtimePublisher?: HeadlessRuntimeStreamPublisher,
 ): {
   handleMessage(
     structuredIO: StructuredIO,
@@ -52,6 +82,8 @@ export function createHeadlessStreamCollector(
 
   return {
     async handleMessage(structuredIO, message) {
+      runtimePublisher?.publishSdkMessage(message)
+
       if (transformToStreamlined) {
         const transformed = transformToStreamlined(
           message as unknown as StdoutMessage,
@@ -62,8 +94,6 @@ export function createHeadlessStreamCollector(
       } else if (options.outputFormat === 'stream-json' && options.verbose) {
         await structuredIO.write(message as unknown as StdoutMessage)
       }
-
-      runtimeEvents?.emitSdkMessage(sanitizeSdkMessageForRuntimeEvent(message))
 
       if (!shouldTrackHeadlessResultMessage(message)) {
         return
