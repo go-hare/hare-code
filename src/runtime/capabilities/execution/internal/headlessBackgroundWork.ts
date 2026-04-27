@@ -2,6 +2,11 @@ import type { AppState } from 'src/state/AppStateStore.js'
 import { isBackgroundTask } from '../../../../tasks/types.js'
 import { getRunningTasks } from '../../../../utils/task/framework.js'
 
+export type HeadlessBackgroundEventTrackingState = {
+  pendingTaskIds: Set<string>
+  handoffTurnIds: Set<string>
+}
+
 function isBackgroundedLocalAgentAwaitingNotification(
   task: AppState['tasks'][string],
 ): boolean {
@@ -29,4 +34,37 @@ export function hasHeadlessBackgroundWorkPending(state: AppState): boolean {
   return Object.values(state.tasks ?? {}).some(
     isBackgroundedLocalAgentAwaitingNotification,
   )
+}
+
+export function observeHeadlessBackgroundSdkMessage(
+  message: unknown,
+  tracking: HeadlessBackgroundEventTrackingState,
+  activeTurnId?: string,
+): void {
+  const record = message as Record<string, unknown>
+  if (record.type !== 'system') {
+    return
+  }
+
+  const taskId =
+    typeof record.task_id === 'string' ? record.task_id : undefined
+  if (!taskId) {
+    return
+  }
+
+  if (record.subtype === 'task_started') {
+    const taskType =
+      typeof record.task_type === 'string' ? record.task_type : undefined
+    if (taskType === 'local_agent' || taskType === 'local_bash') {
+      tracking.pendingTaskIds.add(taskId)
+      if (activeTurnId) {
+        tracking.handoffTurnIds.add(activeTurnId)
+      }
+    }
+    return
+  }
+
+  if (record.subtype === 'task_notification') {
+    tracking.pendingTaskIds.delete(taskId)
+  }
 }

@@ -488,16 +488,16 @@ export function meetsAvailabilityRequirement(cmd: Command): boolean {
   for (const a of cmd.availability) {
     switch (a) {
       case 'claude-ai':
-        if (isClaudeAISubscriber()) return true
+        if (isClaudeAISubscriberSafe()) return true
         break
       case 'console':
         // Console API key user = direct 1P API customer (not 3P, not claude.ai).
         // Excludes 3P (Bedrock/Vertex/Foundry) who don't set ANTHROPIC_BASE_URL
         // and gateway users who proxy through a custom base URL.
         if (
-          !isClaudeAISubscriber() &&
-          !isUsing3PServices() &&
-          isFirstPartyAnthropicBaseUrl()
+          !isClaudeAISubscriberSafe() &&
+          !isUsing3PServicesSafe() &&
+          isFirstPartyAnthropicBaseUrlSafe()
         )
           return true
         break
@@ -509,6 +509,30 @@ export function meetsAvailabilityRequirement(cmd: Command): boolean {
     }
   }
   return false
+}
+
+function isClaudeAISubscriberSafe(): boolean {
+  try {
+    return isClaudeAISubscriber()
+  } catch {
+    return false
+  }
+}
+
+function isUsing3PServicesSafe(): boolean {
+  try {
+    return isUsing3PServices()
+  } catch {
+    return false
+  }
+}
+
+function isFirstPartyAnthropicBaseUrlSafe(): boolean {
+  try {
+    return isFirstPartyAnthropicBaseUrl()
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -550,7 +574,7 @@ export async function getCommands(cwd: string): Promise<Command[]> {
 
   // Build base commands without dynamic skills
   const baseCommands = allCommands.filter(
-    _ => meetsAvailabilityRequirement(_) && isCommandEnabled(_),
+    _ => meetsAvailabilityRequirement(_) && isCommandEnabledSafe(_),
   )
 
   if (dynamicSkills.length === 0) {
@@ -563,7 +587,7 @@ export async function getCommands(cwd: string): Promise<Command[]> {
     s =>
       !baseCommandNames.has(s.name) &&
       meetsAvailabilityRequirement(s) &&
-      isCommandEnabled(s),
+      isCommandEnabledSafe(s),
   )
 
   if (uniqueDynamicSkills.length === 0) {
@@ -598,6 +622,14 @@ export function clearCommandMemoizationCaches(): void {
   // caches is a no-op for the outer — lodash memoize returns the cached result
   // without ever reaching the cleared inners. Must clear it explicitly.
   clearSkillIndexCache?.()
+}
+
+function isCommandEnabledSafe(command: Command): boolean {
+  try {
+    return isCommandEnabled(command)
+  } catch {
+    return false
+  }
 }
 
 export function clearCommandsCache(): void {

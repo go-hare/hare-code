@@ -4,6 +4,7 @@ export type RuntimeMcpTransport =
   | 'sse-ide'
   | 'http'
   | 'ws'
+  | 'ws-ide'
   | 'sdk'
   | 'claudeai-proxy'
   | 'unknown'
@@ -35,6 +36,42 @@ export interface RuntimeMcpToolBinding {
   server: string
   serverToolName: string
   runtimeToolName: string
+}
+
+export type RuntimeMcpConnectRequest = {
+  serverName: string
+  metadata?: Record<string, unknown>
+}
+
+export type RuntimeMcpAuthAction = 'authenticate' | 'clear'
+
+export type RuntimeMcpAuthRequest = {
+  serverName: string
+  action?: RuntimeMcpAuthAction
+  callbackUrl?: string
+  metadata?: Record<string, unknown>
+}
+
+export type RuntimeMcpSetEnabledRequest = {
+  serverName: string
+  enabled: boolean
+  metadata?: Record<string, unknown>
+}
+
+export type RuntimeMcpLifecycleResult = {
+  serverName: string
+  state: RuntimeMcpConnectionState
+  server?: RuntimeMcpServerRef
+  snapshot?: Partial<RuntimeMcpRegistrySnapshot>
+  authorizationUrl?: string
+  message?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface RuntimeMcpRegistrySnapshot {
+  servers: readonly RuntimeMcpServerRef[]
+  resources: readonly RuntimeMcpResourceRef[]
+  toolBindings: readonly RuntimeMcpToolBinding[]
 }
 
 export interface RuntimeMcpRegistry {

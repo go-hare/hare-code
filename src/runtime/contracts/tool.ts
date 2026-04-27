@@ -6,6 +6,12 @@ export interface RuntimeToolDescriptor {
   name: string
   description: string
   source: RuntimeToolSource
+  provenance?: {
+    source: RuntimeToolSource
+    label?: string
+    serverName?: string
+    toolName?: string
+  }
   aliases?: readonly string[]
   inputSchema?: Record<string, unknown>
   outputSchema?: Record<string, unknown>
@@ -22,10 +28,19 @@ export type RuntimeToolCall = {
   input: unknown
 }
 
+export type RuntimeToolCallRequest = RuntimeToolCall & {
+  permissionMode?: string
+  metadata?: Record<string, unknown>
+}
+
 export type RuntimeToolResult = {
   output: unknown
   isError?: boolean
   metadata?: Record<string, unknown>
+}
+
+export type RuntimeToolCallResult = RuntimeToolResult & {
+  toolName: string
 }
 
 export interface RuntimeToolExecutionContext {

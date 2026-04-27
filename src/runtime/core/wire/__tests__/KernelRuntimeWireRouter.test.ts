@@ -9,10 +9,18 @@ import { RuntimeEventBus } from '../../events/RuntimeEventBus.js'
 import { createKernelRuntimeHeadlessProcessExecutor } from '../KernelRuntimeHeadlessProcessExecutor.js'
 import {
   createKernelRuntimeWireRouter,
+  type KernelRuntimeWireAgentRegistry,
+  type KernelRuntimeWireCommandCatalog,
   type KernelRuntimeWireConversationRecoverySnapshot,
   type KernelRuntimeWireConversationSnapshotStore,
   type KernelRuntimeWireCapabilityResolver,
+  type KernelRuntimeWireHookCatalog,
+  type KernelRuntimeWireMcpRegistry,
   type KernelRuntimeWirePermissionBroker,
+  type KernelRuntimeWirePluginCatalog,
+  type KernelRuntimeWireSkillCatalog,
+  type KernelRuntimeWireTaskRegistry,
+  type KernelRuntimeWireToolCatalog,
   type KernelRuntimeWireTurnExecutor,
 } from '../KernelRuntimeWireRouter.js'
 import { KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION } from '../../../contracts/wire.js'
@@ -37,9 +45,17 @@ function createMessageIds(): () => string {
 function createRouter(
   options: {
     capabilityResolver?: KernelRuntimeWireCapabilityResolver
+    commandCatalog?: KernelRuntimeWireCommandCatalog
     conversationSnapshotStore?: KernelRuntimeWireConversationSnapshotStore
     maxReplayEvents?: number
+    mcpRegistry?: KernelRuntimeWireMcpRegistry
+    hookCatalog?: KernelRuntimeWireHookCatalog
+    skillCatalog?: KernelRuntimeWireSkillCatalog
+    pluginCatalog?: KernelRuntimeWirePluginCatalog
+    agentRegistry?: KernelRuntimeWireAgentRegistry
+    taskRegistry?: KernelRuntimeWireTaskRegistry
     permissionBroker?: KernelRuntimeWirePermissionBroker
+    toolCatalog?: KernelRuntimeWireToolCatalog
     runTurnExecutor?: KernelRuntimeWireTurnExecutor
   } = {},
 ) {
@@ -59,6 +75,14 @@ function createRouter(
     eventBus,
     conversationSnapshotStore: options.conversationSnapshotStore,
     capabilityResolver: options.capabilityResolver,
+    commandCatalog: options.commandCatalog,
+    toolCatalog: options.toolCatalog,
+    mcpRegistry: options.mcpRegistry,
+    hookCatalog: options.hookCatalog,
+    skillCatalog: options.skillCatalog,
+    pluginCatalog: options.pluginCatalog,
+    agentRegistry: options.agentRegistry,
+    taskRegistry: options.taskRegistry,
     permissionBroker: options.permissionBroker,
     runTurnExecutor: options.runTurnExecutor,
     createConversation: options => createHeadlessConversation(options),
@@ -906,16 +930,22 @@ describe('KernelRuntimeWireRouter', () => {
     await waitForObserved(
       observed,
       envelope =>
-        (envelope as { payload?: { type?: string; payload?: { conversationId?: string } } })
-          .payload?.type === 'executor.started' &&
+        (
+          envelope as {
+            payload?: { type?: string; payload?: { conversationId?: string } }
+          }
+        ).payload?.type === 'executor.started' &&
         (envelope as { payload?: { payload?: { conversationId?: string } } })
           .payload?.payload?.conversationId === 'conversation-a',
     )
     await waitForObserved(
       observed,
       envelope =>
-        (envelope as { payload?: { type?: string; payload?: { conversationId?: string } } })
-          .payload?.type === 'executor.started' &&
+        (
+          envelope as {
+            payload?: { type?: string; payload?: { conversationId?: string } }
+          }
+        ).payload?.type === 'executor.started' &&
         (envelope as { payload?: { payload?: { conversationId?: string } } })
           .payload?.payload?.conversationId === 'conversation-b',
     )
@@ -1546,6 +1576,168 @@ describe('KernelRuntimeWireRouter', () => {
         scope: { type: 'capability', name: 'tools' },
       }),
     )
+    const listCommands = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'list_commands',
+        requestId: 'list-commands-1',
+      }),
+    )
+    const listTools = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'list_tools',
+        requestId: 'list-tools-1',
+      }),
+    )
+    const listMcpTools = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'list_mcp_tools',
+        requestId: 'list-mcp-tools-1',
+        serverName: 'github',
+      }),
+    )
+    const reloadMcp = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'reload_mcp',
+        requestId: 'reload-mcp-1',
+      }),
+    )
+    const connectMcp = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'connect_mcp',
+        requestId: 'connect-mcp-1',
+        serverName: 'github',
+      }),
+    )
+    const authMcp = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'authenticate_mcp',
+        requestId: 'auth-mcp-1',
+        serverName: 'github',
+        action: 'clear',
+      }),
+    )
+    const setMcpEnabled = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'set_mcp_enabled',
+        requestId: 'set-mcp-enabled-1',
+        serverName: 'github',
+        enabled: false,
+      }),
+    )
+    const listHooks = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'list_hooks',
+        requestId: 'list-hooks-1',
+      }),
+    )
+    const runHook = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'run_hook',
+        requestId: 'run-hook-1',
+        event: 'PreToolUse',
+        matcher: 'Bash',
+        input: { tool: 'Bash' },
+      }),
+    )
+    const registerHook = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'register_hook',
+        requestId: 'register-hook-1',
+        hook: {
+          event: 'SessionEnd',
+          type: 'command',
+          source: 'sessionHook',
+        },
+        handlerRef: 'session-end',
+      }),
+    )
+    const resolveSkillContext = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'resolve_skill_context',
+        requestId: 'resolve-skill-context-1',
+        name: 'review',
+        args: 'focus',
+      }),
+    )
+    const reloadPlugins = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'reload_plugins',
+        requestId: 'reload-plugins-1',
+      }),
+    )
+    const setPluginEnabled = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'set_plugin_enabled',
+        requestId: 'set-plugin-enabled-1',
+        name: 'audit-plugin',
+        enabled: false,
+        scope: 'project',
+      }),
+    )
+    const installPlugin = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'install_plugin',
+        requestId: 'install-plugin-1',
+        name: 'audit-plugin',
+        scope: 'project',
+      }),
+    )
+    const uninstallPlugin = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'uninstall_plugin',
+        requestId: 'uninstall-plugin-1',
+        name: 'audit-plugin',
+        keepData: true,
+      }),
+    )
+    const updatePlugin = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'update_plugin',
+        requestId: 'update-plugin-1',
+        name: 'audit-plugin',
+        scope: 'project',
+      }),
+    )
+    const listAgents = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'list_agents',
+        requestId: 'list-agents-1',
+      }),
+    )
+    const listTasks = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'list_tasks',
+        requestId: 'list-tasks-1',
+        taskListId: 'team-a',
+      }),
+    )
+    const getTask = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'get_task',
+        requestId: 'get-task-1',
+        taskListId: 'team-a',
+        taskId: '1',
+      }),
+    )
     const hostEvent = parseKernelRuntimeCommandLine(
       JSON.stringify({
         schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
@@ -1573,6 +1765,111 @@ describe('KernelRuntimeWireRouter', () => {
     expect(reload).toMatchObject({
       type: 'reload_capabilities',
       scope: { type: 'capability', name: 'tools' },
+    })
+    expect(listCommands).toMatchObject({
+      type: 'list_commands',
+      requestId: 'list-commands-1',
+    })
+    expect(listTools).toMatchObject({
+      type: 'list_tools',
+      requestId: 'list-tools-1',
+    })
+    expect(listMcpTools).toMatchObject({
+      type: 'list_mcp_tools',
+      requestId: 'list-mcp-tools-1',
+      serverName: 'github',
+    })
+    expect(reloadMcp).toMatchObject({
+      type: 'reload_mcp',
+      requestId: 'reload-mcp-1',
+    })
+    expect(connectMcp).toMatchObject({
+      type: 'connect_mcp',
+      requestId: 'connect-mcp-1',
+      serverName: 'github',
+    })
+    expect(authMcp).toMatchObject({
+      type: 'authenticate_mcp',
+      requestId: 'auth-mcp-1',
+      serverName: 'github',
+      action: 'clear',
+    })
+    expect(setMcpEnabled).toMatchObject({
+      type: 'set_mcp_enabled',
+      requestId: 'set-mcp-enabled-1',
+      serverName: 'github',
+      enabled: false,
+    })
+    expect(listHooks).toMatchObject({
+      type: 'list_hooks',
+      requestId: 'list-hooks-1',
+    })
+    expect(runHook).toMatchObject({
+      type: 'run_hook',
+      requestId: 'run-hook-1',
+      event: 'PreToolUse',
+      matcher: 'Bash',
+      input: { tool: 'Bash' },
+    })
+    expect(registerHook).toMatchObject({
+      type: 'register_hook',
+      requestId: 'register-hook-1',
+      hook: {
+        event: 'SessionEnd',
+        type: 'command',
+        source: 'sessionHook',
+      },
+      handlerRef: 'session-end',
+    })
+    expect(resolveSkillContext).toMatchObject({
+      type: 'resolve_skill_context',
+      requestId: 'resolve-skill-context-1',
+      name: 'review',
+      args: 'focus',
+    })
+    expect(reloadPlugins).toMatchObject({
+      type: 'reload_plugins',
+      requestId: 'reload-plugins-1',
+    })
+    expect(setPluginEnabled).toMatchObject({
+      type: 'set_plugin_enabled',
+      requestId: 'set-plugin-enabled-1',
+      name: 'audit-plugin',
+      enabled: false,
+      scope: 'project',
+    })
+    expect(installPlugin).toMatchObject({
+      type: 'install_plugin',
+      requestId: 'install-plugin-1',
+      name: 'audit-plugin',
+      scope: 'project',
+    })
+    expect(uninstallPlugin).toMatchObject({
+      type: 'uninstall_plugin',
+      requestId: 'uninstall-plugin-1',
+      name: 'audit-plugin',
+      keepData: true,
+    })
+    expect(updatePlugin).toMatchObject({
+      type: 'update_plugin',
+      requestId: 'update-plugin-1',
+      name: 'audit-plugin',
+      scope: 'project',
+    })
+    expect(listAgents).toMatchObject({
+      type: 'list_agents',
+      requestId: 'list-agents-1',
+    })
+    expect(listTasks).toMatchObject({
+      type: 'list_tasks',
+      requestId: 'list-tasks-1',
+      taskListId: 'team-a',
+    })
+    expect(getTask).toMatchObject({
+      type: 'get_task',
+      requestId: 'get-task-1',
+      taskListId: 'team-a',
+      taskId: '1',
     })
     expect(hostEvent).toMatchObject({
       type: 'publish_host_event',
@@ -1660,6 +1957,1431 @@ describe('KernelRuntimeWireRouter', () => {
     )
   })
 
+  test('lists command and tool catalogs through runtime wire commands', async () => {
+    const required: string[] = []
+    let mcpReloaded = false
+    let hooksReloaded = false
+    let skillsReloaded = false
+    let pluginsReloaded = false
+    let agentsReloaded = false
+    const capabilityResolver = createRuntimeCapabilityResolver([
+      {
+        name: 'commands',
+        load: async () => {
+          required.push('commands')
+        },
+      },
+      {
+        name: 'tools',
+        load: async () => {
+          required.push('tools')
+        },
+      },
+      {
+        name: 'mcp',
+        load: async () => {
+          required.push('mcp')
+        },
+      },
+      {
+        name: 'hooks',
+        load: async () => {
+          required.push('hooks')
+        },
+      },
+      {
+        name: 'skills',
+        load: async () => {
+          required.push('skills')
+        },
+      },
+      {
+        name: 'plugins',
+        load: async () => {
+          required.push('plugins')
+        },
+      },
+      {
+        name: 'agents',
+        load: async () => {
+          required.push('agents')
+        },
+      },
+      {
+        name: 'tasks',
+        load: async () => {
+          required.push('tasks')
+        },
+      },
+    ])
+    const { router } = createRouter({
+      capabilityResolver,
+      commandCatalog: {
+        listCommands: () => [
+          {
+            descriptor: {
+              name: 'status',
+              description: 'Show status',
+              kind: 'local',
+            },
+            source: 'builtin',
+            loadedFrom: 'builtin',
+            supportsNonInteractive: true,
+            modelInvocable: false,
+          },
+        ],
+        executeCommand: request => ({
+          name: request.name,
+          kind: 'local',
+          result: {
+            type: 'text',
+            text: `executed:${request.name}:${request.args ?? ''}`,
+          },
+        }),
+      },
+      toolCatalog: {
+        listTools: () => [
+          {
+            name: 'Read',
+            description: 'Read files',
+            source: 'builtin',
+            safety: 'read',
+            isConcurrencySafe: true,
+          },
+        ],
+        callTool: request => ({
+          toolName: request.toolName,
+          output: {
+            input: request.input,
+          },
+        }),
+      },
+      mcpRegistry: {
+        listServers: () => [
+          {
+            name: 'github',
+            transport: 'stdio',
+            state: 'connected',
+            scope: 'project',
+          },
+        ],
+        listToolBindings: () => [
+          {
+            server: 'github',
+            serverToolName: 'list_issues',
+            runtimeToolName: 'mcp__github__list_issues',
+          },
+          {
+            server: 'linear',
+            serverToolName: 'list_tasks',
+            runtimeToolName: 'mcp__linear__list_tasks',
+          },
+        ],
+        listResources: serverName =>
+          serverName === 'github'
+            ? [
+                {
+                  server: 'github',
+                  uri: 'repo://hare-code',
+                  name: 'hare-code',
+                },
+              ]
+            : [],
+        reload: () => {
+          mcpReloaded = true
+        },
+        connectServer: request => ({
+          serverName: request.serverName,
+          state: 'connected',
+          server: {
+            name: request.serverName,
+            transport: 'stdio',
+            state: 'connected',
+          },
+        }),
+        authenticateServer: request => ({
+          serverName: request.serverName,
+          state: request.action === 'clear' ? 'needs-auth' : 'connected',
+          message: request.action ?? 'authenticate',
+        }),
+        setServerEnabled: request => ({
+          serverName: request.serverName,
+          state: request.enabled ? 'pending' : 'disabled',
+          server: {
+            name: request.serverName,
+            transport: 'http',
+            state: request.enabled ? 'pending' : 'disabled',
+          },
+        }),
+      },
+      hookCatalog: {
+        listHooks: () => [
+          {
+            event: 'PreToolUse',
+            type: 'command',
+            source: 'projectSettings',
+            matcher: 'Bash',
+          },
+        ],
+        reload: () => {
+          hooksReloaded = true
+        },
+        runHook: request => ({
+          event: request.event,
+          handled: true,
+          outputs: [
+            {
+              matcher: request.matcher ?? null,
+              input: request.input,
+            },
+          ],
+        }),
+        registerHook: request => ({
+          hook: request.hook,
+          registered: true,
+          handlerRef: request.handlerRef,
+        }),
+      },
+      skillCatalog: {
+        listSkills: () => [
+          {
+            name: 'review',
+            description: 'Review code',
+            source: 'projectSettings',
+            loadedFrom: 'skills',
+            modelInvocable: true,
+          },
+        ],
+        reload: () => {
+          skillsReloaded = true
+        },
+        resolvePromptContext: request => ({
+          name: request.name,
+          descriptor:
+            request.name === 'review'
+              ? {
+                  name: 'review',
+                  description: 'Review code',
+                  source: 'projectSettings',
+                  loadedFrom: 'skills',
+                  modelInvocable: true,
+                }
+              : undefined,
+          context: 'inline',
+          content: `skill:${request.name}:${request.args ?? ''}`,
+          allowedTools: ['Read'],
+        }),
+      },
+      pluginCatalog: {
+        listPlugins: () => ({
+          plugins: [
+            {
+              name: 'audit-plugin',
+              source: 'audit@local',
+              path: '/tmp/audit-plugin',
+              repository: 'audit@local',
+              status: 'enabled',
+              enabled: true,
+              components: {
+                commands: true,
+                agents: false,
+                skills: true,
+                hooks: true,
+                mcp: false,
+                lsp: false,
+                outputStyles: false,
+                settings: false,
+              },
+            },
+          ],
+          errors: [],
+        }),
+        reload: () => {
+          pluginsReloaded = true
+        },
+        setPluginEnabled: request => ({
+          name: request.name,
+          action: 'set_enabled',
+          success: true,
+          enabled: request.enabled,
+          status: request.enabled ? 'enabled' : 'disabled',
+          plugin: {
+            name: request.name,
+            source: 'audit@local',
+            path: '/tmp/audit-plugin',
+            repository: 'audit@local',
+            status: request.enabled ? 'enabled' : 'disabled',
+            enabled: request.enabled,
+            components: {
+              commands: true,
+              agents: false,
+              skills: true,
+              hooks: true,
+              mcp: false,
+              lsp: false,
+              outputStyles: false,
+              settings: false,
+            },
+          },
+        }),
+        installPlugin: request => ({
+          name: request.name,
+          action: 'install',
+          success: true,
+          enabled: true,
+          status: 'enabled',
+          plugin: {
+            name: request.name,
+            source: 'audit@local',
+            path: '/tmp/audit-plugin',
+            repository: 'audit@local',
+            status: 'enabled',
+            enabled: true,
+            components: {
+              commands: true,
+              agents: false,
+              skills: true,
+              hooks: true,
+              mcp: false,
+              lsp: false,
+              outputStyles: false,
+              settings: false,
+            },
+          },
+        }),
+        uninstallPlugin: request => ({
+          name: request.name,
+          action: 'uninstall',
+          success: true,
+          enabled: false,
+          status: 'disabled',
+        }),
+        updatePlugin: request => ({
+          name: request.name,
+          action: 'update',
+          success: true,
+          enabled: true,
+          status: 'enabled',
+          oldVersion: '1.0.0',
+          newVersion: '1.1.0',
+        }),
+      },
+      agentRegistry: {
+        listAgents: () => ({
+          activeAgents: [
+            {
+              agentType: 'reviewer',
+              whenToUse: 'Review code',
+              source: 'projectSettings',
+              active: true,
+            },
+          ],
+          allAgents: [
+            {
+              agentType: 'reviewer',
+              whenToUse: 'Review code',
+              source: 'projectSettings',
+              active: true,
+            },
+          ],
+        }),
+        reload: () => {
+          agentsReloaded = true
+        },
+      },
+      taskRegistry: {
+        listTasks: taskListId => ({
+          taskListId: taskListId ?? 'team-a',
+          tasks: [
+            {
+              id: '1',
+              subject: 'Wire tasks',
+              description: 'Expose tasks',
+              status: 'in_progress',
+              taskListId: taskListId ?? 'team-a',
+              owner: 'reviewer',
+              blocks: [],
+              blockedBy: [],
+            },
+          ],
+        }),
+        getTask: (taskId, taskListId) =>
+          taskId === '1'
+            ? {
+                id: '1',
+                subject: 'Wire tasks',
+                description: 'Expose tasks',
+                status: 'in_progress',
+                taskListId: taskListId ?? 'team-a',
+                owner: 'reviewer',
+                blocks: [],
+                blockedBy: [],
+              }
+            : null,
+      },
+    })
+
+    const [commands] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_commands',
+      requestId: 'commands-1',
+    })
+    const [executedCommand] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'execute_command',
+      requestId: 'commands-execute-1',
+      name: 'status',
+      args: 'brief',
+    })
+    const [tools] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_tools',
+      requestId: 'tools-1',
+    })
+    const [calledTool] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'call_tool',
+      requestId: 'tools-call-1',
+      toolName: 'Read',
+      input: {
+        file_path: 'README.md',
+      },
+    })
+    const [mcpServers] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_mcp_servers',
+      requestId: 'mcp-servers-1',
+    })
+    const [mcpTools] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_mcp_tools',
+      requestId: 'mcp-tools-1',
+      serverName: 'github',
+    })
+    const [mcpResources] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_mcp_resources',
+      requestId: 'mcp-resources-1',
+      serverName: 'github',
+    })
+    const [mcpReload] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'reload_mcp',
+      requestId: 'mcp-reload-1',
+    })
+    const [mcpConnect] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'connect_mcp',
+      requestId: 'mcp-connect-1',
+      serverName: 'github',
+    })
+    const [mcpAuth] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'authenticate_mcp',
+      requestId: 'mcp-auth-1',
+      serverName: 'github',
+      action: 'authenticate',
+    })
+    const [mcpDisable] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'set_mcp_enabled',
+      requestId: 'mcp-disable-1',
+      serverName: 'linear',
+      enabled: false,
+    })
+    const [hooks] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_hooks',
+      requestId: 'hooks-1',
+    })
+    const [hooksReload] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'reload_hooks',
+      requestId: 'hooks-reload-1',
+    })
+    const [hookRun] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_hook',
+      requestId: 'hooks-run-1',
+      event: 'PreToolUse',
+      matcher: 'Bash',
+      input: { tool: 'Bash' },
+    })
+    const [hookRegister] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'register_hook',
+      requestId: 'hooks-register-1',
+      hook: {
+        event: 'SessionEnd',
+        type: 'command',
+        source: 'sessionHook',
+      },
+      handlerRef: 'session-end',
+    })
+    const [skills] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_skills',
+      requestId: 'skills-1',
+    })
+    const [skillsReload] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'reload_skills',
+      requestId: 'skills-reload-1',
+    })
+    const [skillContext] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'resolve_skill_context',
+      requestId: 'skills-context-1',
+      name: 'review',
+      args: 'focus',
+    })
+    const [plugins] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_plugins',
+      requestId: 'plugins-1',
+    })
+    const [pluginsReload] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'reload_plugins',
+      requestId: 'plugins-reload-1',
+    })
+    const [pluginDisable] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'set_plugin_enabled',
+      requestId: 'plugins-disable-1',
+      name: 'audit-plugin',
+      enabled: false,
+    })
+    const [pluginInstall] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'install_plugin',
+      requestId: 'plugins-install-1',
+      name: 'audit-plugin',
+      scope: 'project',
+    })
+    const [pluginUninstall] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'uninstall_plugin',
+      requestId: 'plugins-uninstall-1',
+      name: 'audit-plugin',
+      keepData: true,
+    })
+    const [pluginUpdate] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'update_plugin',
+      requestId: 'plugins-update-1',
+      name: 'audit-plugin',
+      scope: 'project',
+    })
+    const [agents] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_agents',
+      requestId: 'agents-1',
+    })
+    const [agentsReload] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'reload_agents',
+      requestId: 'agents-reload-1',
+    })
+    const [tasks] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_tasks',
+      requestId: 'tasks-1',
+      taskListId: 'team-a',
+    })
+    const [task] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'get_task',
+      requestId: 'task-1',
+      taskListId: 'team-a',
+      taskId: '1',
+    })
+
+    expect(commands).toMatchObject({
+      kind: 'ack',
+      requestId: 'commands-1',
+      payload: {
+        entries: [
+          {
+            descriptor: {
+              name: 'status',
+              kind: 'local',
+            },
+          },
+        ],
+      },
+    })
+    expect(tools).toMatchObject({
+      kind: 'ack',
+      requestId: 'tools-1',
+      payload: {
+        tools: [
+          {
+            name: 'Read',
+            safety: 'read',
+          },
+        ],
+      },
+    })
+    expect(executedCommand).toMatchObject({
+      kind: 'ack',
+      requestId: 'commands-execute-1',
+      payload: {
+        name: 'status',
+        result: {
+          type: 'text',
+          text: 'executed:status:brief',
+        },
+      },
+    })
+    expect(calledTool).toMatchObject({
+      kind: 'ack',
+      requestId: 'tools-call-1',
+      payload: {
+        toolName: 'Read',
+        output: {
+          input: {
+            file_path: 'README.md',
+          },
+        },
+      },
+    })
+    expect(mcpServers).toMatchObject({
+      kind: 'ack',
+      requestId: 'mcp-servers-1',
+      payload: {
+        servers: [
+          {
+            name: 'github',
+            transport: 'stdio',
+            state: 'connected',
+          },
+        ],
+      },
+    })
+    expect(mcpTools).toMatchObject({
+      kind: 'ack',
+      requestId: 'mcp-tools-1',
+      payload: {
+        tools: [
+          {
+            server: 'github',
+            serverToolName: 'list_issues',
+            runtimeToolName: 'mcp__github__list_issues',
+          },
+        ],
+      },
+    })
+    expect(mcpResources).toMatchObject({
+      kind: 'ack',
+      requestId: 'mcp-resources-1',
+      payload: {
+        resources: [
+          {
+            server: 'github',
+            uri: 'repo://hare-code',
+          },
+        ],
+      },
+    })
+    expect(mcpReload).toMatchObject({
+      kind: 'ack',
+      requestId: 'mcp-reload-1',
+      payload: {
+        servers: [
+          {
+            name: 'github',
+          },
+        ],
+        toolBindings: expect.arrayContaining([
+          expect.objectContaining({
+            runtimeToolName: 'mcp__github__list_issues',
+          }),
+        ]),
+      },
+    })
+    expect(mcpReloaded).toBe(true)
+    expect(mcpConnect).toMatchObject({
+      kind: 'ack',
+      requestId: 'mcp-connect-1',
+      payload: {
+        serverName: 'github',
+        state: 'connected',
+      },
+    })
+    expect(mcpAuth).toMatchObject({
+      kind: 'ack',
+      requestId: 'mcp-auth-1',
+      payload: {
+        serverName: 'github',
+        state: 'connected',
+        message: 'authenticate',
+      },
+    })
+    expect(mcpDisable).toMatchObject({
+      kind: 'ack',
+      requestId: 'mcp-disable-1',
+      payload: {
+        serverName: 'linear',
+        state: 'disabled',
+      },
+    })
+    expect(hooks).toMatchObject({
+      kind: 'ack',
+      requestId: 'hooks-1',
+      payload: {
+        hooks: [
+          {
+            event: 'PreToolUse',
+            type: 'command',
+            source: 'projectSettings',
+          },
+        ],
+      },
+    })
+    expect(hooksReload).toMatchObject({
+      kind: 'ack',
+      requestId: 'hooks-reload-1',
+      payload: { hooks: expect.any(Array) },
+    })
+    expect(hookRun).toMatchObject({
+      kind: 'ack',
+      requestId: 'hooks-run-1',
+      payload: {
+        event: 'PreToolUse',
+        handled: true,
+        outputs: [
+          {
+            matcher: 'Bash',
+            input: { tool: 'Bash' },
+          },
+        ],
+      },
+    })
+    expect(hookRegister).toMatchObject({
+      kind: 'ack',
+      requestId: 'hooks-register-1',
+      payload: {
+        hook: {
+          event: 'SessionEnd',
+          source: 'sessionHook',
+        },
+        registered: true,
+        handlerRef: 'session-end',
+      },
+    })
+    expect(skills).toMatchObject({
+      kind: 'ack',
+      requestId: 'skills-1',
+      payload: {
+        skills: [
+          {
+            name: 'review',
+            modelInvocable: true,
+          },
+        ],
+      },
+    })
+    expect(skillsReload).toMatchObject({
+      kind: 'ack',
+      requestId: 'skills-reload-1',
+      payload: { skills: expect.any(Array) },
+    })
+    expect(skillContext).toMatchObject({
+      kind: 'ack',
+      requestId: 'skills-context-1',
+      payload: {
+        name: 'review',
+        context: 'inline',
+        content: 'skill:review:focus',
+        allowedTools: ['Read'],
+      },
+    })
+    expect(plugins).toMatchObject({
+      kind: 'ack',
+      requestId: 'plugins-1',
+      payload: {
+        plugins: [
+          {
+            name: 'audit-plugin',
+            enabled: true,
+          },
+        ],
+        errors: [],
+      },
+    })
+    expect(pluginsReload).toMatchObject({
+      kind: 'ack',
+      requestId: 'plugins-reload-1',
+      payload: { plugins: expect.any(Array), errors: [] },
+    })
+    expect(pluginDisable).toMatchObject({
+      kind: 'ack',
+      requestId: 'plugins-disable-1',
+      payload: {
+        name: 'audit-plugin',
+        enabled: false,
+        status: 'disabled',
+      },
+    })
+    expect(pluginInstall).toMatchObject({
+      kind: 'ack',
+      requestId: 'plugins-install-1',
+      payload: {
+        name: 'audit-plugin',
+        action: 'install',
+        success: true,
+        enabled: true,
+        status: 'enabled',
+      },
+    })
+    expect(pluginUninstall).toMatchObject({
+      kind: 'ack',
+      requestId: 'plugins-uninstall-1',
+      payload: {
+        name: 'audit-plugin',
+        action: 'uninstall',
+        success: true,
+        enabled: false,
+        status: 'disabled',
+      },
+    })
+    expect(pluginUpdate).toMatchObject({
+      kind: 'ack',
+      requestId: 'plugins-update-1',
+      payload: {
+        name: 'audit-plugin',
+        action: 'update',
+        success: true,
+        enabled: true,
+        status: 'enabled',
+        oldVersion: '1.0.0',
+        newVersion: '1.1.0',
+      },
+    })
+    expect(agents).toMatchObject({
+      kind: 'ack',
+      requestId: 'agents-1',
+      payload: {
+        activeAgents: [
+          {
+            agentType: 'reviewer',
+            active: true,
+          },
+        ],
+      },
+    })
+    expect(agentsReload).toMatchObject({
+      kind: 'ack',
+      requestId: 'agents-reload-1',
+      payload: { activeAgents: expect.any(Array) },
+    })
+    expect(tasks).toMatchObject({
+      kind: 'ack',
+      requestId: 'tasks-1',
+      payload: {
+        taskListId: 'team-a',
+        tasks: [
+          {
+            id: '1',
+            status: 'in_progress',
+          },
+        ],
+      },
+    })
+    expect(task).toMatchObject({
+      kind: 'ack',
+      requestId: 'task-1',
+      payload: {
+        task: {
+          id: '1',
+          owner: 'reviewer',
+        },
+      },
+    })
+    expect(hooksReloaded).toBe(true)
+    expect(skillsReloaded).toBe(true)
+    expect(pluginsReloaded).toBe(true)
+    expect(agentsReloaded).toBe(true)
+    expect(required).toEqual([
+      'commands',
+      'tools',
+      'mcp',
+      'hooks',
+      'skills',
+      'plugins',
+      'agents',
+      'tasks',
+    ])
+  })
+
+  test('routes agent spawn and task mutations through runtime wire commands', async () => {
+    const required: string[] = []
+    const events: string[] = []
+    const { router, observed } = createRouter({
+      capabilityResolver: createRuntimeCapabilityResolver([
+        {
+          name: 'agents',
+          load: async () => {
+            required.push('agents')
+          },
+        },
+        {
+          name: 'tasks',
+          load: async () => {
+            required.push('tasks')
+          },
+        },
+      ]),
+      agentRegistry: {
+        listAgents: () => ({
+          activeAgents: [
+            {
+              agentType: 'reviewer',
+              whenToUse: 'Review code',
+              source: 'projectSettings',
+              active: true,
+            },
+          ],
+          allAgents: [],
+        }),
+        spawnAgent: request => ({
+          status: 'async_launched',
+          runId: 'agent-run-1',
+          prompt: request.prompt,
+          agentType: request.agentType,
+          agentId: 'agent-1',
+          taskId: request.taskId,
+          taskListId: request.taskListId,
+          outputFile: '/tmp/agent-1.log',
+          isAsync: true,
+          run: {
+            runId: 'agent-run-1',
+            status: 'running',
+            prompt: request.prompt,
+            createdAt: '2026-04-26T00:00:00.000Z',
+            updatedAt: '2026-04-26T00:00:01.000Z',
+            agentType: request.agentType,
+            agentId: 'agent-1',
+            taskId: request.taskId,
+            taskListId: request.taskListId,
+            outputFile: '/tmp/agent-1.log',
+            outputAvailable: true,
+          },
+        }),
+        listAgentRuns: () => ({
+          runs: [
+            {
+              runId: 'agent-run-1',
+              status: 'running',
+              prompt: 'Review runtime mutations',
+              createdAt: '2026-04-26T00:00:00.000Z',
+              updatedAt: '2026-04-26T00:00:01.000Z',
+              agentType: 'reviewer',
+              agentId: 'agent-1',
+              taskId: '1',
+              taskListId: 'team-a',
+              outputFile: '/tmp/agent-1.log',
+              outputAvailable: true,
+            },
+          ],
+        }),
+        getAgentRun: runId =>
+          runId === 'agent-run-1'
+            ? {
+                runId,
+                status: 'running',
+                prompt: 'Review runtime mutations',
+                createdAt: '2026-04-26T00:00:00.000Z',
+                updatedAt: '2026-04-26T00:00:01.000Z',
+                agentType: 'reviewer',
+                agentId: 'agent-1',
+                taskId: '1',
+                taskListId: 'team-a',
+              }
+            : null,
+        getAgentOutput: request => ({
+          runId: request.runId,
+          status: 'running',
+          available: true,
+          output: 'runtime output',
+          outputFile: '/tmp/agent-1.log',
+          truncated: false,
+        }),
+        cancelAgentRun: request => ({
+          runId: request.runId,
+          cancelled: true,
+          status: 'cancelled',
+          reason: request.reason,
+          run: {
+            runId: request.runId,
+            status: 'cancelled',
+            prompt: 'Review runtime mutations',
+            createdAt: '2026-04-26T00:00:00.000Z',
+            updatedAt: '2026-04-26T00:00:02.000Z',
+            completedAt: '2026-04-26T00:00:02.000Z',
+            cancelledAt: '2026-04-26T00:00:02.000Z',
+            cancelReason: request.reason,
+            agentType: 'reviewer',
+            agentId: 'agent-1',
+            taskId: '1',
+            taskListId: 'team-a',
+          },
+        }),
+      },
+      taskRegistry: {
+        listTasks: () => ({ taskListId: 'team-a', tasks: [] }),
+        getTask: () => null,
+        createTask: request => ({
+          taskListId: request.taskListId ?? 'team-a',
+          taskId: '1',
+          created: true,
+          updatedFields: ['subject', 'description'],
+          task: {
+            id: '1',
+            subject: request.subject,
+            description: request.description,
+            status: request.status ?? 'pending',
+            taskListId: request.taskListId ?? 'team-a',
+            blocks: [],
+            blockedBy: [],
+          },
+        }),
+        updateTask: request => ({
+          taskListId: request.taskListId ?? 'team-a',
+          taskId: request.taskId,
+          updatedFields: ['status'],
+          task: {
+            id: request.taskId,
+            subject: 'Wire mutations',
+            description: 'Update task state',
+            status: request.status ?? 'in_progress',
+            taskListId: request.taskListId ?? 'team-a',
+            blocks: [],
+            blockedBy: [],
+          },
+        }),
+        assignTask: request => ({
+          taskListId: request.taskListId ?? 'team-a',
+          taskId: request.taskId,
+          assigned: true,
+          updatedFields: ['owner', 'ownedFiles'],
+          task: {
+            id: request.taskId,
+            subject: 'Wire mutations',
+            description: 'Assign task owner',
+            status: request.status ?? 'in_progress',
+            taskListId: request.taskListId ?? 'team-a',
+            owner: request.owner,
+            ownedFiles: request.ownedFiles,
+            blocks: [],
+            blockedBy: [],
+          },
+        }),
+      },
+    })
+    const unsubscribe = router.eventBus.subscribe(envelope => {
+      const type = (envelope.payload as { type?: string } | undefined)?.type
+      if (type) events.push(type)
+    })
+
+    try {
+      const [spawned] = await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'spawn_agent',
+        requestId: 'spawn-agent-1',
+        agentType: 'reviewer',
+        prompt: 'Review runtime mutations',
+        taskId: '1',
+        taskListId: 'team-a',
+      })
+      const [runs] = await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'list_agent_runs',
+        requestId: 'list-agent-runs-1',
+      })
+      const [run] = await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'get_agent_run',
+        requestId: 'get-agent-run-1',
+        runId: 'agent-run-1',
+      })
+      const [output] = await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'get_agent_output',
+        requestId: 'get-agent-output-1',
+        runId: 'agent-run-1',
+        tailBytes: 128,
+      })
+      const [cancelled] = await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'cancel_agent_run',
+        requestId: 'cancel-agent-run-1',
+        runId: 'agent-run-1',
+        reason: 'test_cancel',
+      })
+      const [created] = await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'create_task',
+        requestId: 'create-task-1',
+        taskListId: 'team-a',
+        subject: 'Wire mutations',
+        description: 'Create task via wire',
+      })
+      const [updated] = await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'update_task',
+        requestId: 'update-task-1',
+        taskListId: 'team-a',
+        taskId: '1',
+        status: 'in_progress',
+      })
+      const [assigned] = await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'assign_task',
+        requestId: 'assign-task-1',
+        taskListId: 'team-a',
+        taskId: '1',
+        owner: 'reviewer',
+        ownedFiles: ['src/kernel/runtimeTasks.ts'],
+      })
+
+      expect(spawned).toMatchObject({
+        kind: 'ack',
+        requestId: 'spawn-agent-1',
+        payload: {
+          status: 'async_launched',
+          runId: 'agent-run-1',
+          agentId: 'agent-1',
+          taskId: '1',
+        },
+      })
+      expect(runs).toMatchObject({
+        kind: 'ack',
+        requestId: 'list-agent-runs-1',
+        payload: {
+          runs: [{ runId: 'agent-run-1', status: 'running' }],
+        },
+      })
+      expect(run).toMatchObject({
+        kind: 'ack',
+        requestId: 'get-agent-run-1',
+        payload: {
+          run: { runId: 'agent-run-1', status: 'running' },
+        },
+      })
+      expect(output).toMatchObject({
+        kind: 'ack',
+        requestId: 'get-agent-output-1',
+        payload: {
+          runId: 'agent-run-1',
+          available: true,
+          output: 'runtime output',
+        },
+      })
+      expect(cancelled).toMatchObject({
+        kind: 'ack',
+        requestId: 'cancel-agent-run-1',
+        payload: {
+          runId: 'agent-run-1',
+          cancelled: true,
+          status: 'cancelled',
+        },
+      })
+      expect(created).toMatchObject({
+        kind: 'ack',
+        requestId: 'create-task-1',
+        payload: {
+          created: true,
+          task: { id: '1', subject: 'Wire mutations' },
+        },
+      })
+      expect(updated).toMatchObject({
+        kind: 'ack',
+        requestId: 'update-task-1',
+        payload: {
+          task: { id: '1', status: 'in_progress' },
+        },
+      })
+      expect(assigned).toMatchObject({
+        kind: 'ack',
+        requestId: 'assign-task-1',
+        payload: {
+          assigned: true,
+          task: { id: '1', owner: 'reviewer' },
+        },
+      })
+      expect(events).toEqual(
+        expect.arrayContaining([
+          'agents.spawned',
+          'agents.run.cancelled',
+          'tasks.created',
+          'tasks.updated',
+          'tasks.assigned',
+        ]),
+      )
+      expect(
+        observed.some(
+          envelope =>
+            (envelope as { payload?: { type?: string } }).payload?.type ===
+            'tasks.assigned',
+        ),
+      ).toBe(true)
+      expect(required).toEqual(['agents', 'tasks'])
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  test('returns unavailable when command or tool catalogs are missing', async () => {
+    const { router } = createRouter()
+
+    const [commands] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_commands',
+      requestId: 'commands-missing',
+    })
+    const [tools] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_tools',
+      requestId: 'tools-missing',
+    })
+    const [mcp] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_mcp_servers',
+      requestId: 'mcp-missing',
+    })
+    const [hooks] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_hooks',
+      requestId: 'hooks-missing',
+    })
+    const [skills] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_skills',
+      requestId: 'skills-missing',
+    })
+    const [plugins] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_plugins',
+      requestId: 'plugins-missing',
+    })
+    const [agents] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_agents',
+      requestId: 'agents-missing',
+    })
+    const [tasks] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_tasks',
+      requestId: 'tasks-missing',
+    })
+
+    expect(commands).toMatchObject({
+      kind: 'error',
+      requestId: 'commands-missing',
+      error: {
+        code: 'unavailable',
+        message: 'Command catalog is not available',
+      },
+    })
+    expect(tools).toMatchObject({
+      kind: 'error',
+      requestId: 'tools-missing',
+      error: {
+        code: 'unavailable',
+        message: 'Tool catalog is not available',
+      },
+    })
+    expect(mcp).toMatchObject({
+      kind: 'error',
+      requestId: 'mcp-missing',
+      error: {
+        code: 'unavailable',
+        message: 'MCP registry is not available',
+      },
+    })
+    expect(hooks).toMatchObject({
+      kind: 'error',
+      requestId: 'hooks-missing',
+      error: {
+        code: 'unavailable',
+        message: 'Hook catalog is not available',
+      },
+    })
+    expect(skills).toMatchObject({
+      kind: 'error',
+      requestId: 'skills-missing',
+      error: {
+        code: 'unavailable',
+        message: 'Skill catalog is not available',
+      },
+    })
+    expect(plugins).toMatchObject({
+      kind: 'error',
+      requestId: 'plugins-missing',
+      error: {
+        code: 'unavailable',
+        message: 'Plugin catalog is not available',
+      },
+    })
+    expect(agents).toMatchObject({
+      kind: 'error',
+      requestId: 'agents-missing',
+      error: {
+        code: 'unavailable',
+        message: 'Agent registry is not available',
+      },
+    })
+    expect(tasks).toMatchObject({
+      kind: 'error',
+      requestId: 'tasks-missing',
+      error: {
+        code: 'unavailable',
+        message: 'Task registry is not available',
+      },
+    })
+  })
+
+  test('returns unavailable when catalog capabilities cannot be loaded', async () => {
+    const { router } = createRouter({
+      capabilityResolver: createRuntimeCapabilityResolver([]),
+      commandCatalog: {
+        listCommands: () => [],
+      },
+      toolCatalog: {
+        listTools: () => [],
+      },
+      mcpRegistry: {
+        listServers: () => [],
+        listResources: () => [],
+        listToolBindings: () => [],
+      },
+      hookCatalog: {
+        listHooks: () => [],
+      },
+      skillCatalog: {
+        listSkills: () => [],
+      },
+      pluginCatalog: {
+        listPlugins: () => ({ plugins: [], errors: [] }),
+      },
+      agentRegistry: {
+        listAgents: () => ({ activeAgents: [], allAgents: [] }),
+      },
+      taskRegistry: {
+        listTasks: () => ({ taskListId: 'test', tasks: [] }),
+        getTask: () => null,
+      },
+    })
+
+    const [commands] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_commands',
+      requestId: 'commands-unavailable',
+    })
+    const [tools] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_tools',
+      requestId: 'tools-unavailable',
+    })
+    const [mcp] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_mcp_servers',
+      requestId: 'mcp-unavailable',
+    })
+    const [hooks] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_hooks',
+      requestId: 'hooks-unavailable',
+    })
+    const [skills] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_skills',
+      requestId: 'skills-unavailable',
+    })
+    const [plugins] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_plugins',
+      requestId: 'plugins-unavailable',
+    })
+    const [agents] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_agents',
+      requestId: 'agents-unavailable',
+    })
+    const [tasks] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_tasks',
+      requestId: 'tasks-unavailable',
+    })
+
+    expect(commands).toMatchObject({
+      kind: 'error',
+      requestId: 'commands-unavailable',
+      error: {
+        code: 'unavailable',
+        details: { capabilities: ['commands'] },
+      },
+    })
+    expect(tools).toMatchObject({
+      kind: 'error',
+      requestId: 'tools-unavailable',
+      error: {
+        code: 'unavailable',
+        details: { capabilities: ['tools'] },
+      },
+    })
+    expect(mcp).toMatchObject({
+      kind: 'error',
+      requestId: 'mcp-unavailable',
+      error: {
+        code: 'unavailable',
+        details: { capabilities: ['mcp'] },
+      },
+    })
+    expect(hooks).toMatchObject({
+      kind: 'error',
+      requestId: 'hooks-unavailable',
+      error: {
+        code: 'unavailable',
+        details: { capabilities: ['hooks'] },
+      },
+    })
+    expect(skills).toMatchObject({
+      kind: 'error',
+      requestId: 'skills-unavailable',
+      error: {
+        code: 'unavailable',
+        details: { capabilities: ['skills'] },
+      },
+    })
+    expect(plugins).toMatchObject({
+      kind: 'error',
+      requestId: 'plugins-unavailable',
+      error: {
+        code: 'unavailable',
+        details: { capabilities: ['plugins'] },
+      },
+    })
+    expect(agents).toMatchObject({
+      kind: 'error',
+      requestId: 'agents-unavailable',
+      error: {
+        code: 'unavailable',
+        details: { capabilities: ['agents'] },
+      },
+    })
+    expect(tasks).toMatchObject({
+      kind: 'error',
+      requestId: 'tasks-unavailable',
+      error: {
+        code: 'unavailable',
+        details: { capabilities: ['tasks'] },
+      },
+    })
+  })
+
   test('loads capability intent before creating a conversation', async () => {
     const loaded: string[] = []
     const capabilityResolver = createRuntimeCapabilityResolver([
@@ -1700,13 +3422,9 @@ describe('KernelRuntimeWireRouter', () => {
     expect(loaded.sort()).toEqual(['mcp', 'tools'])
     expect(
       observed.map(
-        envelope =>
-          (envelope as { payload?: { type?: string } }).payload?.type,
+        envelope => (envelope as { payload?: { type?: string } }).payload?.type,
       ),
-    ).toEqual([
-      'capabilities.required',
-      'conversation.ready',
-    ])
+    ).toEqual(['capabilities.required', 'conversation.ready'])
     expect(
       observed.find(
         envelope =>

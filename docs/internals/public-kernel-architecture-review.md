@@ -6,8 +6,40 @@
 主链已经继续前进一轮。`SessionRuntime.submitRuntimeTurn(...)` 已成为
 runtime-first turn stream，`RuntimeExecutionSession` 不再声明
 `submitMessage(...)`，ACP prompt / bridge 直接消费 runtime envelope。
-`createKernelRuntime()` 仍是下一阶段 public API 目标，不再作为内部 kernel
-完整性的 blocker。
+`createKernelRuntime()` 的第一层 public façade 已落地，并已补上 stdio
+transport convenience、terminal turn wait API 与 `KernelTurn` object；它不改变内部 kernel 完整性
+判断，后续 public SDK 工作集中在非 NDJSON transport 扩展、event object model
+代码化和发布级兼容矩阵。event taxonomy 已进入当前 root surface：
+`KERNEL_RUNTIME_EVENT_TAXONOMY`、`KernelRuntimeEventType`、category lookup、
+known-type guard、event-of-type guard 与 turn terminal guard 已落地；剩余是
+payload-specific event union、更多 per-domain collector 和 payload contract tests。
+capability descriptor 也已前进到 host-facing API 这一刀：descriptor/status/
+reload scope 在 runtime contract 中稳定，默认 capability graph 已列出，
+`KernelRuntime.capabilities` 的 list/get/view/filter/group/reload 语义已定义；
+`KernelRuntime.commands`、`KernelRuntime.tools`、`KernelRuntime.mcp`、
+`KernelRuntime.hooks`、`KernelRuntime.skills`、`KernelRuntime.plugins`、
+`KernelRuntime.agents` 与 `KernelRuntime.tasks` 的 catalog / status /
+registry / mutation manager 也已进入 public SDK：对应 `list_*` / `reload_*` /
+`get_task` / `spawn_agent` / `list_agent_runs` / `get_agent_run` /
+`get_agent_output` / `cancel_agent_run` / `create_task` / `update_task` /
+`assign_task` wire command、in-process / stdio client method、SDK façade 和
+package declaration 均已对齐。agent executor lifecycle 的第一层
+spawn/status/output/result/cancel contract 已进入 public SDK；command execute
+与 tool call 的第一层 wire / SDK contract 也已落地，router 通过 optional
+executor hook 执行并发出 `commands.executed` / `tools.called` event。MCP
+connect/auth/set-enabled lifecycle 的 wire / SDK contract 也已落地，router
+通过 MCP registry hook 执行并发出 `mcp.connected` / `mcp.authenticated` /
+`mcp.enabled_changed` event；默认 registry 已能按配置尝试 reconnect 与持久化
+enable/disable。hooks run/register、skills prompt context resolve、plugins
+set-enabled/install/uninstall lifecycle 的 wire / SDK contract 也已落地，并发出
+`hooks.ran` / `hooks.registered` / `skills.context_resolved` /
+`plugins.enabled_changed` / `plugins.installed` / `plugins.uninstalled` /
+`plugins.updated` event。默认 command executor 已能执行 non-interactive local
+command 和 prompt command projection；默认 tool executor 已能通过
+`ToolUseContext` 跑 builtin tool validation / permission-mode / progress / result
+路径；默认 skill resolver 已能通过 prompt command 生成 prompt content。剩余不能误写成完成的是完整 MCP auth
+interactive executor、默认 hook runner、plugin marketplace discovery/options、
+真实 agent/coordinator executor 写入 run registry 和 coordinator invocation schema。
 
 ## 1. 审查结论
 
@@ -29,7 +61,12 @@ runtime-first turn stream，`RuntimeExecutionSession` 不再声明
 
 架构上最大的剩余缺口：
 
-- 还没有 `createKernelRuntime()` 总入口。
+- `createKernelRuntime()` 第一层 public façade 已落地：默认使用
+  in-process wire transport，也支持 `transportConfig.kind = 'stdio'` 启动
+  runtime runner；提供 `KernelRuntime` / `KernelConversation` object model、
+  `KernelTurn` object model、event replay、permission decision、capability
+  reload、terminal turn wait 和 `runTurnAndWait(...)` 便捷入口。剩余是把它扩展到 IPC / WebSocket / Unix
+  socket 等非 NDJSON transport 与更完整的发布级 SDK 体验。
 - `KernelRuntimeWireProtocol` 已有 internal command/router/NDJSON runner
   skeleton，并已进入 package public export/bin；router-level 长 turn
   executor streaming contract 与 process-isolated headless executor wiring 已
@@ -44,12 +81,31 @@ runtime-first turn stream，`RuntimeExecutionSession` 不再声明
 - 统一 `KernelEvent` / envelope / replay 已有 internal event bus、
   router-level replay gap contract、compat projection 与 host event facade；
   headless、direct-connect、remote / SSH、bridge / RCS 与 ACP 已接入同源
-  envelope。剩余缺口是把这套内部 event model 整理成更稳定的 public event
-  object model。
-- capability resolver 已有 internal lazy-loading skeleton，`create_conversation`
-  已开始消费 `capabilityIntent` 并通过 `requireCapability(...)` demand-load；
-  package declaration 已暴露 resolver injection type。剩余缺口是 headless
-  eager assembly 还没有完全替换成 materialized capability object。
+  envelope。public taxonomy 已按 `runtime.*`、`host.*`、
+  `conversation.*`、`turn.*`、`permission.*`、`capabilities.*` 与
+  compatibility `headless.sdk_message` 进入 package root；剩余缺口是
+  payload-specific discriminated union、更多 per-domain helper 与 payload
+  contract tests。
+- capability resolver 已有 descriptor / lazy-loading skeleton，
+  `create_conversation` 已开始消费 `capabilityIntent` 并通过
+  `requireCapability(...)` demand-load；package declaration 已暴露 resolver
+  injection type。当前 public SDK 这一刀已把 capability families、status、
+  host view、filter、group 和 scoped reload 语义定义清楚，并补上
+  commands/tools/MCP/hooks/skills/plugins catalog / status / registry manager，
+  以及 agents/tasks 的 spawn / run lifecycle / create / update / assign 第一组 mutate
+  contract；commands/tools 已补上 `execute_command` / `call_tool` contract 和
+  SDK façade，MCP 已补上 `connect_mcp` / `authenticate_mcp` /
+  `set_mcp_enabled` contract 和 SDK façade；hooks 已补上 `run_hook` /
+  `register_hook`，skills 已补上 `resolve_skill_context`，plugins 已补上
+  `set_plugin_enabled` / `install_plugin` / `uninstall_plugin` /
+  `update_plugin`。默认 command/tool executor 已进入 default router：
+  `execute_command` 复用 command registry 执行 non-interactive local command /
+  prompt projection，`call_tool` 复用 builtin tool registry 与非交互
+  `ToolUseContext` 执行 validation、permission mode 和 tool result。剩余缺口不再是“有没有 descriptor、catalog 或默认 command/tool
+  executor”，而是更深 lifecycle 仍未完整 runtime-owned，不能把完整
+  MCP auth interactive executor、默认 hook runner、
+  plugin marketplace discovery/options、真实 agent/coordinator executor 与
+  coordinator invocation 写成已完成。
 - permission 已有 runtime broker、headless wrapper、wire-level
   `decide_permission` command，以及 executor context 级共享
   `permissionBroker`；SDK stdio / structured IO 已经收敛到 broker-first
@@ -323,14 +379,14 @@ flowchart TB
 | 领域 | 当前代码状态 | 完整状态要求 | 风险 |
 | --- | --- | --- | --- |
 | Root surface | 已有 `@go-hare/hare-code/kernel` | 承载完整 contract exports | 中 |
-| Runtime 总入口 | 未见 public `createKernelRuntime()` | runtime object 统一生命周期 | 高 |
+| Runtime 总入口 | 已有 public `createKernelRuntime()` façade，覆盖 in-process / stdio convenience、event replay、permission、capability reload、terminal turn wait、`KernelTurn` object | runtime object 覆盖 IPC / WebSocket / Unix socket 与长期 semver 文档 | 中 |
 | Wire protocol | 已有 internal/router/client/export/bin 与 NDJSON/in-process/stdio transport | 扩展 IPC / WebSocket / Unix socket 等承载层 | 中 |
-| Event surface | 已有 runtime envelope、event facade、compat projection 与多 host 接入 | public event object model 稳定化 | 中 |
+| Event surface | 已有 runtime envelope、event facade、compat projection 与多 host 接入；public taxonomy constants / type union / helper 已进 root surface，`KernelEvent` 仍是 generic payload | payload-specific discriminated union、更多 per-domain helper 与 payload contract tests | 中 |
 | Headless | runtime-first 可运行 façade | public controller object + turn state machine | 中 |
 | Server/direct-connect | contract 化较好 | 映射到统一 wire/event/permission | 中 |
 | Session core | runtime conversation / turn controller 与 active execution journal 已有 | public conversation/turn object model | 中 |
 | Permission | runtime broker 与 package-level broker facade 已有 | 替换更多 legacy UI callback | 中 |
-| Capability | 分散加载 | resolver + descriptor + lazy loading | 高 |
+| Capability | descriptor/status/reload scope、默认 capability graph、resolver lazy loading、`capabilityIntent` demand-load、host-facing view/filter/group/reload 语义已进入当前 SDK surface；commands catalog + 默认 `execute_command` executor、tools catalog + 默认 `call_tool` executor、MCP readonly/status/reload + `connect_mcp` / `authenticate_mcp` / `set_mcp_enabled`、hooks catalog + `run_hook` / `register_hook`、skills catalog + `resolve_skill_context`、plugins status catalog + `set_plugin_enabled` / `install_plugin` / `uninstall_plugin` / `update_plugin`、agents registry + `spawn_agent` + process-backed run lifecycle、tasks list/get + `create_task` / `update_task` / `assign_task` 已进入 `KernelRuntime` | 完整 MCP auth interactive executor、默认 hook runner、plugin marketplace discovery/options、coordinator 专用 invocation contract 补齐 | 中 |
 | State ownership | provider seam 已有 | process-global singleton 退场 | 高 |
 | Tests | surface/package/contract 已有 | wire/concurrency/security contract | 中 |
 
@@ -410,24 +466,44 @@ Public kernel 应暴露：
 
 这是完整状态的收口顺序，不是 MVP 范围裁剪。
 
-1. 定义 `KernelRuntime` / `KernelConversation` / `KernelTurn` / `KernelEvent` / `KernelRuntimeEnvelope` 类型。
-2. 建立 `createKernelRuntime()`，先复用现有 headless/server runtime，但不要把 API 设计成 headless-only。
-3. 增加 wire protocol runner，支持 `init_runtime`、`create_conversation`、`run_turn`、`abort_turn`、`subscribe_events`、`ping`。
-4. 把 `SessionRuntime` 包成 conversation object，补 active turn lock 和 abort 状态机。
+1. `KernelRuntime` / `KernelConversation` / `KernelTurn` / `KernelEvent` /
+   `KernelRuntimeEnvelope` 的第一层 public 类型已进入 root surface；event taxonomy
+   常量、type union 与 helper 已进 root surface，下一步是 payload-specific
+   union / helper 与长期 semver 文档。
+2. `createKernelRuntime()` 已建立，并复用现有 wire router / in-process
+   transport；stdio façade 已通过 `transportConfig` 落地，下一步扩展 IPC /
+   WebSocket / Unix socket 等 transport façade。
+3. wire protocol runner 已支持 `init_runtime`、`create_conversation`、`run_turn`、`abort_turn`、`subscribe_events`、`ping` 等主命令；下一步补发布级 transport matrix。
+4. `SessionRuntime` / wire conversation 已被 public `KernelConversation` façade
+   包住；turn wait / terminal state convenience API 与 `KernelTurn` object 已
+   落地，event taxonomy 的 package-level typed helper 已落地；下一步补
+   payload-specific contract tests 与 host capability descriptor 文档。
 5. 把 direct-connect / server 输出映射到 `KernelRuntimeEnvelope`，保留旧协议做 compatibility layer；当前旧 transport 已能承载并识别 `kernel_runtime_event`，direct-connect backlog 已有 envelope sidecar facade，RCS bridge schema / worker SSE 已保留 first-class envelope 字段，package-level event facade 已开放给 host 使用。
 6. 抽 `KernelPermissionBridge`，统一 permission request/decision/timeout/audit；
    source-level broker 已经下沉到 `hasPermissionsToUseTool(...)`，package-level
    permission broker facade 已开放给 host。
-7. 抽 `KernelRuntimeCapabilities` resolver，让 commands/tools/MCP/hooks/skills/plugins/agents 进入 descriptor + lazy loading。
+7. `KernelRuntimeCapabilities` descriptor API 已进入当前 public SDK 形态：
+   `list` / `get` / `view` / `filter` / `group` / scoped `reload` 面向 host
+   展示与选择；commands/tools 已有 public catalog + invoke contract，MCP 已有
+   readonly/status/reload + lifecycle contract，hooks 已有 run/register
+   contract，skills 已有 prompt context resolve contract，plugins 已有
+   enable/disable/install/uninstall/update lifecycle contract，agents/tasks 已有 public
+   spawn/process-backed run lifecycle/create/update/assign 第一组 mutate
+   contract；默认 command/tool executor 已补齐。下一步是补更深 lifecycle，
+   不能把完整 MCP auth interactive executor、默认 hook runner、
+   plugin marketplace discovery/options、coordinator 专用 invocation 提前标成完成。
 8. 继续拆 `bootstrapProvider`，把 runtime-core / conversation / host state 分开。
 9. 扩展测试：wire contract、event replay、abort race、multi conversation、permission timeout、package smoke。
 
-当前 checkpoint：1、3、4、6、7 已有 internal skeleton 和定向测试，其中
+当前 checkpoint：1、3、4、6、7 已有 internal skeleton / public descriptor
+surface 和定向测试，其中
 wire runner 已覆盖 event replay、conversation snapshot recovery、多
 conversation subscription isolation 与 session reuse guard；6 的 source-level
-permission source of truth 和 package-level permission facade 已收口。后续
-主要 integration 工作集中在 5、8、capability materialization 和 durable
-execution resume。
+permission source of truth、package-level permission facade 以及
+commands/tools/MCP/hooks/skills/plugins manager、agents/tasks
+spawn/process-backed run lifecycle/create/update/assign manager 已收口。
+后续主要 integration 工作集中在 5、8、更深 lifecycle、
+capability materialization 尾部收口和 durable execution resume。
 
 ## 8. 需要架构决策的点
 

@@ -43,15 +43,15 @@ export function toRuntimeCommandDescriptor(
   command: Command,
 ): RuntimeCommandDescriptor {
   return {
-    name: getCommandName(command),
-    description: command.description,
+    name: getRuntimeCommandName(command),
+    description: getRuntimeCommandDescription(command),
     kind: toRuntimeCommandKind(command),
     aliases: command.aliases,
     availability: toAvailability(command.availability),
     argumentHint: command.argumentHint,
     bridgeSafe: command.bridgeSafe,
     disableModelInvocation: command.disableModelInvocation,
-    hidden: command.isHidden,
+    hidden: getRuntimeCommandHidden(command),
     immediate: command.immediate,
     sensitive: command.isSensitive,
     terminalOnly: command.type === 'local-jsx',
@@ -69,4 +69,28 @@ export function createRuntimeCommandGraph(
     supportsNonInteractive: supportsNonInteractive(command),
     modelInvocable: !command.disableModelInvocation,
   }))
+}
+
+function getRuntimeCommandName(command: Command): string {
+  try {
+    return getCommandName(command)
+  } catch {
+    return command.name
+  }
+}
+
+function getRuntimeCommandDescription(command: Command): string {
+  try {
+    return command.description
+  } catch {
+    return command.name
+  }
+}
+
+function getRuntimeCommandHidden(command: Command): boolean | undefined {
+  try {
+    return command.isHidden
+  } catch {
+    return undefined
+  }
 }

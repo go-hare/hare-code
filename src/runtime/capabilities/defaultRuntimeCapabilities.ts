@@ -49,6 +49,7 @@ export function createDefaultRuntimeCapabilityDefinitions(): readonly RuntimeCap
     capability('commands', {
       dependencies: ['skills', 'plugins', 'mcp'],
       load: async context => {
+        await prepareDefaultRuntimeCapabilityLoad()
         const commands = await import('../../commands.js')
         return commands.getRuntimeCommandGraph(context.cwd ?? process.cwd())
       },
@@ -62,6 +63,7 @@ export function createDefaultRuntimeCapabilityDefinitions(): readonly RuntimeCap
       load: async () => import('./hooks/RuntimeHookService.js'),
     }),
     capability('agents', { dependencies: ['tools', 'permissions'] }),
+    capability('tasks', { dependencies: ['agents', 'sessions'] }),
     capability('memory', { dependencies: ['runtime', 'events'] }),
     capability('sessions', { dependencies: ['runtime', 'events'] }),
     capability('execution', {
@@ -91,4 +93,12 @@ export function createDefaultRuntimeCapabilityResolver(
     createDefaultRuntimeCapabilityDefinitions(),
     context,
   )
+}
+
+async function prepareDefaultRuntimeCapabilityLoad(): Promise<void> {
+  if (process.env.NODE_ENV === 'test') {
+    return
+  }
+  const { enableConfigs } = await import('../../utils/config.js')
+  enableConfigs()
 }

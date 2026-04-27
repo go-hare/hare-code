@@ -9,20 +9,56 @@ import type {
 import type { KernelRuntimeHostIdentity } from '../../contracts/runtime.js'
 import type {
   KernelRuntimeAbortTurnCommand,
+  KernelRuntimeAssignTaskCommand,
+  KernelRuntimeAuthenticateMcpCommand,
+  KernelRuntimeCancelAgentRunCommand,
+  KernelRuntimeCallToolCommand,
   KernelRuntimeCommand,
   KernelRuntimeCommandType,
+  KernelRuntimeConnectMcpCommand,
   KernelRuntimeConnectHostCommand,
+  KernelRuntimeCreateTaskCommand,
   KernelRuntimeCreateConversationCommand,
   KernelRuntimeDecidePermissionCommand,
   KernelRuntimeDisconnectHostCommand,
+  KernelRuntimeExecuteCommandCommand,
   KernelRuntimeHostDisconnectPolicy,
   KernelRuntimeDisposeConversationCommand,
+  KernelRuntimeGetAgentOutputCommand,
+  KernelRuntimeGetAgentRunCommand,
+  KernelRuntimeGetTaskCommand,
+  KernelRuntimeInstallPluginCommand,
   KernelRuntimeInitCommand,
+  KernelRuntimeListAgentsCommand,
+  KernelRuntimeListAgentRunsCommand,
+  KernelRuntimeListCommandsCommand,
+  KernelRuntimeListHooksCommand,
+  KernelRuntimeListMcpResourcesCommand,
+  KernelRuntimeListMcpServersCommand,
+  KernelRuntimeListMcpToolsCommand,
+  KernelRuntimeListPluginsCommand,
+  KernelRuntimeListSkillsCommand,
+  KernelRuntimeListTasksCommand,
+  KernelRuntimeListToolsCommand,
   KernelRuntimePingCommand,
   KernelRuntimePublishHostEventCommand,
+  KernelRuntimeRegisterHookCommand,
+  KernelRuntimeReloadAgentsCommand,
   KernelRuntimeReloadCapabilitiesCommand,
+  KernelRuntimeReloadHooksCommand,
+  KernelRuntimeReloadMcpCommand,
+  KernelRuntimeReloadPluginsCommand,
+  KernelRuntimeReloadSkillsCommand,
+  KernelRuntimeResolveSkillContextCommand,
+  KernelRuntimeRunHookCommand,
+  KernelRuntimeSetPluginEnabledCommand,
   KernelRuntimeRunTurnCommand,
+  KernelRuntimeSetMcpEnabledCommand,
+  KernelRuntimeSpawnAgentCommand,
   KernelRuntimeSubscribeEventsCommand,
+  KernelRuntimeUninstallPluginCommand,
+  KernelRuntimeUpdatePluginCommand,
+  KernelRuntimeUpdateTaskCommand,
 } from '../../contracts/wire.js'
 import { KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION } from '../../contracts/wire.js'
 
@@ -36,6 +72,42 @@ const COMMAND_TYPES = new Set<KernelRuntimeCommandType>([
   'decide_permission',
   'dispose_conversation',
   'reload_capabilities',
+  'list_commands',
+  'execute_command',
+  'list_tools',
+  'call_tool',
+  'list_mcp_servers',
+  'list_mcp_tools',
+  'list_mcp_resources',
+  'reload_mcp',
+  'connect_mcp',
+  'authenticate_mcp',
+  'set_mcp_enabled',
+  'list_hooks',
+  'reload_hooks',
+  'run_hook',
+  'register_hook',
+  'list_skills',
+  'reload_skills',
+  'resolve_skill_context',
+  'list_plugins',
+  'reload_plugins',
+  'set_plugin_enabled',
+  'install_plugin',
+  'uninstall_plugin',
+  'update_plugin',
+  'list_agents',
+  'reload_agents',
+  'spawn_agent',
+  'list_agent_runs',
+  'get_agent_run',
+  'get_agent_output',
+  'cancel_agent_run',
+  'list_tasks',
+  'get_task',
+  'create_task',
+  'update_task',
+  'assign_task',
   'publish_host_event',
   'subscribe_events',
   'ping',
@@ -114,6 +186,169 @@ export function parseKernelRuntimeCommand(
       return parseDisposeConversationCommand(record, requestId, metadata)
     case 'reload_capabilities':
       return parseReloadCapabilitiesCommand(record, requestId, metadata)
+    case 'list_commands':
+      return withMetadata<KernelRuntimeListCommandsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'execute_command':
+      return parseExecuteCommandCommand(record, requestId, metadata)
+    case 'list_tools':
+      return withMetadata<KernelRuntimeListToolsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'call_tool':
+      return parseCallToolCommand(record, requestId, metadata)
+    case 'list_mcp_servers':
+      return withMetadata<KernelRuntimeListMcpServersCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'list_mcp_tools':
+      return parseListMcpToolsCommand(record, requestId, metadata)
+    case 'list_mcp_resources':
+      return parseListMcpResourcesCommand(record, requestId, metadata)
+    case 'reload_mcp':
+      return withMetadata<KernelRuntimeReloadMcpCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'connect_mcp':
+      return parseConnectMcpCommand(record, requestId, metadata)
+    case 'authenticate_mcp':
+      return parseAuthenticateMcpCommand(record, requestId, metadata)
+    case 'set_mcp_enabled':
+      return parseSetMcpEnabledCommand(record, requestId, metadata)
+    case 'list_hooks':
+      return withMetadata<KernelRuntimeListHooksCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'reload_hooks':
+      return withMetadata<KernelRuntimeReloadHooksCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'run_hook':
+      return parseRunHookCommand(record, requestId, metadata)
+    case 'register_hook':
+      return parseRegisterHookCommand(record, requestId, metadata)
+    case 'list_skills':
+      return withMetadata<KernelRuntimeListSkillsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'reload_skills':
+      return withMetadata<KernelRuntimeReloadSkillsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'resolve_skill_context':
+      return parseResolveSkillContextCommand(record, requestId, metadata)
+    case 'list_plugins':
+      return withMetadata<KernelRuntimeListPluginsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'reload_plugins':
+      return withMetadata<KernelRuntimeReloadPluginsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'set_plugin_enabled':
+      return parseSetPluginEnabledCommand(record, requestId, metadata)
+    case 'install_plugin':
+      return parseInstallPluginCommand(record, requestId, metadata)
+    case 'uninstall_plugin':
+      return parseUninstallPluginCommand(record, requestId, metadata)
+    case 'update_plugin':
+      return parseUpdatePluginCommand(record, requestId, metadata)
+    case 'list_agents':
+      return withMetadata<KernelRuntimeListAgentsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'reload_agents':
+      return withMetadata<KernelRuntimeReloadAgentsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'spawn_agent':
+      return parseSpawnAgentCommand(record, requestId, metadata)
+    case 'list_agent_runs':
+      return withMetadata<KernelRuntimeListAgentRunsCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'get_agent_run':
+      return parseGetAgentRunCommand(record, requestId, metadata)
+    case 'get_agent_output':
+      return parseGetAgentOutputCommand(record, requestId, metadata)
+    case 'cancel_agent_run':
+      return parseCancelAgentRunCommand(record, requestId, metadata)
+    case 'list_tasks':
+      return parseListTasksCommand(record, requestId, metadata)
+    case 'get_task':
+      return parseGetTaskCommand(record, requestId, metadata)
+    case 'create_task':
+      return parseCreateTaskCommand(record, requestId, metadata)
+    case 'update_task':
+      return parseUpdateTaskCommand(record, requestId, metadata)
+    case 'assign_task':
+      return parseAssignTaskCommand(record, requestId, metadata)
     case 'publish_host_event':
       return parsePublishHostEventCommand(record, requestId, metadata)
     case 'subscribe_events':
@@ -314,6 +549,457 @@ function parseReloadCapabilitiesCommand(
   return withMetadata(command, metadata)
 }
 
+function parseExecuteCommandCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeExecuteCommandCommand {
+  const command: KernelRuntimeExecuteCommandCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'execute_command',
+    requestId,
+    name: requireString(record, 'name'),
+  }
+  assignOptional(command, 'args', optionalString(record, 'args'))
+  assignOptional(command, 'source', optionalCommandInvocationSource(record))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseCallToolCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeCallToolCommand {
+  const command: KernelRuntimeCallToolCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'call_tool',
+    requestId,
+    toolName: requireString(record, 'toolName'),
+    input: record.input,
+  }
+  assignOptional(
+    command,
+    'permissionMode',
+    optionalString(record, 'permissionMode'),
+  )
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function optionalCommandInvocationSource(
+  record: JsonRecord,
+): KernelRuntimeExecuteCommandCommand['source'] | undefined {
+  const value = optionalString(record, 'source')
+  switch (value) {
+    case undefined:
+    case 'cli':
+    case 'repl':
+    case 'bridge':
+    case 'daemon':
+    case 'sdk':
+    case 'test':
+      return value
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `Invalid command source ${value}`,
+        optionalString(record, 'requestId'),
+      )
+  }
+}
+
+function parseListMcpToolsCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeListMcpToolsCommand {
+  const command: KernelRuntimeListMcpToolsCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'list_mcp_tools',
+    requestId,
+  }
+  assignOptional(command, 'serverName', optionalString(record, 'serverName'))
+  return withMetadata(command, metadata)
+}
+
+function parseListMcpResourcesCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeListMcpResourcesCommand {
+  const command: KernelRuntimeListMcpResourcesCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'list_mcp_resources',
+    requestId,
+  }
+  assignOptional(command, 'serverName', optionalString(record, 'serverName'))
+  return withMetadata(command, metadata)
+}
+
+function parseConnectMcpCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeConnectMcpCommand {
+  const command: KernelRuntimeConnectMcpCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'connect_mcp',
+    requestId,
+    serverName: requireString(record, 'serverName'),
+  }
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseAuthenticateMcpCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeAuthenticateMcpCommand {
+  const command: KernelRuntimeAuthenticateMcpCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'authenticate_mcp',
+    requestId,
+    serverName: requireString(record, 'serverName'),
+  }
+  assignOptional(command, 'action', optionalMcpAuthAction(record))
+  assignOptional(command, 'callbackUrl', optionalString(record, 'callbackUrl'))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseSetMcpEnabledCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeSetMcpEnabledCommand {
+  const command: KernelRuntimeSetMcpEnabledCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'set_mcp_enabled',
+    requestId,
+    serverName: requireString(record, 'serverName'),
+    enabled: requireBoolean(record, 'enabled'),
+  }
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseRunHookCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeRunHookCommand {
+  const command: KernelRuntimeRunHookCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'run_hook',
+    requestId,
+    event: requireString(record, 'event'),
+  }
+  assignOptional(command, 'input', record.input)
+  assignOptional(command, 'matcher', optionalString(record, 'matcher'))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseRegisterHookCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeRegisterHookCommand {
+  const command: KernelRuntimeRegisterHookCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'register_hook',
+    requestId,
+    hook: requireHookDescriptor(record),
+  }
+  assignOptional(command, 'handlerRef', optionalString(record, 'handlerRef'))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseResolveSkillContextCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeResolveSkillContextCommand {
+  const command: KernelRuntimeResolveSkillContextCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'resolve_skill_context',
+    requestId,
+    name: requireString(record, 'name'),
+  }
+  assignOptional(command, 'args', optionalString(record, 'args'))
+  assignOptional(command, 'input', record.input)
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseSetPluginEnabledCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeSetPluginEnabledCommand {
+  const command: KernelRuntimeSetPluginEnabledCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'set_plugin_enabled',
+    requestId,
+    name: requireString(record, 'name'),
+    enabled: requireBoolean(record, 'enabled'),
+  }
+  assignOptional(command, 'scope', optionalPluginScope(record))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseInstallPluginCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeInstallPluginCommand {
+  const command: KernelRuntimeInstallPluginCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'install_plugin',
+    requestId,
+    name: requireString(record, 'name'),
+  }
+  assignOptional(command, 'scope', optionalPluginScope(record))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseUninstallPluginCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeUninstallPluginCommand {
+  const command: KernelRuntimeUninstallPluginCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'uninstall_plugin',
+    requestId,
+    name: requireString(record, 'name'),
+  }
+  assignOptional(command, 'scope', optionalPluginScope(record))
+  assignOptional(command, 'keepData', optionalBoolean(record, 'keepData'))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseUpdatePluginCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeUpdatePluginCommand {
+  const command: KernelRuntimeUpdatePluginCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'update_plugin',
+    requestId,
+    name: requireString(record, 'name'),
+  }
+  assignOptional(command, 'scope', optionalPluginScope(record))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseListTasksCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeListTasksCommand {
+  const command: KernelRuntimeListTasksCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'list_tasks',
+    requestId,
+  }
+  assignOptional(command, 'taskListId', optionalString(record, 'taskListId'))
+  return withMetadata(command, metadata)
+}
+
+function parseSpawnAgentCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeSpawnAgentCommand {
+  const command: KernelRuntimeSpawnAgentCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'spawn_agent',
+    requestId,
+    prompt: requireString(record, 'prompt'),
+  }
+  assignOptional(command, 'agentType', optionalString(record, 'agentType'))
+  assignOptional(command, 'description', optionalString(record, 'description'))
+  assignOptional(command, 'model', optionalString(record, 'model'))
+  assignOptional(
+    command,
+    'runInBackground',
+    optionalBoolean(record, 'runInBackground'),
+  )
+  assignOptional(command, 'taskId', optionalString(record, 'taskId'))
+  assignOptional(command, 'taskListId', optionalString(record, 'taskListId'))
+  assignOptional(
+    command,
+    'ownedFiles',
+    optionalStringArray(record, 'ownedFiles'),
+  )
+  assignOptional(command, 'name', optionalString(record, 'name'))
+  assignOptional(command, 'teamName', optionalString(record, 'teamName'))
+  assignOptional(command, 'mode', optionalString(record, 'mode'))
+  assignOptional(
+    command,
+    'isolation',
+    optionalAgentIsolation(record, 'isolation'),
+  )
+  assignOptional(command, 'cwd', optionalString(record, 'cwd'))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseGetAgentRunCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeGetAgentRunCommand {
+  return withMetadata<KernelRuntimeGetAgentRunCommand>(
+    {
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'get_agent_run',
+      requestId,
+      runId: requireString(record, 'runId'),
+    },
+    metadata,
+  )
+}
+
+function parseGetAgentOutputCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeGetAgentOutputCommand {
+  const command: KernelRuntimeGetAgentOutputCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'get_agent_output',
+    requestId,
+    runId: requireString(record, 'runId'),
+  }
+  assignOptional(
+    command,
+    'tailBytes',
+    optionalNonNegativeInteger(record, 'tailBytes'),
+  )
+  return withMetadata(command, metadata)
+}
+
+function parseCancelAgentRunCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeCancelAgentRunCommand {
+  const command: KernelRuntimeCancelAgentRunCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'cancel_agent_run',
+    requestId,
+    runId: requireString(record, 'runId'),
+  }
+  assignOptional(command, 'reason', optionalString(record, 'reason'))
+  return withMetadata(command, metadata)
+}
+
+function parseGetTaskCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeGetTaskCommand {
+  const command: KernelRuntimeGetTaskCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'get_task',
+    requestId,
+    taskId: requireString(record, 'taskId'),
+  }
+  assignOptional(command, 'taskListId', optionalString(record, 'taskListId'))
+  return withMetadata(command, metadata)
+}
+
+function parseCreateTaskCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeCreateTaskCommand {
+  const command: KernelRuntimeCreateTaskCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'create_task',
+    requestId,
+    subject: requireString(record, 'subject'),
+    description: requireString(record, 'description'),
+  }
+  assignOptional(command, 'taskListId', optionalString(record, 'taskListId'))
+  assignOptional(command, 'activeForm', optionalString(record, 'activeForm'))
+  assignOptional(command, 'owner', optionalString(record, 'owner'))
+  assignOptional(command, 'status', optionalTaskStatus(record, 'status'))
+  assignOptional(command, 'blocks', optionalStringArray(record, 'blocks'))
+  assignOptional(command, 'blockedBy', optionalStringArray(record, 'blockedBy'))
+  assignOptional(
+    command,
+    'ownedFiles',
+    optionalStringArray(record, 'ownedFiles'),
+  )
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseUpdateTaskCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeUpdateTaskCommand {
+  const command: KernelRuntimeUpdateTaskCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'update_task',
+    requestId,
+    taskId: requireString(record, 'taskId'),
+  }
+  assignOptional(command, 'taskListId', optionalString(record, 'taskListId'))
+  assignOptional(command, 'subject', optionalString(record, 'subject'))
+  assignOptional(command, 'description', optionalString(record, 'description'))
+  assignOptional(command, 'activeForm', optionalString(record, 'activeForm'))
+  assignOptional(command, 'status', optionalTaskStatus(record, 'status'))
+  assignOptional(command, 'owner', optionalString(record, 'owner'))
+  assignOptional(command, 'addBlocks', optionalStringArray(record, 'addBlocks'))
+  assignOptional(
+    command,
+    'addBlockedBy',
+    optionalStringArray(record, 'addBlockedBy'),
+  )
+  assignOptional(
+    command,
+    'ownedFiles',
+    optionalStringArray(record, 'ownedFiles'),
+  )
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseAssignTaskCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeAssignTaskCommand {
+  const command: KernelRuntimeAssignTaskCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'assign_task',
+    requestId,
+    taskId: requireString(record, 'taskId'),
+    owner: requireString(record, 'owner'),
+  }
+  assignOptional(command, 'taskListId', optionalString(record, 'taskListId'))
+  assignOptional(
+    command,
+    'ownedFiles',
+    optionalStringArray(record, 'ownedFiles'),
+  )
+  assignOptional(command, 'status', optionalTaskStatus(record, 'status'))
+  assignOptional(command, 'metadata', optionalRecord(record, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
 function parsePublishHostEventCommand(
   record: JsonRecord,
   requestId: string,
@@ -410,6 +1096,159 @@ function optionalArray(
   return value
 }
 
+function optionalStringArray(
+  record: JsonRecord,
+  key: string,
+): readonly string[] | undefined {
+  const value = optionalArray(record, key)
+  if (value === undefined) {
+    return undefined
+  }
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      throw new KernelRuntimeWireCommandParseError(
+        `${key} must be an array of strings`,
+      )
+    }
+  }
+  return value as readonly string[]
+}
+
+function optionalBoolean(record: JsonRecord, key: string): boolean | undefined {
+  const value = record[key]
+  if (value === undefined) {
+    return undefined
+  }
+  if (typeof value !== 'boolean') {
+    throw new KernelRuntimeWireCommandParseError(`${key} must be a boolean`)
+  }
+  return value
+}
+
+function requireBoolean(record: JsonRecord, key: string): boolean {
+  const value = record[key]
+  if (typeof value !== 'boolean') {
+    throw new KernelRuntimeWireCommandParseError(`${key} must be a boolean`)
+  }
+  return value
+}
+
+function optionalMcpAuthAction(
+  record: JsonRecord,
+): KernelRuntimeAuthenticateMcpCommand['action'] | undefined {
+  const value = optionalString(record, 'action')
+  switch (value) {
+    case undefined:
+    case 'authenticate':
+    case 'clear':
+      return value
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `Invalid MCP auth action ${value}`,
+        optionalString(record, 'requestId'),
+      )
+  }
+}
+
+function requireHookDescriptor(
+  record: JsonRecord,
+): KernelRuntimeRegisterHookCommand['hook'] {
+  const hook = requireRecordField(record, 'hook')
+  const descriptor: KernelRuntimeRegisterHookCommand['hook'] = {
+    event: requireString(hook, 'event'),
+    type: requireHookType(hook),
+    source: requireHookSource(hook),
+  }
+  assignOptional(descriptor, 'matcher', optionalString(hook, 'matcher'))
+  assignOptional(descriptor, 'pluginName', optionalString(hook, 'pluginName'))
+  assignOptional(descriptor, 'displayName', optionalString(hook, 'displayName'))
+  assignOptional(
+    descriptor,
+    'timeoutSeconds',
+    optionalNonNegativeInteger(hook, 'timeoutSeconds'),
+  )
+  assignOptional(descriptor, 'async', optionalBoolean(hook, 'async'))
+  assignOptional(descriptor, 'once', optionalBoolean(hook, 'once'))
+  return descriptor
+}
+
+function requireHookType(
+  record: JsonRecord,
+): KernelRuntimeRegisterHookCommand['hook']['type'] {
+  const value = requireString(record, 'type')
+  switch (value) {
+    case 'command':
+    case 'prompt':
+    case 'agent':
+    case 'http':
+    case 'callback':
+    case 'function':
+    case 'unknown':
+      return value
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `Invalid hook type ${value}`,
+        optionalString(record, 'requestId'),
+      )
+  }
+}
+
+function requireHookSource(
+  record: JsonRecord,
+): KernelRuntimeRegisterHookCommand['hook']['source'] {
+  const value = requireString(record, 'source')
+  switch (value) {
+    case 'userSettings':
+    case 'projectSettings':
+    case 'localSettings':
+    case 'policySettings':
+    case 'pluginHook':
+    case 'sessionHook':
+    case 'builtinHook':
+    case 'unknown':
+      return value
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `Invalid hook source ${value}`,
+        optionalString(record, 'requestId'),
+      )
+  }
+}
+
+function optionalPluginScope(
+  record: JsonRecord,
+): KernelRuntimeSetPluginEnabledCommand['scope'] | undefined {
+  const value = optionalString(record, 'scope')
+  switch (value) {
+    case undefined:
+    case 'user':
+    case 'project':
+    case 'local':
+      return value
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `Invalid plugin scope ${value}`,
+        optionalString(record, 'requestId'),
+      )
+  }
+}
+
+function optionalNonNegativeInteger(
+  record: JsonRecord,
+  key: string,
+): number | undefined {
+  const value = record[key]
+  if (value === undefined) {
+    return undefined
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new KernelRuntimeWireCommandParseError(
+      `${key} must be a non-negative integer`,
+    )
+  }
+  return value
+}
+
 function requirePrompt(
   record: JsonRecord,
   key: string,
@@ -433,6 +1272,38 @@ function requireCommandType(record: JsonRecord): KernelRuntimeCommandType {
     )
   }
   return type as KernelRuntimeCommandType
+}
+
+function optionalTaskStatus(
+  record: JsonRecord,
+  key: string,
+): KernelRuntimeCreateTaskCommand['status'] {
+  const value = optionalString(record, key)
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === 'pending' || value === 'in_progress' || value === 'completed') {
+    return value
+  }
+  throw new KernelRuntimeWireCommandParseError(
+    `${key} must be pending, in_progress, or completed`,
+  )
+}
+
+function optionalAgentIsolation(
+  record: JsonRecord,
+  key: string,
+): KernelRuntimeSpawnAgentCommand['isolation'] {
+  const value = optionalString(record, key)
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === 'worktree' || value === 'remote') {
+    return value
+  }
+  throw new KernelRuntimeWireCommandParseError(
+    `${key} must be worktree or remote`,
+  )
 }
 
 function optionalHostDisconnectPolicy(
@@ -502,10 +1373,11 @@ function withMetadata<T extends { metadata?: Record<string, unknown> }>(
   return command
 }
 
-function assignOptional<
-  TTarget extends Record<string, unknown>,
-  TKey extends keyof TTarget,
->(target: TTarget, key: TKey, value: TTarget[TKey] | undefined): void {
+function assignOptional<TTarget, TKey extends keyof TTarget>(
+  target: TTarget,
+  key: TKey,
+  value: TTarget[TKey] | undefined,
+): void {
   if (value !== undefined) {
     target[key] = value
   }

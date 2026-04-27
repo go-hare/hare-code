@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { hasHeadlessBackgroundWorkPending } from '../headlessBackgroundWork.js'
+import {
+  hasHeadlessBackgroundWorkPending,
+  observeHeadlessBackgroundSdkMessage,
+} from '../headlessBackgroundWork.js'
 
 const baseTask = {
   id: 'a1',
@@ -77,5 +80,48 @@ describe('hasHeadlessBackgroundWorkPending', () => {
         }),
       ),
     ).toBe(false)
+  })
+})
+
+describe('observeHeadlessBackgroundSdkMessage', () => {
+  test('tracks direct task_started messages and their launching turn', () => {
+    const tracking = {
+      pendingTaskIds: new Set<string>(),
+      handoffTurnIds: new Set<string>(),
+    }
+
+    observeHeadlessBackgroundSdkMessage(
+      {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'agent-1',
+        task_type: 'local_agent',
+      },
+      tracking,
+      'turn-1',
+    )
+
+    expect(tracking.pendingTaskIds.has('agent-1')).toBe(true)
+    expect(tracking.handoffTurnIds.has('turn-1')).toBe(true)
+  })
+
+  test('clears pending tasks on terminal task notifications', () => {
+    const tracking = {
+      pendingTaskIds: new Set<string>(['agent-1']),
+      handoffTurnIds: new Set<string>(['turn-1']),
+    }
+
+    observeHeadlessBackgroundSdkMessage(
+      {
+        type: 'system',
+        subtype: 'task_notification',
+        task_id: 'agent-1',
+      },
+      tracking,
+      'turn-2',
+    )
+
+    expect(tracking.pendingTaskIds.has('agent-1')).toBe(false)
+    expect(tracking.handoffTurnIds.has('turn-1')).toBe(true)
   })
 })

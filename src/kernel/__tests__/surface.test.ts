@@ -8,12 +8,17 @@ import * as headlessStartup from '../headlessStartup.js'
 import * as events from '../events.js'
 import * as kernel from '../index.js'
 import * as permissions from '../permissions.js'
+import * as runtime from '../runtime.js'
+import * as runtimeEvents from '../runtimeEvents.js'
 import * as serverHost from '../serverHost.js'
 import * as wireProtocol from '../wireProtocol.js'
 import * as serverTypes from '../../server/types.js'
 
 const EXPECTED_KERNEL_EXPORTS = [
+  'KERNEL_CAPABILITY_FAMILIES',
   'KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION',
+  'KERNEL_RUNTIME_EVENT_TAXONOMY',
+  'KERNEL_RUNTIME_EVENT_TYPES',
   'DirectConnectError',
   'applyDirectConnectSessionState',
   'assembleServerHost',
@@ -31,13 +36,27 @@ const EXPECTED_KERNEL_EXPORTS = [
   'createKernelRuntimeInProcessWireTransport',
   'createKernelRuntimeStdioWireTransport',
   'createKernelRuntimeWireClient',
+  'createKernelRuntime',
+  'filterKernelCapabilities',
+  'getKernelCapabilityFamily',
   'createKernelSession',
   'getDirectConnectErrorMessage',
+  'groupKernelCapabilities',
   'getKernelEventFromEnvelope',
+  'getKernelRuntimeEventCategory',
+  'getKernelRuntimeEventTaxonomyEntry',
+  'getKernelRuntimeEventType',
   'getKernelRuntimeEnvelopeFromMessage',
+  'isKernelCapabilityReady',
+  'isKernelCapabilityUnavailable',
+  'isKernelRuntimeEventEnvelope',
+  'isKernelRuntimeEventOfType',
   'isKernelRuntimeEnvelope',
+  'isKernelTurnTerminalEvent',
+  'isKnownKernelRuntimeEventType',
   'KernelPermissionBrokerDisposedError',
   'KernelPermissionDecisionError',
+  'KernelRuntimeRequestError',
   'KernelRuntimeEventReplayError',
   'prepareKernelHeadlessStartup',
   'runBridgeHeadless',
@@ -48,6 +67,8 @@ const EXPECTED_KERNEL_EXPORTS = [
   'runKernelRuntimeWireProtocol',
   'startKernelServer',
   'startServer',
+  'toKernelCapabilityView',
+  'toKernelCapabilityViews',
   'toKernelRuntimeEventMessage',
 ] as const
 
@@ -169,6 +190,54 @@ describe('kernel index surface', () => {
     expect(kernel.KernelRuntimeEventReplayError).toBe(
       events.KernelRuntimeEventReplayError,
     )
+    expect(kernel.KERNEL_RUNTIME_EVENT_TAXONOMY).toBe(
+      runtimeEvents.KERNEL_RUNTIME_EVENT_TAXONOMY,
+    )
+    expect(kernel.KERNEL_RUNTIME_EVENT_TYPES).toBe(
+      runtimeEvents.KERNEL_RUNTIME_EVENT_TYPES,
+    )
+    expect(
+      Object.is(
+        kernel.getKernelRuntimeEventType,
+        runtimeEvents.getKernelRuntimeEventType,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.getKernelRuntimeEventCategory,
+        runtimeEvents.getKernelRuntimeEventCategory,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.getKernelRuntimeEventTaxonomyEntry,
+        runtimeEvents.getKernelRuntimeEventTaxonomyEntry,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.isKernelRuntimeEventEnvelope,
+        runtimeEvents.isKernelRuntimeEventEnvelope,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.isKernelRuntimeEventOfType,
+        runtimeEvents.isKernelRuntimeEventOfType,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.isKernelTurnTerminalEvent,
+        runtimeEvents.isKernelTurnTerminalEvent,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.isKnownKernelRuntimeEventType,
+        runtimeEvents.isKnownKernelRuntimeEventType,
+      ),
+    ).toBe(true)
     expect(
       Object.is(
         kernel.createKernelPermissionBroker,
@@ -192,6 +261,31 @@ describe('kernel index surface', () => {
       true,
     )
     expect(Object.is(kernel.runDaemonWorker, daemon.runDaemonWorker)).toBe(true)
+    expect(
+      Object.is(kernel.createKernelRuntime, runtime.createKernelRuntime),
+    ).toBe(true)
+    expect(kernel.KernelRuntimeRequestError).toBe(
+      runtime.KernelRuntimeRequestError,
+    )
+    const kernelRecord = kernel as unknown as Record<string, unknown>
+    const runtimeRecord = runtime as unknown as Record<string, unknown>
+    for (const exportName of [
+      'KERNEL_CAPABILITY_FAMILIES',
+      'filterKernelCapabilities',
+      'getKernelCapabilityFamily',
+      'groupKernelCapabilities',
+      'isKernelCapabilityReady',
+      'isKernelCapabilityUnavailable',
+      'toKernelCapabilityView',
+      'toKernelCapabilityViews',
+    ]) {
+      expect(kernelRecord[exportName]).toBe(runtimeRecord[exportName])
+      if (exportName === 'KERNEL_CAPABILITY_FAMILIES') {
+        expect(Array.isArray(kernelRecord[exportName])).toBe(true)
+      } else {
+        expect(typeof kernelRecord[exportName]).toBe('function')
+      }
+    }
     expect(
       Object.is(
         kernel.createDefaultKernelRuntimeWireRouter,

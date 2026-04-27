@@ -4,6 +4,23 @@ import type {
   KernelRuntimeCapabilityReloadRequest,
 } from '../../contracts/capability.js'
 import type {
+  RuntimeAgentDescriptor,
+  RuntimeAgentRegistrySnapshot,
+  RuntimeAgentRunCancelRequest,
+  RuntimeAgentRunCancelResult,
+  RuntimeAgentRunDescriptor,
+  RuntimeAgentRunListSnapshot,
+  RuntimeAgentRunOutput,
+  RuntimeAgentRunOutputRequest,
+  RuntimeAgentSpawnRequest,
+  RuntimeAgentSpawnResult,
+} from '../../contracts/agent.js'
+import type {
+  RuntimeCommandExecuteRequest,
+  RuntimeCommandExecutionResult,
+  RuntimeCommandGraphEntry,
+} from '../../contracts/command.js'
+import type {
   KernelConversationId,
   KernelConversationSnapshot,
 } from '../../contracts/conversation.js'
@@ -12,14 +29,56 @@ import type {
   KernelRuntimeEnvelopeBase,
 } from '../../contracts/events.js'
 import type {
+  RuntimeHookDescriptor,
+  RuntimeHookMutationResult,
+  RuntimeHookRegistrySnapshot,
+  RuntimeHookRegisterRequest,
+  RuntimeHookRunRequest,
+  RuntimeHookRunResult,
+} from '../../contracts/hook.js'
+import type {
+  RuntimeMcpAuthRequest,
+  RuntimeMcpConnectRequest,
+  RuntimeMcpLifecycleResult,
+  RuntimeMcpRegistrySnapshot,
+  RuntimeMcpResourceRef,
+  RuntimeMcpServerRef,
+  RuntimeMcpSetEnabledRequest,
+  RuntimeMcpToolBinding,
+} from '../../contracts/mcp.js'
+import type {
   KernelRuntimeHostIdentity,
   KernelRuntimeId,
 } from '../../contracts/runtime.js'
+import type {
+  RuntimePluginCatalogSnapshot,
+  RuntimePluginDescriptor,
+  RuntimePluginErrorDescriptor,
+  RuntimePluginInstallRequest,
+  RuntimePluginMutationResult,
+  RuntimePluginSetEnabledRequest,
+  RuntimePluginUninstallRequest,
+  RuntimePluginUpdateRequest,
+} from '../../contracts/plugin.js'
 import type {
   KernelPermissionDecision,
   KernelPermissionRequest,
   KernelPermissionRequestId,
 } from '../../contracts/permissions.js'
+import type {
+  RuntimeSkillCatalogSnapshot,
+  RuntimeSkillDescriptor,
+  RuntimeSkillPromptContextRequest,
+  RuntimeSkillPromptContextResult,
+} from '../../contracts/skill.js'
+import type {
+  RuntimeTaskAssignRequest,
+  RuntimeTaskCreateRequest,
+  RuntimeTaskDescriptor,
+  RuntimeTaskListSnapshot,
+  RuntimeTaskMutationResult,
+  RuntimeTaskUpdateRequest,
+} from '../../contracts/task.js'
 import type { KernelTurnId, KernelTurnSnapshot } from '../../contracts/turn.js'
 import type {
   KernelRuntimeCommand,
@@ -30,6 +89,11 @@ import type {
   KernelRuntimeRunTurnCommand,
   KernelRuntimeSubscribeEventsCommand,
 } from '../../contracts/wire.js'
+import type {
+  RuntimeToolCallRequest,
+  RuntimeToolCallResult,
+  RuntimeToolDescriptor,
+} from '../../contracts/tool.js'
 import { RuntimeConversationBusyError } from '../conversation/RuntimeConversation.js'
 import {
   RuntimeEventBus,
@@ -110,12 +174,221 @@ export type KernelRuntimeWireTurnExecutor = (
   context: KernelRuntimeWireTurnExecutionContext,
 ) => KernelRuntimeWireTurnExecutionResult
 
+type Awaitable<T> = T | Promise<T>
+
+export type KernelRuntimeWireCommandCatalog = {
+  listCommands(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<readonly RuntimeCommandGraphEntry[]>
+  executeCommand?(
+    request: RuntimeCommandExecuteRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimeCommandExecutionResult>
+}
+
+export type KernelRuntimeWireToolCatalog = {
+  listTools(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<readonly RuntimeToolDescriptor[]>
+  callTool?(
+    request: RuntimeToolCallRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimeToolCallResult>
+}
+
+export type KernelRuntimeWireMcpRegistry = {
+  listServers(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<readonly RuntimeMcpServerRef[]>
+  listResources(
+    serverName?: string,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<readonly RuntimeMcpResourceRef[]>
+  listToolBindings(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<readonly RuntimeMcpToolBinding[]>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<void | Partial<RuntimeMcpRegistrySnapshot>>
+  connectServer?(
+    request: RuntimeMcpConnectRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimeMcpLifecycleResult>
+  authenticateServer?(
+    request: RuntimeMcpAuthRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimeMcpLifecycleResult>
+  setServerEnabled?(
+    request: RuntimeMcpSetEnabledRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimeMcpLifecycleResult>
+}
+
+export type KernelRuntimeWireHookCatalog = {
+  listHooks(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<readonly RuntimeHookDescriptor[]>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<void | Partial<RuntimeHookRegistrySnapshot>>
+  runHook?(
+    request: RuntimeHookRunRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimeHookRunResult>
+  registerHook?(
+    request: RuntimeHookRegisterRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimeHookMutationResult>
+}
+
+export type KernelRuntimeWireSkillCatalog = {
+  listSkills(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<readonly RuntimeSkillDescriptor[]>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<void | Partial<RuntimeSkillCatalogSnapshot>>
+  resolvePromptContext?(
+    request: RuntimeSkillPromptContextRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimeSkillPromptContextResult>
+}
+
+export type KernelRuntimeWirePluginCatalog = {
+  listPlugins(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<{
+    plugins: readonly RuntimePluginDescriptor[]
+    errors?: readonly RuntimePluginErrorDescriptor[]
+  }>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<void | Partial<RuntimePluginCatalogSnapshot>>
+  setPluginEnabled?(
+    request: RuntimePluginSetEnabledRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimePluginMutationResult>
+  installPlugin?(
+    request: RuntimePluginInstallRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimePluginMutationResult>
+  uninstallPlugin?(
+    request: RuntimePluginUninstallRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimePluginMutationResult>
+  updatePlugin?(
+    request: RuntimePluginUpdateRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): Awaitable<RuntimePluginMutationResult>
+}
+
+export type KernelRuntimeWireAgentRegistry = {
+  listAgents(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<RuntimeAgentRegistrySnapshot>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<void | Partial<RuntimeAgentRegistrySnapshot>>
+  spawnAgent?(
+    request: RuntimeAgentSpawnRequest,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeAgentSpawnResult>
+  listAgentRuns?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): Awaitable<RuntimeAgentRunListSnapshot>
+  getAgentRun?(
+    runId: string,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeAgentRunDescriptor | null>
+  getAgentOutput?(
+    request: RuntimeAgentRunOutputRequest,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeAgentRunOutput>
+  cancelAgentRun?(
+    request: RuntimeAgentRunCancelRequest,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeAgentRunCancelResult>
+}
+
+export type KernelRuntimeWireTaskRegistry = {
+  listTasks(
+    taskListId?: string,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeTaskListSnapshot>
+  getTask(
+    taskId: string,
+    taskListId?: string,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeTaskDescriptor | null>
+  createTask?(
+    request: RuntimeTaskCreateRequest,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeTaskMutationResult>
+  updateTask?(
+    request: RuntimeTaskUpdateRequest,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeTaskMutationResult>
+  assignTask?(
+    request: RuntimeTaskAssignRequest,
+    context?: {
+      cwd?: string
+      metadata?: Record<string, unknown>
+    },
+  ): Awaitable<RuntimeTaskMutationResult>
+}
+
 export type KernelRuntimeWireRouterOptions = {
   runtimeId: KernelRuntimeId
   workspacePath: string
   eventBus?: RuntimeEventBus
   conversationSnapshotStore?: KernelRuntimeWireConversationSnapshotStore
   capabilityResolver?: KernelRuntimeWireCapabilityResolver
+  commandCatalog?: KernelRuntimeWireCommandCatalog
+  toolCatalog?: KernelRuntimeWireToolCatalog
+  mcpRegistry?: KernelRuntimeWireMcpRegistry
+  hookCatalog?: KernelRuntimeWireHookCatalog
+  skillCatalog?: KernelRuntimeWireSkillCatalog
+  pluginCatalog?: KernelRuntimeWirePluginCatalog
+  agentRegistry?: KernelRuntimeWireAgentRegistry
+  taskRegistry?: KernelRuntimeWireTaskRegistry
   permissionBroker?: KernelRuntimeWirePermissionBroker
   runTurnExecutor?: KernelRuntimeWireTurnExecutor
   createConversation(
@@ -133,8 +406,6 @@ type KernelRuntimeWireHostRecord = {
   disconnectReason?: string
   disconnectPolicy?: KernelRuntimeHostDisconnectPolicy
 }
-
-type Awaitable<T> = T | Promise<T>
 
 export type KernelRuntimeWireConversationRecoverySnapshot = {
   conversation: KernelConversationSnapshot
@@ -218,6 +489,78 @@ export class KernelRuntimeWireRouter {
           return this.handleSubscribeEvents(command)
         case 'reload_capabilities':
           return [await this.handleReloadCapabilities(command)]
+        case 'list_commands':
+          return [await this.handleListCommands(command)]
+        case 'execute_command':
+          return [await this.handleExecuteCommand(command)]
+        case 'list_tools':
+          return [await this.handleListTools(command)]
+        case 'call_tool':
+          return [await this.handleCallTool(command)]
+        case 'list_mcp_servers':
+          return [await this.handleListMcpServers(command)]
+        case 'list_mcp_tools':
+          return [await this.handleListMcpTools(command)]
+        case 'list_mcp_resources':
+          return [await this.handleListMcpResources(command)]
+        case 'reload_mcp':
+          return [await this.handleReloadMcp(command)]
+        case 'connect_mcp':
+          return [await this.handleConnectMcp(command)]
+        case 'authenticate_mcp':
+          return [await this.handleAuthenticateMcp(command)]
+        case 'set_mcp_enabled':
+          return [await this.handleSetMcpEnabled(command)]
+        case 'list_hooks':
+          return [await this.handleListHooks(command)]
+        case 'reload_hooks':
+          return [await this.handleReloadHooks(command)]
+        case 'run_hook':
+          return [await this.handleRunHook(command)]
+        case 'register_hook':
+          return [await this.handleRegisterHook(command)]
+        case 'list_skills':
+          return [await this.handleListSkills(command)]
+        case 'reload_skills':
+          return [await this.handleReloadSkills(command)]
+        case 'resolve_skill_context':
+          return [await this.handleResolveSkillContext(command)]
+        case 'list_plugins':
+          return [await this.handleListPlugins(command)]
+        case 'reload_plugins':
+          return [await this.handleReloadPlugins(command)]
+        case 'set_plugin_enabled':
+          return [await this.handleSetPluginEnabled(command)]
+        case 'install_plugin':
+          return [await this.handleInstallPlugin(command)]
+        case 'uninstall_plugin':
+          return [await this.handleUninstallPlugin(command)]
+        case 'update_plugin':
+          return [await this.handleUpdatePlugin(command)]
+        case 'list_agents':
+          return [await this.handleListAgents(command)]
+        case 'reload_agents':
+          return [await this.handleReloadAgents(command)]
+        case 'spawn_agent':
+          return [await this.handleSpawnAgent(command)]
+        case 'list_agent_runs':
+          return [await this.handleListAgentRuns(command)]
+        case 'get_agent_run':
+          return [await this.handleGetAgentRun(command)]
+        case 'get_agent_output':
+          return [await this.handleGetAgentOutput(command)]
+        case 'cancel_agent_run':
+          return [await this.handleCancelAgentRun(command)]
+        case 'list_tasks':
+          return [await this.handleListTasks(command)]
+        case 'get_task':
+          return [await this.handleGetTask(command)]
+        case 'create_task':
+          return [await this.handleCreateTask(command)]
+        case 'update_task':
+          return [await this.handleUpdateTask(command)]
+        case 'assign_task':
+          return [await this.handleAssignTask(command)]
         case 'publish_host_event':
           return [this.handlePublishHostEvent(command)]
       }
@@ -637,6 +980,1093 @@ export class KernelRuntimeWireRouter {
         descriptors: sanitizeWirePayload(descriptors),
       },
     })
+  }
+
+  private async handleListCommands(
+    command: Extract<KernelRuntimeCommand, { type: 'list_commands' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.commandCatalog) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Command catalog is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('commands', command)
+    const entries = await this.options.commandCatalog.listCommands({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        entries: sanitizeWirePayload(entries),
+      },
+    })
+  }
+
+  private async handleExecuteCommand(
+    command: Extract<KernelRuntimeCommand, { type: 'execute_command' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const executeCommand = this.options.commandCatalog?.executeCommand
+    if (!executeCommand) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Command execution is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('commands', command)
+    const result = await executeCommand(stripWireCommandFields(command), {
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    this.eventBus.emit({
+      type: 'commands.executed',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleListTools(
+    command: Extract<KernelRuntimeCommand, { type: 'list_tools' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.toolCatalog) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Tool catalog is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('tools', command)
+    const tools = await this.options.toolCatalog.listTools({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        tools: sanitizeWirePayload(tools),
+      },
+    })
+  }
+
+  private async handleCallTool(
+    command: Extract<KernelRuntimeCommand, { type: 'call_tool' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const callTool = this.options.toolCatalog?.callTool
+    if (!callTool) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Tool execution is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('tools', command)
+    const result = await callTool(stripWireCommandFields(command), {
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    this.eventBus.emit({
+      type: 'tools.called',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleListMcpServers(
+    command: Extract<KernelRuntimeCommand, { type: 'list_mcp_servers' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.mcpRegistry) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'MCP registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('mcp', command)
+    const servers = await this.options.mcpRegistry.listServers({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        servers: sanitizeWirePayload(servers),
+      },
+    })
+  }
+
+  private async handleListMcpTools(
+    command: Extract<KernelRuntimeCommand, { type: 'list_mcp_tools' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.mcpRegistry) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'MCP registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('mcp', command)
+    const tools = await this.options.mcpRegistry.listToolBindings({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        tools: sanitizeWirePayload(
+          filterMcpToolBindings(tools, command.serverName),
+        ),
+      },
+    })
+  }
+
+  private async handleListMcpResources(
+    command: Extract<KernelRuntimeCommand, { type: 'list_mcp_resources' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.mcpRegistry) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'MCP registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('mcp', command)
+    const resources = await this.options.mcpRegistry.listResources(
+      command.serverName,
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        resources: sanitizeWirePayload(resources),
+      },
+    })
+  }
+
+  private async handleReloadMcp(
+    command: Extract<KernelRuntimeCommand, { type: 'reload_mcp' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.mcpRegistry) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'MCP registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('mcp', command)
+    await this.options.mcpRegistry.reload?.({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    const snapshot = await this.readMcpRegistrySnapshot(command.metadata)
+    this.eventBus.emit({
+      type: 'mcp.reloaded',
+      replayable: true,
+      payload: sanitizeWirePayload(snapshot),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(snapshot),
+    })
+  }
+
+  private async handleConnectMcp(
+    command: Extract<KernelRuntimeCommand, { type: 'connect_mcp' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.mcpRegistry?.connectServer) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'MCP connect is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('mcp', command)
+    const result = await this.options.mcpRegistry.connectServer(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.ackMcpLifecycle(command, result, 'mcp.connected')
+  }
+
+  private async handleAuthenticateMcp(
+    command: Extract<KernelRuntimeCommand, { type: 'authenticate_mcp' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.mcpRegistry?.authenticateServer) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'MCP authentication is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('mcp', command)
+    const result = await this.options.mcpRegistry.authenticateServer(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.ackMcpLifecycle(command, result, 'mcp.authenticated')
+  }
+
+  private async handleSetMcpEnabled(
+    command: Extract<KernelRuntimeCommand, { type: 'set_mcp_enabled' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.mcpRegistry?.setServerEnabled) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'MCP enable/disable is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('mcp', command)
+    const result = await this.options.mcpRegistry.setServerEnabled(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.ackMcpLifecycle(command, result, 'mcp.enabled_changed')
+  }
+
+  private ackMcpLifecycle(
+    command: Extract<
+      KernelRuntimeCommand,
+      { type: 'connect_mcp' | 'authenticate_mcp' | 'set_mcp_enabled' }
+    >,
+    result: RuntimeMcpLifecycleResult,
+    eventType: string,
+  ): KernelRuntimeEnvelopeBase {
+    const payload = sanitizeWirePayload(result)
+    this.eventBus.emit({
+      type: eventType,
+      replayable: true,
+      payload,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload,
+    })
+  }
+
+  private async readMcpRegistrySnapshot(
+    metadata: Record<string, unknown> | undefined,
+  ): Promise<RuntimeMcpRegistrySnapshot> {
+    const context = {
+      cwd: this.options.workspacePath,
+      metadata,
+    }
+    const [servers, resources, toolBindings] = await Promise.all([
+      this.options.mcpRegistry!.listServers(context),
+      this.options.mcpRegistry!.listResources(undefined, context),
+      this.options.mcpRegistry!.listToolBindings(context),
+    ])
+    return { servers, resources, toolBindings }
+  }
+
+  private async handleListHooks(
+    command: Extract<KernelRuntimeCommand, { type: 'list_hooks' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.hookCatalog) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Hook catalog is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('hooks', command)
+    const hooks = await this.options.hookCatalog.listHooks({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        hooks: sanitizeWirePayload(hooks),
+      },
+    })
+  }
+
+  private async handleReloadHooks(
+    command: Extract<KernelRuntimeCommand, { type: 'reload_hooks' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.hookCatalog) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Hook catalog is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('hooks', command)
+    await this.options.hookCatalog.reload?.({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    const snapshot: RuntimeHookRegistrySnapshot = {
+      hooks: await this.options.hookCatalog.listHooks({
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      }),
+    }
+    this.eventBus.emit({
+      type: 'hooks.reloaded',
+      replayable: true,
+      payload: sanitizeWirePayload(snapshot),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(snapshot),
+    })
+  }
+
+  private async handleRunHook(
+    command: Extract<KernelRuntimeCommand, { type: 'run_hook' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.hookCatalog?.runHook) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Hook run is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('hooks', command)
+    const result = await this.options.hookCatalog.runHook(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    this.eventBus.emit({
+      type: 'hooks.ran',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleRegisterHook(
+    command: Extract<KernelRuntimeCommand, { type: 'register_hook' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.hookCatalog?.registerHook) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Hook registration is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('hooks', command)
+    const result = await this.options.hookCatalog.registerHook(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    this.eventBus.emit({
+      type: 'hooks.registered',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleListSkills(
+    command: Extract<KernelRuntimeCommand, { type: 'list_skills' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.skillCatalog) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Skill catalog is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('skills', command)
+    const skills = await this.options.skillCatalog.listSkills({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        skills: sanitizeWirePayload(skills),
+      },
+    })
+  }
+
+  private async handleReloadSkills(
+    command: Extract<KernelRuntimeCommand, { type: 'reload_skills' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.skillCatalog) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Skill catalog is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('skills', command)
+    await this.options.skillCatalog.reload?.({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    const snapshot: RuntimeSkillCatalogSnapshot = {
+      skills: await this.options.skillCatalog.listSkills({
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      }),
+    }
+    this.eventBus.emit({
+      type: 'skills.reloaded',
+      replayable: true,
+      payload: sanitizeWirePayload(snapshot),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(snapshot),
+    })
+  }
+
+  private async handleResolveSkillContext(
+    command: Extract<KernelRuntimeCommand, { type: 'resolve_skill_context' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.skillCatalog?.resolvePromptContext) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Skill prompt context resolution is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('skills', command)
+    const result = await this.options.skillCatalog.resolvePromptContext(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    this.eventBus.emit({
+      type: 'skills.context_resolved',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleListPlugins(
+    command: Extract<KernelRuntimeCommand, { type: 'list_plugins' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.pluginCatalog) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Plugin catalog is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('plugins', command)
+    const snapshot = await this.options.pluginCatalog.listPlugins({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({
+        plugins: snapshot.plugins,
+        errors: snapshot.errors ?? [],
+      }),
+    })
+  }
+
+  private async handleReloadPlugins(
+    command: Extract<KernelRuntimeCommand, { type: 'reload_plugins' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.pluginCatalog) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Plugin catalog is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('plugins', command)
+    await this.options.pluginCatalog.reload?.({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    const listed = await this.options.pluginCatalog.listPlugins({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    const snapshot: RuntimePluginCatalogSnapshot = {
+      plugins: listed.plugins,
+      errors: listed.errors ?? [],
+    }
+    this.eventBus.emit({
+      type: 'plugins.reloaded',
+      replayable: true,
+      payload: sanitizeWirePayload(snapshot),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(snapshot),
+    })
+  }
+
+  private async handleSetPluginEnabled(
+    command: Extract<KernelRuntimeCommand, { type: 'set_plugin_enabled' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.pluginCatalog?.setPluginEnabled) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Plugin enable/disable is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('plugins', command)
+    const result = await this.options.pluginCatalog.setPluginEnabled(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    this.eventBus.emit({
+      type: 'plugins.enabled_changed',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleInstallPlugin(
+    command: Extract<KernelRuntimeCommand, { type: 'install_plugin' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.pluginCatalog?.installPlugin) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Plugin install is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('plugins', command)
+    const result = await this.options.pluginCatalog.installPlugin(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    this.eventBus.emit({
+      type: 'plugins.installed',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleUninstallPlugin(
+    command: Extract<KernelRuntimeCommand, { type: 'uninstall_plugin' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.pluginCatalog?.uninstallPlugin) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Plugin uninstall is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('plugins', command)
+    const result = await this.options.pluginCatalog.uninstallPlugin(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    this.eventBus.emit({
+      type: 'plugins.uninstalled',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleUpdatePlugin(
+    command: Extract<KernelRuntimeCommand, { type: 'update_plugin' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.pluginCatalog?.updatePlugin) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Plugin update is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('plugins', command)
+    const result = await this.options.pluginCatalog.updatePlugin(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    this.eventBus.emit({
+      type: 'plugins.updated',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleListAgents(
+    command: Extract<KernelRuntimeCommand, { type: 'list_agents' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.agentRegistry) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Agent registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('agents', command)
+    const snapshot = await this.options.agentRegistry.listAgents({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(snapshot),
+    })
+  }
+
+  private async handleReloadAgents(
+    command: Extract<KernelRuntimeCommand, { type: 'reload_agents' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.agentRegistry) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Agent registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('agents', command)
+    await this.options.agentRegistry.reload?.({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    const snapshot = await this.options.agentRegistry.listAgents({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    this.eventBus.emit({
+      type: 'agents.reloaded',
+      replayable: true,
+      payload: sanitizeWirePayload(snapshot),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(snapshot),
+    })
+  }
+
+  private async handleSpawnAgent(
+    command: Extract<KernelRuntimeCommand, { type: 'spawn_agent' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.agentRegistry?.spawnAgent) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Agent spawner is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('agents', command)
+    const result = await this.options.agentRegistry.spawnAgent(
+      stripWireCommandFields(command),
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    this.eventBus.emit({
+      type: 'agents.spawned',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleListAgentRuns(
+    command: Extract<KernelRuntimeCommand, { type: 'list_agent_runs' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const listAgentRuns = this.options.agentRegistry?.listAgentRuns
+    if (!listAgentRuns) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Agent run registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('agents', command)
+    const snapshot = await listAgentRuns({
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(snapshot),
+    })
+  }
+
+  private async handleGetAgentRun(
+    command: Extract<KernelRuntimeCommand, { type: 'get_agent_run' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const getAgentRun = this.options.agentRegistry?.getAgentRun
+    if (!getAgentRun) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Agent run registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('agents', command)
+    const run = await getAgentRun(command.runId, {
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        run: sanitizeWirePayload(run),
+      },
+    })
+  }
+
+  private async handleGetAgentOutput(
+    command: Extract<KernelRuntimeCommand, { type: 'get_agent_output' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const getAgentOutput = this.options.agentRegistry?.getAgentOutput
+    if (!getAgentOutput) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Agent run output is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('agents', command)
+    const output = await getAgentOutput(stripWireCommandFields(command), {
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(output),
+    })
+  }
+
+  private async handleCancelAgentRun(
+    command: Extract<KernelRuntimeCommand, { type: 'cancel_agent_run' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const cancelAgentRun = this.options.agentRegistry?.cancelAgentRun
+    if (!cancelAgentRun) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Agent run cancellation is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('agents', command)
+    const result = await cancelAgentRun(stripWireCommandFields(command), {
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    if (result.cancelled) {
+      this.eventBus.emit({
+        type: 'agents.run.cancelled',
+        replayable: true,
+        payload: sanitizeWirePayload(result),
+        metadata: command.metadata,
+      })
+    }
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleListTasks(
+    command: Extract<KernelRuntimeCommand, { type: 'list_tasks' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.taskRegistry) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Task registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('tasks', command)
+    const snapshot = await this.options.taskRegistry.listTasks(
+      command.taskListId,
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(snapshot),
+    })
+  }
+
+  private async handleGetTask(
+    command: Extract<KernelRuntimeCommand, { type: 'get_task' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.taskRegistry) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Task registry is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('tasks', command)
+    const task = await this.options.taskRegistry.getTask(
+      command.taskId,
+      command.taskListId,
+      {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: {
+        task: sanitizeWirePayload(task),
+      },
+    })
+  }
+
+  private async handleCreateTask(
+    command: Extract<KernelRuntimeCommand, { type: 'create_task' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const createTask = this.options.taskRegistry?.createTask
+    if (!createTask) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Task mutator is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('tasks', command)
+    const result = await createTask(stripWireCommandFields(command), {
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    this.eventBus.emit({
+      type: 'tasks.created',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleUpdateTask(
+    command: Extract<KernelRuntimeCommand, { type: 'update_task' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const updateTask = this.options.taskRegistry?.updateTask
+    if (!updateTask) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Task mutator is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('tasks', command)
+    const result = await updateTask(stripWireCommandFields(command), {
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    this.eventBus.emit({
+      type: 'tasks.updated',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async handleAssignTask(
+    command: Extract<KernelRuntimeCommand, { type: 'assign_task' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    const assignTask = this.options.taskRegistry?.assignTask
+    if (!assignTask) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Task mutator is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('tasks', command)
+    const result = await assignTask(stripWireCommandFields(command), {
+      cwd: this.options.workspacePath,
+      metadata: command.metadata,
+    })
+    this.eventBus.emit({
+      type: 'tasks.assigned',
+      replayable: true,
+      payload: sanitizeWirePayload(result),
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload(result),
+    })
+  }
+
+  private async requireCatalogCapability(
+    name: KernelCapabilityName,
+    command: Pick<KernelRuntimeCommand, 'requestId' | 'metadata'>,
+  ): Promise<void> {
+    try {
+      await this.options.capabilityResolver?.requireCapability?.(name, {
+        cwd: this.options.workspacePath,
+        metadata: command.metadata,
+      })
+    } catch {
+      throw new KernelRuntimeWireCapabilityUnavailableError(command.requestId, [
+        name,
+      ])
+    }
   }
 
   private handlePublishHostEvent(
@@ -1112,6 +2542,23 @@ function sanitizeWirePayload<T>(value: T): T {
   ) as T
 }
 
+function stripWireCommandFields<
+  TCommand extends {
+    schemaVersion: string
+    type: string
+    requestId: string
+    metadata?: Record<string, unknown>
+  },
+>(command: TCommand): Omit<TCommand, 'schemaVersion' | 'type' | 'requestId'> {
+  const {
+    schemaVersion: _schemaVersion,
+    type: _type,
+    requestId: _requestId,
+    ...payload
+  } = command
+  return payload
+}
+
 function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
   return (
     typeof value === 'object' && value !== null && Symbol.asyncIterator in value
@@ -1190,6 +2637,16 @@ function isPermissionDecisionNotFoundError(error: unknown): boolean {
   return (
     error instanceof Error && error.name === 'RuntimePermissionDecisionError'
   )
+}
+
+function filterMcpToolBindings(
+  bindings: readonly RuntimeMcpToolBinding[],
+  serverName: string | undefined,
+): readonly RuntimeMcpToolBinding[] {
+  if (!serverName) {
+    return bindings
+  }
+  return bindings.filter(binding => binding.server === serverName)
 }
 
 function getCapabilityIntentNames(

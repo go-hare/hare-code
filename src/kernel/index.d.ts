@@ -79,6 +79,144 @@ export type KernelRuntimeEventSink = (
   envelope: KernelRuntimeEnvelopeBase,
 ) => void
 
+export type KernelRuntimeEventCategory =
+  | 'runtime'
+  | 'host'
+  | 'conversation'
+  | 'turn'
+  | 'permission'
+  | 'capability'
+  | 'compatibility'
+  | 'extension'
+
+export type KernelRuntimeEventScope = 'runtime' | 'conversation' | 'turn'
+
+export type KernelRuntimeEventTaxonomyEntry = {
+  readonly type: string
+  readonly category: KernelRuntimeEventCategory
+  readonly scope: KernelRuntimeEventScope
+  readonly terminal?: boolean
+  readonly compatibility?: boolean
+}
+
+export type KernelRuntimeEventType =
+  | 'runtime.ready'
+  | 'host.connected'
+  | 'host.reconnected'
+  | 'host.disconnected'
+  | 'host.focus_changed'
+  | 'conversation.ready'
+  | 'conversation.recovered'
+  | 'conversation.disposed'
+  | 'conversation.snapshot_failed'
+  | 'turn.started'
+  | 'turn.abort_requested'
+  | 'turn.output_delta'
+  | 'turn.delta'
+  | 'turn.progress'
+  | 'turn.completed'
+  | 'turn.failed'
+  | 'permission.requested'
+  | 'permission.resolved'
+  | 'capabilities.required'
+  | 'capabilities.reloaded'
+  | 'commands.executed'
+  | 'tools.called'
+  | 'mcp.reloaded'
+  | 'mcp.connected'
+  | 'mcp.authenticated'
+  | 'mcp.enabled_changed'
+  | 'hooks.reloaded'
+  | 'hooks.ran'
+  | 'hooks.registered'
+  | 'skills.reloaded'
+  | 'skills.context_resolved'
+  | 'plugins.reloaded'
+  | 'plugins.enabled_changed'
+  | 'plugins.installed'
+  | 'plugins.uninstalled'
+  | 'plugins.updated'
+  | 'agents.reloaded'
+  | 'agents.spawned'
+  | 'agents.run.cancelled'
+  | 'tasks.created'
+  | 'tasks.updated'
+  | 'tasks.assigned'
+  | 'headless.sdk_message'
+
+export type KernelEventType = KernelRuntimeEventType | (string & {})
+
+export type KernelTurnEventType =
+  | 'turn.started'
+  | 'turn.abort_requested'
+  | 'turn.output_delta'
+  | 'turn.delta'
+  | 'turn.progress'
+  | 'turn.completed'
+  | 'turn.failed'
+
+export declare const KERNEL_RUNTIME_EVENT_TAXONOMY: readonly KernelRuntimeEventTaxonomyEntry[]
+
+export declare const KERNEL_RUNTIME_EVENT_TYPES: readonly KernelRuntimeEventType[]
+
+export type KernelRuntimeEventEnvelope =
+  KernelRuntimeEnvelopeBase<KernelEvent> & {
+    kind: 'event'
+    payload: KernelEvent
+  }
+
+export type KnownKernelRuntimeEventEnvelope<
+  TType extends KernelRuntimeEventType = KernelRuntimeEventType,
+> = KernelRuntimeEventEnvelope & {
+  payload: KernelEvent & { type: TType }
+}
+
+export type KernelTurnOutputDeltaEvent =
+  KnownKernelRuntimeEventEnvelope<'turn.output_delta'>
+
+export type KernelTurnCompletedEvent =
+  KnownKernelRuntimeEventEnvelope<'turn.completed'>
+
+export type KernelTurnFailedEvent =
+  KnownKernelRuntimeEventEnvelope<'turn.failed'>
+
+export type KernelKnownEvent = KnownKernelRuntimeEventEnvelope
+
+export type KernelRuntimeEventHandler = (
+  envelope: KernelRuntimeEventEnvelope,
+) => void
+
+export declare function isKnownKernelRuntimeEventType(
+  type: string,
+): type is KernelRuntimeEventType
+
+export declare function getKernelRuntimeEventType(
+  input: KernelRuntimeEnvelopeBase | KernelEvent | unknown,
+): string | undefined
+
+export declare function getKernelRuntimeEventCategory(
+  input: KernelRuntimeEnvelopeBase | KernelEvent | string | unknown,
+): KernelRuntimeEventCategory | undefined
+
+export declare function getKernelRuntimeEventTaxonomyEntry(
+  type: string,
+): KernelRuntimeEventTaxonomyEntry | undefined
+
+export declare function isKernelRuntimeEventEnvelope(
+  envelope: KernelRuntimeEnvelopeBase,
+): envelope is KernelRuntimeEventEnvelope
+
+export declare function isKernelRuntimeEventOfType<
+  TType extends KernelRuntimeEventType,
+>(
+  envelope: KernelRuntimeEnvelopeBase,
+  type: TType,
+): envelope is KnownKernelRuntimeEventEnvelope<TType>
+
+export declare function isKernelTurnTerminalEvent(
+  envelope: KernelRuntimeEnvelopeBase,
+): envelope is KnownKernelRuntimeEventEnvelope<'turn.completed' | 'turn.failed'>
+
 export type KernelRuntimeEventMessage = {
   type: 'kernel_runtime_event'
   envelope: KernelRuntimeEnvelopeBase
@@ -187,6 +325,15 @@ export type KernelRuntimeTrustLevel =
   | 'remote'
   | 'untrusted'
 
+export type KernelRuntimeState =
+  | 'created'
+  | 'starting'
+  | 'ready'
+  | 'stopping'
+  | 'stopped'
+  | 'failed'
+  | 'disposed'
+
 export type KernelRuntimeHostIdentity = {
   kind: KernelRuntimeHostKind
   id: string
@@ -223,11 +370,731 @@ export type KernelCapabilityDescriptor = {
   metadata?: Record<string, unknown>
 }
 
+export type KernelCapabilityFamily =
+  | 'core'
+  | 'execution'
+  | 'model'
+  | 'extension'
+  | 'security'
+  | 'host'
+  | 'autonomy'
+  | 'observability'
+
+export declare const KERNEL_CAPABILITY_FAMILIES: readonly KernelCapabilityFamily[]
+
+export type KernelCapabilityView = KernelCapabilityDescriptor & {
+  family: KernelCapabilityFamily
+  ready: boolean
+  unavailable: boolean
+  optional: boolean
+  loaded: boolean
+}
+
+export type KernelCapabilityFilter = {
+  names?: readonly KernelCapabilityName[]
+  family?: KernelCapabilityFamily | readonly KernelCapabilityFamily[]
+  status?: KernelCapabilityStatus | readonly KernelCapabilityStatus[]
+  lazy?: boolean
+  reloadable?: boolean
+  optional?: boolean
+  unavailable?: boolean
+}
+
+export type KernelCapabilityGroups = Record<
+  KernelCapabilityFamily,
+  readonly KernelCapabilityView[]
+>
+
+export declare function getKernelCapabilityFamily(
+  capability: KernelCapabilityDescriptor | KernelCapabilityName,
+): KernelCapabilityFamily
+
+export declare function toKernelCapabilityView(
+  descriptor: KernelCapabilityDescriptor,
+): KernelCapabilityView
+
+export declare function toKernelCapabilityViews(
+  descriptors: readonly KernelCapabilityDescriptor[],
+): readonly KernelCapabilityView[]
+
+export declare function filterKernelCapabilities(
+  descriptors: readonly KernelCapabilityDescriptor[],
+  filter?: KernelCapabilityFilter,
+): readonly KernelCapabilityView[]
+
+export declare function groupKernelCapabilities(
+  descriptors: readonly KernelCapabilityDescriptor[],
+): KernelCapabilityGroups
+
+export declare function isKernelCapabilityReady(
+  descriptor: KernelCapabilityDescriptor,
+): boolean
+
+export declare function isKernelCapabilityUnavailable(
+  descriptor: KernelCapabilityDescriptor,
+): boolean
+
 export type KernelCapabilityReloadScope =
   | { type: 'capability'; name: KernelCapabilityName }
   | { type: 'dependency-closure'; name: KernelCapabilityName }
   | { type: 'workspace' }
   | { type: 'runtime' }
+
+export type KernelRuntimeCommandKind =
+  | 'prompt'
+  | 'local'
+  | 'local-jsx'
+  | 'workflow'
+
+export type KernelRuntimeCommandDescriptor = {
+  name: string
+  description: string
+  kind: KernelRuntimeCommandKind
+  aliases?: readonly string[]
+  availability?: readonly string[]
+  argumentHint?: string
+  bridgeSafe?: boolean
+  disableModelInvocation?: boolean
+  hidden?: boolean
+  immediate?: boolean
+  sensitive?: boolean
+  terminalOnly?: boolean
+  whenToUse?: string
+}
+
+export type KernelCommandDescriptor = KernelRuntimeCommandDescriptor
+
+export type KernelCommandEntry = {
+  descriptor: KernelCommandDescriptor
+  source?: string
+  loadedFrom?: string
+  supportsNonInteractive: boolean
+  modelInvocable: boolean
+}
+
+export type KernelCommandFilter = {
+  names?: readonly string[]
+  kind?: KernelRuntimeCommandKind | readonly KernelRuntimeCommandKind[]
+  source?: string | readonly string[]
+  loadedFrom?: string | readonly string[]
+  supportsNonInteractive?: boolean
+  modelInvocable?: boolean
+  hidden?: boolean
+  terminalOnly?: boolean
+}
+
+export type KernelCommandExecuteRequest = {
+  name: string
+  args?: string
+  source?: 'cli' | 'repl' | 'bridge' | 'daemon' | 'sdk' | 'test'
+  metadata?: Record<string, unknown>
+}
+
+export type KernelCommandResult =
+  | { type: 'skip' }
+  | { type: 'text'; text: string; display?: 'skip' | 'system' | 'user' }
+  | {
+      type: 'query'
+      prompt?: string
+      text?: string
+      metaMessages?: readonly string[]
+      nextInput?: string
+      submitNextInput?: boolean
+    }
+  | { type: 'compact'; text?: string; metaMessages?: readonly string[] }
+
+export type KernelCommandExecutionResult = {
+  name: string
+  kind?: KernelRuntimeCommandKind
+  result: KernelCommandResult
+  metadata?: Record<string, unknown>
+}
+
+export type KernelRuntimeToolSafety = 'read' | 'write' | 'destructive'
+
+export type KernelRuntimeToolSource =
+  | 'builtin'
+  | 'mcp'
+  | 'plugin'
+  | 'skill'
+  | 'host'
+
+export type KernelToolDescriptor = {
+  name: string
+  description: string
+  source: KernelRuntimeToolSource
+  provenance?: {
+    source: KernelRuntimeToolSource
+    label?: string
+    serverName?: string
+    toolName?: string
+  }
+  aliases?: readonly string[]
+  inputSchema?: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
+  safety: KernelRuntimeToolSafety
+  isConcurrencySafe?: boolean
+  isDeferred?: boolean
+  isMcp?: boolean
+  isOpenWorld?: boolean
+  requiresUserInteraction?: boolean
+}
+
+export type KernelToolFilter = {
+  names?: readonly string[]
+  source?: KernelRuntimeToolSource | readonly KernelRuntimeToolSource[]
+  safety?: KernelRuntimeToolSafety | readonly KernelRuntimeToolSafety[]
+  aliases?: readonly string[]
+  mcp?: boolean
+  deferred?: boolean
+  concurrencySafe?: boolean
+  openWorld?: boolean
+  requiresUserInteraction?: boolean
+}
+
+export type KernelToolCallRequest = {
+  toolName: string
+  input: unknown
+  permissionMode?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelToolCallResult = {
+  toolName: string
+  output: unknown
+  isError?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export type KernelMcpTransport =
+  | 'stdio'
+  | 'sse'
+  | 'sse-ide'
+  | 'http'
+  | 'ws'
+  | 'ws-ide'
+  | 'sdk'
+  | 'claudeai-proxy'
+  | 'unknown'
+
+export type KernelMcpConnectionState =
+  | 'pending'
+  | 'connected'
+  | 'needs-auth'
+  | 'failed'
+  | 'disabled'
+
+export type KernelMcpServerRef = {
+  name: string
+  transport: KernelMcpTransport
+  state: KernelMcpConnectionState
+  scope?: string
+  capabilities?: Record<string, unknown>
+  error?: string
+}
+
+export type KernelMcpResourceRef = {
+  server: string
+  uri: string
+  name?: string
+  mimeType?: string
+}
+
+export type KernelMcpToolBinding = {
+  server: string
+  serverToolName: string
+  runtimeToolName: string
+}
+
+export type KernelMcpSnapshot = {
+  servers: readonly KernelMcpServerRef[]
+  resources: readonly KernelMcpResourceRef[]
+  toolBindings: readonly KernelMcpToolBinding[]
+}
+
+export type KernelMcpConnectRequest = {
+  serverName: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelMcpAuthAction = 'authenticate' | 'clear'
+
+export type KernelMcpAuthRequest = {
+  serverName: string
+  action?: KernelMcpAuthAction
+  callbackUrl?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelMcpSetEnabledRequest = {
+  serverName: string
+  enabled: boolean
+  metadata?: Record<string, unknown>
+}
+
+export type KernelMcpLifecycleResult = {
+  serverName: string
+  state: KernelMcpConnectionState
+  server?: KernelMcpServerRef
+  snapshot?: Partial<KernelMcpSnapshot>
+  authorizationUrl?: string
+  message?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelHookType =
+  | 'command'
+  | 'prompt'
+  | 'agent'
+  | 'http'
+  | 'callback'
+  | 'function'
+  | 'unknown'
+
+export type KernelHookSource =
+  | 'userSettings'
+  | 'projectSettings'
+  | 'localSettings'
+  | 'policySettings'
+  | 'pluginHook'
+  | 'sessionHook'
+  | 'builtinHook'
+  | 'unknown'
+
+export type KernelHookDescriptor = {
+  event: string
+  type: KernelHookType
+  source: KernelHookSource
+  matcher?: string
+  pluginName?: string
+  displayName?: string
+  timeoutSeconds?: number
+  async?: boolean
+  once?: boolean
+}
+
+export type KernelHookRunRequest = {
+  event: string
+  input?: unknown
+  matcher?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelHookRunError = {
+  message: string
+  hook?: KernelHookDescriptor
+  code?: string
+}
+
+export type KernelHookRunResult = {
+  event: string
+  handled: boolean
+  outputs?: readonly unknown[]
+  errors?: readonly KernelHookRunError[]
+  metadata?: Record<string, unknown>
+}
+
+export type KernelHookRegisterRequest = {
+  hook: KernelHookDescriptor
+  handlerRef?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelHookMutationResult = {
+  hook: KernelHookDescriptor
+  registered: boolean
+  handlerRef?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelSkillSource =
+  | 'userSettings'
+  | 'projectSettings'
+  | 'localSettings'
+  | 'policySettings'
+  | 'builtin'
+  | 'bundled'
+  | 'plugin'
+  | 'mcp'
+  | 'managed'
+  | 'unknown'
+
+export type KernelSkillContext = 'inline' | 'fork' | 'unknown'
+
+export type KernelSkillDescriptor = {
+  name: string
+  description: string
+  source: KernelSkillSource
+  loadedFrom?: string
+  aliases?: readonly string[]
+  whenToUse?: string
+  version?: string
+  userInvocable?: boolean
+  modelInvocable: boolean
+  context?: KernelSkillContext
+  agent?: string
+  allowedTools?: readonly string[]
+  paths?: readonly string[]
+  contentLength?: number
+  plugin?: {
+    name?: string
+    repository?: string
+  }
+}
+
+export type KernelSkillPromptContextRequest = {
+  name: string
+  args?: string
+  input?: unknown
+  metadata?: Record<string, unknown>
+}
+
+export type KernelSkillPromptContextResult = {
+  name: string
+  descriptor?: KernelSkillDescriptor
+  context: KernelSkillContext
+  content?: string
+  messages?: readonly unknown[]
+  allowedTools?: readonly string[]
+  metadata?: Record<string, unknown>
+}
+
+export type KernelPluginStatus = 'enabled' | 'disabled'
+
+export type KernelPluginComponents = {
+  commands: boolean
+  agents: boolean
+  skills: boolean
+  hooks: boolean
+  mcp: boolean
+  lsp: boolean
+  outputStyles: boolean
+  settings: boolean
+}
+
+export type KernelPluginDescriptor = {
+  name: string
+  source: string
+  path: string
+  repository: string
+  status: KernelPluginStatus
+  enabled: boolean
+  builtin?: boolean
+  version?: string
+  sha?: string
+  description?: string
+  components: KernelPluginComponents
+}
+
+export type KernelPluginErrorDescriptor = {
+  type: string
+  source: string
+  plugin?: string
+  message?: string
+}
+
+export type KernelPluginSnapshot = {
+  plugins: readonly KernelPluginDescriptor[]
+  errors: readonly KernelPluginErrorDescriptor[]
+}
+
+export type KernelPluginScope = 'user' | 'project' | 'local'
+
+export type KernelPluginSetEnabledRequest = {
+  name: string
+  enabled: boolean
+  scope?: KernelPluginScope
+  metadata?: Record<string, unknown>
+}
+
+export type KernelPluginInstallRequest = {
+  name: string
+  scope?: KernelPluginScope
+  metadata?: Record<string, unknown>
+}
+
+export type KernelPluginUninstallRequest = {
+  name: string
+  scope?: KernelPluginScope
+  keepData?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export type KernelPluginUpdateRequest = {
+  name: string
+  scope?: KernelPluginScope
+  metadata?: Record<string, unknown>
+}
+
+export type KernelPluginMutationResult = {
+  name: string
+  action?: 'set_enabled' | 'install' | 'uninstall' | 'update'
+  success?: boolean
+  enabled: boolean
+  status: KernelPluginStatus
+  plugin?: KernelPluginDescriptor
+  snapshot?: Partial<KernelPluginSnapshot>
+  message?: string
+  oldVersion?: string
+  newVersion?: string
+  alreadyUpToDate?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export type KernelAgentSource =
+  | 'built-in'
+  | 'plugin'
+  | 'userSettings'
+  | 'projectSettings'
+  | 'localSettings'
+  | 'flagSettings'
+  | 'policySettings'
+  | 'unknown'
+
+export type KernelAgentMcpServerRef = {
+  name: string
+  inline: boolean
+}
+
+export type KernelAgentDefinitionError = {
+  path: string
+  error: string
+}
+
+export type KernelAgentDescriptor = {
+  agentType: string
+  whenToUse: string
+  source: KernelAgentSource
+  active: boolean
+  filename?: string
+  baseDir?: string
+  plugin?: string
+  color?: string
+  model?: string
+  effort?: string | number
+  permissionMode?: string
+  maxTurns?: number
+  background?: boolean
+  hasInitialPrompt?: boolean
+  hasHooks?: boolean
+  tools?: readonly string[]
+  disallowedTools?: readonly string[]
+  skills?: readonly string[]
+  mcpServers?: readonly KernelAgentMcpServerRef[]
+  memory?: 'user' | 'project' | 'local'
+  isolation?: 'worktree' | 'remote'
+  pendingSnapshotUpdate?: {
+    snapshotTimestamp: string
+  }
+}
+
+export type KernelAgentSnapshot = {
+  activeAgents: readonly KernelAgentDescriptor[]
+  allAgents: readonly KernelAgentDescriptor[]
+  failedFiles?: readonly KernelAgentDefinitionError[]
+  allowedAgentTypes?: readonly string[]
+}
+
+export type KernelAgentSpawnRequest = {
+  agentType?: string
+  prompt: string
+  description?: string
+  model?: string
+  runInBackground?: boolean
+  taskId?: string
+  taskListId?: string
+  ownedFiles?: readonly string[]
+  name?: string
+  teamName?: string
+  mode?: string
+  isolation?: 'worktree' | 'remote'
+  cwd?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelAgentSpawnResult = {
+  status:
+    | 'accepted'
+    | 'async_launched'
+    | 'completed'
+    | 'teammate_spawned'
+    | 'remote_launched'
+  prompt: string
+  runId?: string
+  agentType?: string
+  agentId?: string
+  taskId?: string
+  taskListId?: string
+  backgroundTaskId?: string
+  outputFile?: string
+  description?: string
+  isAsync?: boolean
+  canReadOutputFile?: boolean
+  taskLinkingWarning?: string
+  message?: string
+  run?: KernelAgentRunDescriptor
+  metadata?: Record<string, unknown>
+}
+
+export type KernelAgentRunStatus =
+  | 'accepted'
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export type KernelAgentRunError = {
+  message: string
+  code?: string
+  details?: Record<string, unknown>
+}
+
+export type KernelAgentRunDescriptor = {
+  runId: string
+  status: KernelAgentRunStatus
+  prompt: string
+  createdAt: string
+  updatedAt: string
+  agentType?: string
+  agentId?: string
+  description?: string
+  model?: string
+  taskId?: string
+  taskListId?: string
+  backgroundTaskId?: string
+  outputFile?: string
+  outputAvailable?: boolean
+  result?: unknown
+  error?: KernelAgentRunError
+  startedAt?: string
+  completedAt?: string
+  cancelledAt?: string
+  cancelReason?: string
+  runInBackground?: boolean
+  canReadOutputFile?: boolean
+  ownedFiles?: readonly string[]
+  name?: string
+  teamName?: string
+  mode?: string
+  isolation?: 'worktree' | 'remote'
+  cwd?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelAgentOutput = {
+  runId: string
+  available: boolean
+  status?: KernelAgentRunStatus
+  output?: string
+  outputFile?: string
+  truncated?: boolean
+}
+
+export type KernelAgentCancelResult = {
+  runId: string
+  cancelled: boolean
+  status?: KernelAgentRunStatus
+  reason?: string
+  message?: string
+  run?: KernelAgentRunDescriptor | null
+}
+
+export type KernelAgentRunFilter = {
+  runIds?: readonly string[]
+  agentTypes?: readonly string[]
+  statuses?: readonly KernelAgentRunStatus[]
+  taskId?: string
+  taskListId?: string
+  background?: boolean
+}
+
+export type KernelAgentOutputOptions = {
+  tailBytes?: number
+}
+
+export type KernelAgentCancelOptions = {
+  reason?: string
+}
+
+export type KernelCoordinatorTaskStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+
+export type KernelTaskExecutionMetadata = {
+  linkedBackgroundTaskId?: string
+  linkedBackgroundTaskType?: string
+  linkedAgentId?: string
+  completionSuggestedAt?: string
+  completionSuggestedByBackgroundTaskId?: string
+}
+
+export type KernelTaskDescriptor = {
+  id: string
+  subject: string
+  description: string
+  status: KernelCoordinatorTaskStatus
+  taskListId: string
+  activeForm?: string
+  owner?: string
+  blocks: readonly string[]
+  blockedBy: readonly string[]
+  ownedFiles?: readonly string[]
+  execution?: KernelTaskExecutionMetadata
+}
+
+export type KernelTaskSnapshot = {
+  taskListId: string
+  tasks: readonly KernelTaskDescriptor[]
+}
+
+export type KernelTaskMetadataPatch = Record<string, unknown | null>
+
+export type KernelTaskCreateRequest = {
+  taskListId?: string
+  subject: string
+  description: string
+  activeForm?: string
+  owner?: string
+  status?: KernelCoordinatorTaskStatus
+  blocks?: readonly string[]
+  blockedBy?: readonly string[]
+  ownedFiles?: readonly string[]
+  metadata?: KernelTaskMetadataPatch
+}
+
+export type KernelTaskUpdateRequest = {
+  taskId: string
+  taskListId?: string
+  subject?: string
+  description?: string
+  activeForm?: string
+  status?: KernelCoordinatorTaskStatus
+  owner?: string
+  addBlocks?: readonly string[]
+  addBlockedBy?: readonly string[]
+  ownedFiles?: readonly string[]
+  metadata?: KernelTaskMetadataPatch
+}
+
+export type KernelTaskAssignRequest = {
+  taskId: string
+  owner: string
+  taskListId?: string
+  ownedFiles?: readonly string[]
+  status?: KernelCoordinatorTaskStatus
+  metadata?: KernelTaskMetadataPatch
+}
+
+export type KernelTaskMutationResult = {
+  task: KernelTaskDescriptor | null
+  taskListId: string
+  taskId?: string
+  updatedFields: readonly string[]
+  created?: boolean
+  assigned?: boolean
+}
 
 export declare const KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION: 'kernel.runtime.command.v1'
 
@@ -241,6 +1108,42 @@ export type KernelRuntimeCommandType =
   | 'decide_permission'
   | 'dispose_conversation'
   | 'reload_capabilities'
+  | 'list_commands'
+  | 'execute_command'
+  | 'list_tools'
+  | 'call_tool'
+  | 'list_mcp_servers'
+  | 'list_mcp_tools'
+  | 'list_mcp_resources'
+  | 'reload_mcp'
+  | 'connect_mcp'
+  | 'authenticate_mcp'
+  | 'set_mcp_enabled'
+  | 'list_hooks'
+  | 'reload_hooks'
+  | 'run_hook'
+  | 'register_hook'
+  | 'list_skills'
+  | 'reload_skills'
+  | 'resolve_skill_context'
+  | 'list_plugins'
+  | 'reload_plugins'
+  | 'set_plugin_enabled'
+  | 'install_plugin'
+  | 'uninstall_plugin'
+  | 'update_plugin'
+  | 'list_agents'
+  | 'reload_agents'
+  | 'spawn_agent'
+  | 'list_agent_runs'
+  | 'get_agent_run'
+  | 'get_agent_output'
+  | 'cancel_agent_run'
+  | 'list_tasks'
+  | 'get_task'
+  | 'create_task'
+  | 'update_task'
+  | 'assign_task'
   | 'publish_host_event'
   | 'subscribe_events'
   | 'ping'
@@ -319,11 +1222,7 @@ export type KernelPermissionDecisionSource =
 
 export type KernelPermissionRequestId = string
 
-export type KernelPermissionRisk =
-  | 'low'
-  | 'medium'
-  | 'high'
-  | 'destructive'
+export type KernelPermissionRisk = 'low' | 'medium' | 'high' | 'destructive'
 
 export type KernelPermissionRequest = {
   permissionRequestId: KernelPermissionRequestId
@@ -410,6 +1309,228 @@ export type KernelRuntimeReloadCapabilitiesCommand =
     capabilities?: readonly string[]
   }
 
+export type KernelRuntimeListCommandsCommand =
+  KernelRuntimeCommandBase<'list_commands'>
+
+export type KernelRuntimeListCommandsResult = {
+  entries: readonly KernelCommandEntry[]
+}
+
+export type KernelRuntimeExecuteCommandCommand =
+  KernelRuntimeCommandBase<'execute_command'> & KernelCommandExecuteRequest
+
+export type KernelRuntimeExecuteCommandResult = KernelCommandExecutionResult
+
+export type KernelRuntimeListToolsCommand =
+  KernelRuntimeCommandBase<'list_tools'>
+
+export type KernelRuntimeListToolsResult = {
+  tools: readonly KernelToolDescriptor[]
+}
+
+export type KernelRuntimeCallToolCommand =
+  KernelRuntimeCommandBase<'call_tool'> & KernelToolCallRequest
+
+export type KernelRuntimeCallToolResult = KernelToolCallResult
+
+export type KernelRuntimeListMcpServersCommand =
+  KernelRuntimeCommandBase<'list_mcp_servers'>
+
+export type KernelRuntimeListMcpServersResult = {
+  servers: readonly KernelMcpServerRef[]
+}
+
+export type KernelRuntimeListMcpToolsCommand =
+  KernelRuntimeCommandBase<'list_mcp_tools'> & {
+    serverName?: string
+  }
+
+export type KernelRuntimeListMcpToolsResult = {
+  tools: readonly KernelMcpToolBinding[]
+}
+
+export type KernelRuntimeListMcpResourcesCommand =
+  KernelRuntimeCommandBase<'list_mcp_resources'> & {
+    serverName?: string
+  }
+
+export type KernelRuntimeListMcpResourcesResult = {
+  resources: readonly KernelMcpResourceRef[]
+}
+
+export type KernelRuntimeReloadMcpCommand =
+  KernelRuntimeCommandBase<'reload_mcp'>
+
+export type KernelRuntimeReloadMcpResult = KernelMcpSnapshot
+
+export type KernelRuntimeConnectMcpCommand =
+  KernelRuntimeCommandBase<'connect_mcp'> & KernelMcpConnectRequest
+
+export type KernelRuntimeConnectMcpResult = KernelMcpLifecycleResult
+
+export type KernelRuntimeAuthenticateMcpCommand =
+  KernelRuntimeCommandBase<'authenticate_mcp'> & KernelMcpAuthRequest
+
+export type KernelRuntimeAuthenticateMcpResult = KernelMcpLifecycleResult
+
+export type KernelRuntimeSetMcpEnabledCommand =
+  KernelRuntimeCommandBase<'set_mcp_enabled'> & KernelMcpSetEnabledRequest
+
+export type KernelRuntimeSetMcpEnabledResult = KernelMcpLifecycleResult
+
+export type KernelRuntimeListHooksCommand =
+  KernelRuntimeCommandBase<'list_hooks'>
+
+export type KernelRuntimeListHooksResult = {
+  hooks: readonly KernelHookDescriptor[]
+}
+
+export type KernelRuntimeReloadHooksCommand =
+  KernelRuntimeCommandBase<'reload_hooks'>
+
+export type KernelRuntimeReloadHooksResult = {
+  hooks: readonly KernelHookDescriptor[]
+}
+
+export type KernelRuntimeRunHookCommand = KernelRuntimeCommandBase<'run_hook'> &
+  KernelHookRunRequest
+
+export type KernelRuntimeRunHookResult = KernelHookRunResult
+
+export type KernelRuntimeRegisterHookCommand =
+  KernelRuntimeCommandBase<'register_hook'> & KernelHookRegisterRequest
+
+export type KernelRuntimeRegisterHookResult = KernelHookMutationResult
+
+export type KernelRuntimeListSkillsCommand =
+  KernelRuntimeCommandBase<'list_skills'>
+
+export type KernelRuntimeListSkillsResult = {
+  skills: readonly KernelSkillDescriptor[]
+}
+
+export type KernelRuntimeReloadSkillsCommand =
+  KernelRuntimeCommandBase<'reload_skills'>
+
+export type KernelRuntimeReloadSkillsResult = {
+  skills: readonly KernelSkillDescriptor[]
+}
+
+export type KernelRuntimeResolveSkillContextCommand =
+  KernelRuntimeCommandBase<'resolve_skill_context'> &
+    KernelSkillPromptContextRequest
+
+export type KernelRuntimeResolveSkillContextResult =
+  KernelSkillPromptContextResult
+
+export type KernelRuntimeListPluginsCommand =
+  KernelRuntimeCommandBase<'list_plugins'>
+
+export type KernelRuntimeListPluginsResult = {
+  plugins: readonly KernelPluginDescriptor[]
+  errors: readonly KernelPluginErrorDescriptor[]
+}
+
+export type KernelRuntimeReloadPluginsCommand =
+  KernelRuntimeCommandBase<'reload_plugins'>
+
+export type KernelRuntimeReloadPluginsResult = KernelPluginSnapshot
+
+export type KernelRuntimeSetPluginEnabledCommand =
+  KernelRuntimeCommandBase<'set_plugin_enabled'> & KernelPluginSetEnabledRequest
+
+export type KernelRuntimeSetPluginEnabledResult = KernelPluginMutationResult
+
+export type KernelRuntimeInstallPluginCommand =
+  KernelRuntimeCommandBase<'install_plugin'> & KernelPluginInstallRequest
+
+export type KernelRuntimeInstallPluginResult = KernelPluginMutationResult
+
+export type KernelRuntimeUninstallPluginCommand =
+  KernelRuntimeCommandBase<'uninstall_plugin'> & KernelPluginUninstallRequest
+
+export type KernelRuntimeUninstallPluginResult = KernelPluginMutationResult
+
+export type KernelRuntimeUpdatePluginCommand =
+  KernelRuntimeCommandBase<'update_plugin'> & KernelPluginUpdateRequest
+
+export type KernelRuntimeUpdatePluginResult = KernelPluginMutationResult
+
+export type KernelRuntimeListAgentsCommand =
+  KernelRuntimeCommandBase<'list_agents'>
+
+export type KernelRuntimeListAgentsResult = KernelAgentSnapshot
+
+export type KernelRuntimeReloadAgentsCommand =
+  KernelRuntimeCommandBase<'reload_agents'>
+
+export type KernelRuntimeReloadAgentsResult = KernelAgentSnapshot
+
+export type KernelRuntimeSpawnAgentCommand =
+  KernelRuntimeCommandBase<'spawn_agent'> & KernelAgentSpawnRequest
+
+export type KernelRuntimeSpawnAgentResult = KernelAgentSpawnResult
+
+export type KernelRuntimeListAgentRunsCommand =
+  KernelRuntimeCommandBase<'list_agent_runs'>
+
+export type KernelRuntimeListAgentRunsResult = {
+  runs: readonly KernelAgentRunDescriptor[]
+}
+
+export type KernelRuntimeGetAgentRunCommand =
+  KernelRuntimeCommandBase<'get_agent_run'> & {
+    runId: string
+  }
+
+export type KernelRuntimeGetAgentRunResult = {
+  run: KernelAgentRunDescriptor | null
+}
+
+export type KernelRuntimeGetAgentOutputCommand =
+  KernelRuntimeCommandBase<'get_agent_output'> & {
+    runId: string
+    tailBytes?: number
+  }
+
+export type KernelRuntimeGetAgentOutputResult = KernelAgentOutput
+
+export type KernelRuntimeCancelAgentRunCommand =
+  KernelRuntimeCommandBase<'cancel_agent_run'> & {
+    runId: string
+    reason?: string
+  }
+
+export type KernelRuntimeCancelAgentRunResult = KernelAgentCancelResult
+
+export type KernelRuntimeListTasksCommand =
+  KernelRuntimeCommandBase<'list_tasks'> & {
+    taskListId?: string
+  }
+
+export type KernelRuntimeListTasksResult = KernelTaskSnapshot
+
+export type KernelRuntimeGetTaskCommand =
+  KernelRuntimeCommandBase<'get_task'> & {
+    taskId: string
+    taskListId?: string
+  }
+
+export type KernelRuntimeGetTaskResult = {
+  task: KernelTaskDescriptor | null
+}
+
+export type KernelRuntimeCreateTaskCommand =
+  KernelRuntimeCommandBase<'create_task'> & KernelTaskCreateRequest
+
+export type KernelRuntimeUpdateTaskCommand =
+  KernelRuntimeCommandBase<'update_task'> & KernelTaskUpdateRequest
+
+export type KernelRuntimeAssignTaskCommand =
+  KernelRuntimeCommandBase<'assign_task'> & KernelTaskAssignRequest
+
+export type KernelRuntimeTaskMutationResult = KernelTaskMutationResult
+
 export type KernelRuntimePublishHostEventCommand =
   KernelRuntimeCommandBase<'publish_host_event'> & {
     event: KernelEvent
@@ -435,6 +1556,42 @@ export type KernelRuntimeCommand =
   | KernelRuntimeDecidePermissionCommand
   | KernelRuntimeDisposeConversationCommand
   | KernelRuntimeReloadCapabilitiesCommand
+  | KernelRuntimeListCommandsCommand
+  | KernelRuntimeExecuteCommandCommand
+  | KernelRuntimeListToolsCommand
+  | KernelRuntimeCallToolCommand
+  | KernelRuntimeListMcpServersCommand
+  | KernelRuntimeListMcpToolsCommand
+  | KernelRuntimeListMcpResourcesCommand
+  | KernelRuntimeReloadMcpCommand
+  | KernelRuntimeConnectMcpCommand
+  | KernelRuntimeAuthenticateMcpCommand
+  | KernelRuntimeSetMcpEnabledCommand
+  | KernelRuntimeListHooksCommand
+  | KernelRuntimeReloadHooksCommand
+  | KernelRuntimeRunHookCommand
+  | KernelRuntimeRegisterHookCommand
+  | KernelRuntimeListSkillsCommand
+  | KernelRuntimeReloadSkillsCommand
+  | KernelRuntimeResolveSkillContextCommand
+  | KernelRuntimeListPluginsCommand
+  | KernelRuntimeReloadPluginsCommand
+  | KernelRuntimeSetPluginEnabledCommand
+  | KernelRuntimeInstallPluginCommand
+  | KernelRuntimeUninstallPluginCommand
+  | KernelRuntimeUpdatePluginCommand
+  | KernelRuntimeListAgentsCommand
+  | KernelRuntimeReloadAgentsCommand
+  | KernelRuntimeSpawnAgentCommand
+  | KernelRuntimeListAgentRunsCommand
+  | KernelRuntimeGetAgentRunCommand
+  | KernelRuntimeGetAgentOutputCommand
+  | KernelRuntimeCancelAgentRunCommand
+  | KernelRuntimeListTasksCommand
+  | KernelRuntimeGetTaskCommand
+  | KernelRuntimeCreateTaskCommand
+  | KernelRuntimeUpdateTaskCommand
+  | KernelRuntimeAssignTaskCommand
   | KernelRuntimePublishHostEventCommand
   | KernelRuntimeSubscribeEventsCommand
   | KernelRuntimePingCommand
@@ -583,6 +1740,222 @@ export type KernelRuntimeWireClient = {
   reloadCapabilities(
     command: KernelRuntimeWireClientCommand<KernelRuntimeReloadCapabilitiesCommand>,
   ): Promise<KernelRuntimeEnvelopeBase>
+  listCommands(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListCommandsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  executeCommand(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeExecuteCommandCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listTools(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListToolsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  callTool(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeCallToolCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listMcpServers(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListMcpServersCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listMcpTools(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListMcpToolsCommand>,
+      'requestId' | 'metadata' | 'serverName'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listMcpResources(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListMcpResourcesCommand>,
+      'requestId' | 'metadata' | 'serverName'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadMcp(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadMcpCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  connectMcp(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeConnectMcpCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  authenticateMcp(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeAuthenticateMcpCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  setMcpEnabled(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeSetMcpEnabledCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listHooks(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListHooksCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadHooks(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadHooksCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  runHook(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeRunHookCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  registerHook(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeRegisterHookCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listSkills(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListSkillsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadSkills(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadSkillsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  resolveSkillContext(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeResolveSkillContextCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listPlugins(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListPluginsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadPlugins(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadPluginsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  setPluginEnabled(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeSetPluginEnabledCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  installPlugin(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeInstallPluginCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  uninstallPlugin(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeUninstallPluginCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  updatePlugin(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeUpdatePluginCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listAgents(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListAgentsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadAgents(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadAgentsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  spawnAgent(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeSpawnAgentCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listAgentRuns(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListAgentRunsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getAgentRun(
+    options: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetAgentRunCommand>,
+      'runId' | 'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getAgentOutput(
+    options: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetAgentOutputCommand>,
+      'runId' | 'tailBytes' | 'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  cancelAgentRun(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeCancelAgentRunCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listTasks(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListTasksCommand>,
+      'requestId' | 'metadata' | 'taskListId'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getTask(
+    options: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetTaskCommand>,
+      'taskId' | 'requestId' | 'metadata' | 'taskListId'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  createTask(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeCreateTaskCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  updateTask(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeUpdateTaskCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  assignTask(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeAssignTaskCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
   publishHostEvent(
     event: KernelEvent,
     options?: { requestId?: string; metadata?: Record<string, unknown> },
@@ -602,6 +1975,10 @@ export type KernelRuntimeStdioWireTransportOptions = {
   closeTimeoutMs?: number
   stderr?: (chunk: string) => void
 }
+
+export type KernelRuntimeTransportConfig =
+  | { kind?: 'in-process' }
+  | ({ kind: 'stdio' } & KernelRuntimeStdioWireTransportOptions)
 
 export type KernelRuntimeWireConversation = {
   readonly id: string
@@ -658,6 +2035,14 @@ export type KernelRuntimeHeadlessProcessExecutorOptions = {
   killTimeoutMs?: number
 }
 
+export type KernelRuntimeAgentProcessExecutorOptions = {
+  command?: string
+  args?: readonly string[]
+  cwd?: string
+  env?: Record<string, string | undefined>
+  killTimeoutMs?: number
+}
+
 export type KernelRuntimeWireCapabilityResolver = {
   listDescriptors(): readonly KernelCapabilityDescriptor[]
   requireCapability?(
@@ -670,6 +2055,184 @@ export type KernelRuntimeWireCapabilityResolver = {
   ): Promise<readonly KernelCapabilityDescriptor[]>
 }
 
+export type KernelRuntimeWireCommandCatalog = {
+  listCommands(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): readonly KernelCommandEntry[] | Promise<readonly KernelCommandEntry[]>
+  executeCommand?(
+    request: KernelCommandExecuteRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelCommandExecutionResult | Promise<KernelCommandExecutionResult>
+}
+
+export type KernelRuntimeWireToolCatalog = {
+  listTools(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): readonly KernelToolDescriptor[] | Promise<readonly KernelToolDescriptor[]>
+  callTool?(
+    request: KernelToolCallRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelToolCallResult | Promise<KernelToolCallResult>
+}
+
+export type KernelRuntimeWireMcpRegistry = {
+  listServers(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): readonly KernelMcpServerRef[] | Promise<readonly KernelMcpServerRef[]>
+  listResources(
+    serverName?: string,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): readonly KernelMcpResourceRef[] | Promise<readonly KernelMcpResourceRef[]>
+  listToolBindings(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): readonly KernelMcpToolBinding[] | Promise<readonly KernelMcpToolBinding[]>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): void | Promise<void | Partial<KernelMcpSnapshot>>
+  connectServer?(
+    request: KernelMcpConnectRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelMcpLifecycleResult | Promise<KernelMcpLifecycleResult>
+  authenticateServer?(
+    request: KernelMcpAuthRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelMcpLifecycleResult | Promise<KernelMcpLifecycleResult>
+  setServerEnabled?(
+    request: KernelMcpSetEnabledRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelMcpLifecycleResult | Promise<KernelMcpLifecycleResult>
+}
+
+export type KernelRuntimeWireHookCatalog = {
+  listHooks(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): readonly KernelHookDescriptor[] | Promise<readonly KernelHookDescriptor[]>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): void | Promise<void | { hooks?: readonly KernelHookDescriptor[] }>
+  runHook?(
+    request: KernelHookRunRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelHookRunResult | Promise<KernelHookRunResult>
+  registerHook?(
+    request: KernelHookRegisterRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelHookMutationResult | Promise<KernelHookMutationResult>
+}
+
+export type KernelRuntimeWireSkillCatalog = {
+  listSkills(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }):
+    | readonly KernelSkillDescriptor[]
+    | Promise<readonly KernelSkillDescriptor[]>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): void | Promise<void | { skills?: readonly KernelSkillDescriptor[] }>
+  resolvePromptContext?(
+    request: KernelSkillPromptContextRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelSkillPromptContextResult | Promise<KernelSkillPromptContextResult>
+}
+
+export type KernelRuntimeWirePluginCatalog = {
+  listPlugins(context?: { cwd?: string; metadata?: Record<string, unknown> }):
+    | {
+        plugins: readonly KernelPluginDescriptor[]
+        errors?: readonly KernelPluginErrorDescriptor[]
+      }
+    | Promise<{
+        plugins: readonly KernelPluginDescriptor[]
+        errors?: readonly KernelPluginErrorDescriptor[]
+      }>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): void | Promise<void | Partial<KernelPluginSnapshot>>
+  setPluginEnabled?(
+    request: KernelPluginSetEnabledRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelPluginMutationResult | Promise<KernelPluginMutationResult>
+  installPlugin?(
+    request: KernelPluginInstallRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelPluginMutationResult | Promise<KernelPluginMutationResult>
+  uninstallPlugin?(
+    request: KernelPluginUninstallRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelPluginMutationResult | Promise<KernelPluginMutationResult>
+  updatePlugin?(
+    request: KernelPluginUpdateRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelPluginMutationResult | Promise<KernelPluginMutationResult>
+}
+
+export type KernelRuntimeWireAgentRegistry = {
+  listAgents(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): KernelAgentSnapshot | Promise<KernelAgentSnapshot>
+  reload?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }): void | Promise<void | Partial<KernelAgentSnapshot>>
+  spawnAgent?(
+    request: KernelAgentSpawnRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelAgentSpawnResult | Promise<KernelAgentSpawnResult>
+  listAgentRuns?(context?: {
+    cwd?: string
+    metadata?: Record<string, unknown>
+  }):
+    | { runs: readonly KernelAgentRunDescriptor[] }
+    | Promise<{ runs: readonly KernelAgentRunDescriptor[] }>
+  getAgentRun?(
+    runId: string,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelAgentRunDescriptor | null | Promise<KernelAgentRunDescriptor | null>
+  getAgentOutput?(
+    request: { runId: string; tailBytes?: number },
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelAgentOutput | Promise<KernelAgentOutput>
+  cancelAgentRun?(
+    request: { runId: string; reason?: string },
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelAgentCancelResult | Promise<KernelAgentCancelResult>
+}
+
+export type KernelRuntimeWireTaskRegistry = {
+  listTasks(
+    taskListId?: string,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelTaskSnapshot | Promise<KernelTaskSnapshot>
+  getTask(
+    taskId: string,
+    taskListId?: string,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelTaskDescriptor | null | Promise<KernelTaskDescriptor | null>
+  createTask?(
+    request: KernelTaskCreateRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelTaskMutationResult | Promise<KernelTaskMutationResult>
+  updateTask?(
+    request: KernelTaskUpdateRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelTaskMutationResult | Promise<KernelTaskMutationResult>
+  assignTask?(
+    request: KernelTaskAssignRequest,
+    context?: { cwd?: string; metadata?: Record<string, unknown> },
+  ): KernelTaskMutationResult | Promise<KernelTaskMutationResult>
+}
+
 export type KernelRuntimeWireProtocolOptions = {
   runtimeId?: string
   workspacePath?: string
@@ -677,10 +2240,377 @@ export type KernelRuntimeWireProtocolOptions = {
   conversationJournalPath?: string | false
   maxReplayEvents?: number
   capabilityResolver?: KernelRuntimeWireCapabilityResolver
+  commandCatalog?: KernelRuntimeWireCommandCatalog
+  toolCatalog?: KernelRuntimeWireToolCatalog
+  mcpRegistry?: KernelRuntimeWireMcpRegistry
+  hookCatalog?: KernelRuntimeWireHookCatalog
+  skillCatalog?: KernelRuntimeWireSkillCatalog
+  pluginCatalog?: KernelRuntimeWirePluginCatalog
+  agentRegistry?: KernelRuntimeWireAgentRegistry
+  taskRegistry?: KernelRuntimeWireTaskRegistry
   permissionBroker?: KernelRuntimeWirePermissionBroker
   runTurnExecutor?: KernelRuntimeWireTurnExecutor
   headlessExecutor?: false | KernelRuntimeHeadlessProcessExecutorOptions
+  agentExecutor?: false | KernelRuntimeAgentProcessExecutorOptions
 }
+
+export type KernelRuntimeOptions = KernelRuntimeWireProtocolOptions & {
+  id?: string
+  host?: Partial<KernelRuntimeHostIdentity>
+  transport?: KernelRuntimeWireTransport
+  transportConfig?: KernelRuntimeTransportConfig
+  wireClient?: KernelRuntimeWireClient
+  wireClientOptions?: KernelRuntimeWireClientOptions
+  autoStart?: boolean
+}
+
+export type KernelConversationOptions = {
+  id?: string
+  workspacePath?: string
+  sessionId?: string
+  sessionMeta?: Record<string, unknown>
+  capabilityIntent?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
+
+export type KernelRunTurnOptions = {
+  turnId?: string
+  attachments?: readonly unknown[]
+  metadata?: Record<string, unknown>
+}
+
+export type KernelWaitForTurnOptions = {
+  sinceEventId?: string
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+
+export type KernelRunTurnAndWaitOptions = KernelRunTurnOptions &
+  KernelWaitForTurnOptions
+
+export type KernelAbortTurnOptions = {
+  reason?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelRuntimeEventReplayOptions = {
+  conversationId?: string
+  turnId?: string
+  sinceEventId?: string
+  filters?: Record<string, unknown>
+}
+
+export type KernelTurnEventReplayOptions = Omit<
+  KernelRuntimeEventReplayOptions,
+  'conversationId' | 'turnId'
+>
+
+export type KernelRuntimeCapabilities = {
+  list(): readonly KernelCapabilityDescriptor[]
+  views(): readonly KernelCapabilityView[]
+  get(name: KernelCapabilityName): KernelCapabilityDescriptor | undefined
+  getView(name: KernelCapabilityName): KernelCapabilityView | undefined
+  filter(filter?: KernelCapabilityFilter): readonly KernelCapabilityView[]
+  groupByFamily(): KernelCapabilityGroups
+  listByFamily(family: KernelCapabilityFamily): readonly KernelCapabilityView[]
+  reload(
+    scope?: KernelCapabilityReloadScope,
+  ): Promise<readonly KernelCapabilityDescriptor[]>
+}
+
+export type KernelRuntimeCommands = {
+  list(filter?: KernelCommandFilter): Promise<readonly KernelCommandEntry[]>
+  descriptors(
+    filter?: KernelCommandFilter,
+  ): Promise<readonly KernelCommandDescriptor[]>
+  get(name: string): Promise<KernelCommandEntry | undefined>
+  execute(
+    nameOrRequest: string | KernelCommandExecuteRequest,
+    options?: Omit<KernelCommandExecuteRequest, 'name'>,
+  ): Promise<KernelCommandExecutionResult>
+}
+
+export type KernelRuntimeTools = {
+  list(filter?: KernelToolFilter): Promise<readonly KernelToolDescriptor[]>
+  get(name: string): Promise<KernelToolDescriptor | undefined>
+  call(
+    nameOrRequest: string | KernelToolCallRequest,
+    input?: unknown,
+    options?: Omit<KernelToolCallRequest, 'toolName' | 'input'>,
+  ): Promise<KernelToolCallResult>
+}
+
+export type KernelRuntimeMcp = {
+  status(): Promise<readonly KernelMcpServerRef[]>
+  listServers(): Promise<readonly KernelMcpServerRef[]>
+  listTools(serverName?: string): Promise<readonly KernelMcpToolBinding[]>
+  listResources(serverName?: string): Promise<readonly KernelMcpResourceRef[]>
+  snapshot(): Promise<KernelMcpSnapshot>
+  reload(): Promise<KernelMcpSnapshot>
+  connect(
+    serverNameOrRequest: string | KernelMcpConnectRequest,
+    options?: Omit<KernelMcpConnectRequest, 'serverName'>,
+  ): Promise<KernelMcpLifecycleResult>
+  authenticate(
+    serverNameOrRequest: string | KernelMcpAuthRequest,
+    options?: Omit<KernelMcpAuthRequest, 'serverName'>,
+  ): Promise<KernelMcpLifecycleResult>
+  clearAuth(
+    serverNameOrRequest: string | KernelMcpAuthRequest,
+    options?: Omit<KernelMcpAuthRequest, 'serverName' | 'action'>,
+  ): Promise<KernelMcpLifecycleResult>
+  setEnabled(
+    serverNameOrRequest: string | KernelMcpSetEnabledRequest,
+    enabled?: boolean,
+    options?: Omit<KernelMcpSetEnabledRequest, 'serverName' | 'enabled'>,
+  ): Promise<KernelMcpLifecycleResult>
+  enable(
+    serverName: string,
+    options?: Omit<KernelMcpSetEnabledRequest, 'serverName' | 'enabled'>,
+  ): Promise<KernelMcpLifecycleResult>
+  disable(
+    serverName: string,
+    options?: Omit<KernelMcpSetEnabledRequest, 'serverName' | 'enabled'>,
+  ): Promise<KernelMcpLifecycleResult>
+}
+
+export type KernelHookFilter = {
+  events?: readonly string[]
+  source?: KernelHookSource | readonly KernelHookSource[]
+  type?: KernelHookType | readonly KernelHookType[]
+  matcher?: string
+  pluginName?: string
+}
+
+export type KernelRuntimeHooks = {
+  list(filter?: KernelHookFilter): Promise<readonly KernelHookDescriptor[]>
+  reload(): Promise<readonly KernelHookDescriptor[]>
+  run(
+    eventOrRequest: string | KernelHookRunRequest,
+    input?: unknown,
+    options?: Omit<KernelHookRunRequest, 'event' | 'input'>,
+  ): Promise<KernelHookRunResult>
+  register(
+    hookOrRequest: KernelHookDescriptor | KernelHookRegisterRequest,
+    options?: Omit<KernelHookRegisterRequest, 'hook'>,
+  ): Promise<KernelHookMutationResult>
+}
+
+export type KernelSkillFilter = {
+  names?: readonly string[]
+  source?: KernelSkillSource | readonly KernelSkillSource[]
+  loadedFrom?: string | readonly string[]
+  context?: KernelSkillContext | readonly KernelSkillContext[]
+  userInvocable?: boolean
+  modelInvocable?: boolean
+}
+
+export type KernelRuntimeSkills = {
+  list(filter?: KernelSkillFilter): Promise<readonly KernelSkillDescriptor[]>
+  get(name: string): Promise<KernelSkillDescriptor | undefined>
+  reload(): Promise<readonly KernelSkillDescriptor[]>
+  resolveContext(
+    nameOrRequest: string | KernelSkillPromptContextRequest,
+    options?: Omit<KernelSkillPromptContextRequest, 'name'>,
+  ): Promise<KernelSkillPromptContextResult>
+}
+
+export type KernelPluginFilter = {
+  names?: readonly string[]
+  source?: string | readonly string[]
+  status?: KernelPluginStatus | readonly KernelPluginStatus[]
+  enabled?: boolean
+  builtin?: boolean
+  hasComponent?: keyof KernelPluginComponents
+}
+
+export type KernelRuntimePlugins = {
+  list(filter?: KernelPluginFilter): Promise<readonly KernelPluginDescriptor[]>
+  status(): Promise<KernelPluginSnapshot>
+  reload(): Promise<KernelPluginSnapshot>
+  setEnabled(
+    nameOrRequest: string | KernelPluginSetEnabledRequest,
+    enabled?: boolean,
+    options?: Omit<KernelPluginSetEnabledRequest, 'name' | 'enabled'>,
+  ): Promise<KernelPluginMutationResult>
+  enable(
+    name: string,
+    options?: Omit<KernelPluginSetEnabledRequest, 'name' | 'enabled'>,
+  ): Promise<KernelPluginMutationResult>
+  disable(
+    name: string,
+    options?: Omit<KernelPluginSetEnabledRequest, 'name' | 'enabled'>,
+  ): Promise<KernelPluginMutationResult>
+  install(
+    nameOrRequest: string | KernelPluginInstallRequest,
+    options?: Omit<KernelPluginInstallRequest, 'name'>,
+  ): Promise<KernelPluginMutationResult>
+  uninstall(
+    nameOrRequest: string | KernelPluginUninstallRequest,
+    options?: Omit<KernelPluginUninstallRequest, 'name'>,
+  ): Promise<KernelPluginMutationResult>
+  update(
+    nameOrRequest: string | KernelPluginUpdateRequest,
+    options?: Omit<KernelPluginUpdateRequest, 'name'>,
+  ): Promise<KernelPluginMutationResult>
+}
+
+export type KernelAgentFilter = {
+  agentTypes?: readonly string[]
+  source?: KernelAgentSource | readonly KernelAgentSource[]
+  active?: boolean
+  background?: boolean
+  model?: string | readonly string[]
+  tool?: string
+  skill?: string
+  mcpServer?: string
+}
+
+export type KernelRuntimeAgents = {
+  list(filter?: KernelAgentFilter): Promise<readonly KernelAgentDescriptor[]>
+  all(filter?: KernelAgentFilter): Promise<readonly KernelAgentDescriptor[]>
+  get(
+    agentType: string,
+    options?: { includeInactive?: boolean },
+  ): Promise<KernelAgentDescriptor | undefined>
+  snapshot(): Promise<KernelAgentSnapshot>
+  reload(): Promise<KernelAgentSnapshot>
+  spawn(request: KernelAgentSpawnRequest): Promise<KernelAgentSpawnResult>
+  runs(
+    filter?: KernelAgentRunFilter,
+  ): Promise<readonly KernelAgentRunDescriptor[]>
+  getRun(runId: string): Promise<KernelAgentRunDescriptor | undefined>
+  status(runId: string): Promise<KernelAgentRunDescriptor | undefined>
+  output(
+    runId: string,
+    options?: KernelAgentOutputOptions,
+  ): Promise<KernelAgentOutput>
+  result(runId: string): Promise<unknown>
+  cancel(
+    runId: string,
+    options?: KernelAgentCancelOptions,
+  ): Promise<KernelAgentCancelResult>
+}
+
+export type KernelTaskListOptions = {
+  taskListId?: string
+}
+
+export type KernelTaskFilter = {
+  ids?: readonly string[]
+  status?: KernelCoordinatorTaskStatus | readonly KernelCoordinatorTaskStatus[]
+  owner?: string | readonly string[]
+  blocked?: boolean
+  hasOwnedFiles?: boolean
+  linkedBackgroundTaskId?: string
+  linkedAgentId?: string
+}
+
+export type KernelRuntimeTasks = {
+  list(
+    filter?: KernelTaskFilter,
+    options?: KernelTaskListOptions,
+  ): Promise<readonly KernelTaskDescriptor[]>
+  get(
+    taskId: string,
+    options?: KernelTaskListOptions,
+  ): Promise<KernelTaskDescriptor | undefined>
+  snapshot(options?: KernelTaskListOptions): Promise<KernelTaskSnapshot>
+  create(request: KernelTaskCreateRequest): Promise<KernelTaskMutationResult>
+  update(request: KernelTaskUpdateRequest): Promise<KernelTaskMutationResult>
+  assign(request: KernelTaskAssignRequest): Promise<KernelTaskMutationResult>
+}
+
+export type KernelRuntimePermissions = {
+  decide(decision: KernelPermissionDecision): Promise<KernelPermissionDecision>
+}
+
+export type KernelTurn = {
+  readonly id: string
+  readonly conversationId: string
+  snapshot(): KernelTurnSnapshot
+  wait(options?: KernelWaitForTurnOptions): Promise<KernelTurnSnapshot>
+  abort(options?: KernelAbortTurnOptions): Promise<KernelTurnSnapshot>
+  onEvent(handler: KernelRuntimeEventHandler): () => void
+  replayEvents(
+    options?: KernelTurnEventReplayOptions,
+  ): Promise<KernelRuntimeEventEnvelope[]>
+}
+
+export type KernelConversation = {
+  readonly id: string
+  readonly workspacePath: string
+  readonly sessionId: string | undefined
+  snapshot(): KernelConversationSnapshot
+  startTurn(
+    prompt: string | readonly unknown[],
+    options?: KernelRunTurnOptions,
+  ): Promise<KernelTurn>
+  runTurn(
+    prompt: string | readonly unknown[],
+    options?: KernelRunTurnOptions,
+  ): Promise<KernelTurnSnapshot>
+  waitForTurn(
+    turnId: string,
+    options?: KernelWaitForTurnOptions,
+  ): Promise<KernelTurnSnapshot>
+  runTurnAndWait(
+    prompt: string | readonly unknown[],
+    options?: KernelRunTurnAndWaitOptions,
+  ): Promise<KernelTurnSnapshot>
+  abortTurn(
+    turnId: string,
+    options?: KernelAbortTurnOptions,
+  ): Promise<KernelTurnSnapshot>
+  onEvent(handler: KernelRuntimeEventSink): () => void
+  replayEvents(
+    options?: Omit<KernelRuntimeEventReplayOptions, 'conversationId'>,
+  ): Promise<KernelRuntimeEnvelopeBase[]>
+  dispose(reason?: string): Promise<void>
+}
+
+export type KernelRuntime = {
+  readonly id: string
+  readonly workspacePath: string
+  readonly host: KernelRuntimeHostIdentity
+  readonly transportKind: KernelRuntimeTransportKind
+  readonly capabilities: KernelRuntimeCapabilities
+  readonly commands: KernelRuntimeCommands
+  readonly tools: KernelRuntimeTools
+  readonly mcp: KernelRuntimeMcp
+  readonly hooks: KernelRuntimeHooks
+  readonly skills: KernelRuntimeSkills
+  readonly plugins: KernelRuntimePlugins
+  readonly agents: KernelRuntimeAgents
+  readonly tasks: KernelRuntimeTasks
+  readonly permissions: KernelRuntimePermissions
+  readonly state: KernelRuntimeState
+  start(): Promise<void>
+  createConversation(
+    options?: KernelConversationOptions,
+  ): Promise<KernelConversation>
+  reloadCapabilities(
+    scope?: KernelCapabilityReloadScope,
+  ): Promise<readonly KernelCapabilityDescriptor[]>
+  decidePermission(
+    decision: KernelPermissionDecision,
+  ): Promise<KernelPermissionDecision>
+  onEvent(handler: KernelRuntimeEventSink): () => void
+  replayEvents(
+    options?: KernelRuntimeEventReplayOptions,
+  ): Promise<KernelRuntimeEnvelopeBase[]>
+  dispose(reason?: string): Promise<void>
+}
+
+export declare class KernelRuntimeRequestError extends Error {
+  readonly envelope: KernelRuntimeEnvelopeBase
+  readonly code: KernelRuntimeErrorCode | undefined
+  constructor(envelope: KernelRuntimeEnvelopeBase)
+}
+
+export declare function createKernelRuntime(
+  options?: KernelRuntimeOptions,
+): Promise<KernelRuntime>
 
 export type KernelRuntimeWireInput = AsyncIterable<string | Uint8Array>
 

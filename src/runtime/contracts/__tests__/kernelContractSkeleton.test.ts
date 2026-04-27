@@ -10,6 +10,13 @@ const CONTRACT_FILES = [
   'turn.ts',
   'events.ts',
   'capability.ts',
+  'agent.ts',
+  'command.ts',
+  'tool.ts',
+  'hook.ts',
+  'skill.ts',
+  'plugin.ts',
+  'task.ts',
   'permissions.ts',
   'wire.ts',
 ] as const
@@ -71,6 +78,18 @@ describe('public kernel contract skeleton', () => {
     expect(await readContract('capability.ts')).toContain(
       'KernelCapabilityDescriptor',
     )
+    expect(await readContract('command.ts')).toContain(
+      'RuntimeCommandGraphEntry',
+    )
+    expect(await readContract('agent.ts')).toContain('RuntimeAgentDescriptor')
+    expect(await readContract('agent.ts')).toContain(
+      'RuntimeAgentRunDescriptor',
+    )
+    expect(await readContract('tool.ts')).toContain('RuntimeToolDescriptor')
+    expect(await readContract('hook.ts')).toContain('RuntimeHookDescriptor')
+    expect(await readContract('skill.ts')).toContain('RuntimeSkillDescriptor')
+    expect(await readContract('plugin.ts')).toContain('RuntimePluginDescriptor')
+    expect(await readContract('task.ts')).toContain('RuntimeTaskDescriptor')
     expect(await readContract('permissions.ts')).toContain(
       'KernelPermissionRequestId',
     )

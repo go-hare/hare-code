@@ -308,7 +308,10 @@ import {
 } from './headlessPostTurn.js'
 import { emitHeadlessRuntimeMessage } from './headlessStreamEmission.js'
 import { projectRuntimeEnvelopeToLegacySDKMessage } from '../../../core/events/compatProjection.js'
-import { hasHeadlessBackgroundWorkPending } from './headlessBackgroundWork.js'
+import {
+  hasHeadlessBackgroundWorkPending,
+  observeHeadlessBackgroundSdkMessage,
+} from './headlessBackgroundWork.js'
 import {
   createHeadlessRuntimeStreamPublisher,
   createHeadlessStreamCollector,
@@ -991,7 +994,10 @@ function runHeadlessStreaming(
   let heldBackResult: StdoutMessage | null = null
   let heldBackAssistantMessages: StdoutMessage[] = []
   let terminalResultEmitted = false
-  const pendingHeadlessBackgroundTaskIds = new Set<string>()
+  const backgroundEventTracking = {
+    pendingTaskIds: new Set<string>(),
+    handoffTurnIds: new Set<string>(),
+  }
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
   const managedSession = createHeadlessManagedSession(initialMessages, {
@@ -1034,7 +1040,19 @@ function runHeadlessStreaming(
   session.registerCleanup(() => {
     managedSession.detachSink(outputSink)
   })
-  session.registerCleanup(() => managedSession.stopAndWait(true))
+  session.registerCleanup(async () => {
+    const activeTurnId = headlessConversation.activeTurnId
+    if (
+      activeTurnId &&
+      backgroundEventTracking.handoffTurnIds.has(activeTurnId)
+    ) {
+      headlessConversation.completeTurn(activeTurnId, 'end_turn')
+      await managedSession.stopAndWait(false)
+      return
+    }
+
+    await managedSession.stopAndWait(true)
+  })
 
   const abortCurrentHeadlessTurn = (reason = 'interrupt') => {
     headlessConversation.abortActiveTurn(reason)
@@ -1133,29 +1151,11 @@ function runHeadlessStreaming(
   }
 
   const observeHeadlessBackgroundSdkEvent = (message: StdoutMessage) => {
-    const record = message as Record<string, unknown>
-    if (record.type !== 'system') {
-      return
-    }
-
-    const taskId =
-      typeof record.task_id === 'string' ? record.task_id : undefined
-    if (!taskId) {
-      return
-    }
-
-    if (record.subtype === 'task_started') {
-      const taskType =
-        typeof record.task_type === 'string' ? record.task_type : undefined
-      if (taskType === 'local_agent' || taskType === 'local_bash') {
-        pendingHeadlessBackgroundTaskIds.add(taskId)
-      }
-      return
-    }
-
-    if (record.subtype === 'task_notification') {
-      pendingHeadlessBackgroundTaskIds.delete(taskId)
-    }
+    observeHeadlessBackgroundSdkMessage(
+      message,
+      backgroundEventTracking,
+      headlessConversation.activeTurnId,
+    )
   }
 
   const drainTrackedSdkEvents = (): StdoutMessage[] => {
@@ -1167,7 +1167,7 @@ function runHeadlessStreaming(
   }
 
   const hasPendingHeadlessBackgroundWork = (): boolean =>
-    pendingHeadlessBackgroundTaskIds.size > 0 ||
+    backgroundEventTracking.pendingTaskIds.size > 0 ||
     hasHeadlessBackgroundWorkPending(getAppState())
 
   const flushHeldBackIfNoBackgroundWork = () => {
@@ -1912,12 +1912,28 @@ function runHeadlessStreaming(
             },
           })
           const turnAbortController = managedSession.startTurn()
+          let runtimeTurnFinalized = false
           const abortRuntimeTurn = () => {
             if (terminalResultEmitted) {
               return
             }
+            if (runtimeTurnFinalized) {
+              return
+            }
+            const reason = turnAbortController.signal.reason ?? 'interrupt'
+            const activeTurnId = headlessConversation.activeTurnId
+            if (
+              reason === 'shutdown' &&
+              activeTurnId &&
+              (backgroundEventTracking.handoffTurnIds.has(activeTurnId) ||
+                backgroundEventTracking.pendingTaskIds.size > 0)
+            ) {
+              runtimeTurnFinalized = true
+              headlessConversation.completeTurn(activeTurnId, 'end_turn')
+              return
+            }
             headlessConversation.abortActiveTurn(
-              turnAbortController.signal.reason ?? 'interrupt',
+              reason,
             )
           }
           turnAbortController.signal.addEventListener(
@@ -1935,7 +1951,6 @@ function runHeadlessStreaming(
             await markAutonomyRunRunning(runId)
           }
           let lastResultIsError = false
-          let runtimeTurnFinalized = false
           const finalizeRuntimeTurn = (
             outcome: 'completed' | 'failed',
             value: unknown,
@@ -2029,6 +2044,11 @@ function runHeadlessStreaming(
                     continue
                   }
                   const message = sdkMessage as unknown as StdoutMessage
+                  // Runtime-first execution can surface task bookends as the
+                  // current SDK message, not only through the side SDK queue.
+                  // Track both sources before deciding whether headless can
+                  // drain/cleanup or must wait for background completion.
+                  observeHeadlessBackgroundSdkEvent(message)
                   // Forward messages to bridge incrementally (mid-turn) so
                   // claude.ai sees progress and the connection stays alive
                   // while blocked on permission requests.

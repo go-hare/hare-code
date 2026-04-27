@@ -1,0 +1,686 @@
+import type {
+  RuntimeHookDescriptor,
+  RuntimeHookSource,
+  RuntimeHookType,
+} from '../runtime/contracts/hook.js'
+import type {
+  RuntimePluginDescriptor,
+  RuntimePluginErrorDescriptor,
+  RuntimePluginInstallRequest,
+  RuntimePluginMutationResult,
+  RuntimePluginSetEnabledRequest,
+  RuntimePluginUninstallRequest,
+  RuntimePluginUpdateRequest,
+} from '../runtime/contracts/plugin.js'
+import type {
+  RuntimeSkillContext,
+  RuntimeSkillDescriptor,
+  RuntimeSkillPromptContextRequest,
+  RuntimeSkillPromptContextResult,
+  RuntimeSkillSource,
+} from '../runtime/contracts/skill.js'
+import type {
+  KernelRuntimeWireHookCatalog,
+  KernelRuntimeWirePluginCatalog,
+  KernelRuntimeWireSkillCatalog,
+} from '../runtime/core/wire/KernelRuntimeWireRouter.js'
+import type {
+  Command,
+  LocalJSXCommandContext,
+} from '../types/command.js'
+import type {
+  ToolPermissionContext,
+  ToolUseContext,
+  Tools,
+} from '../Tool.js'
+import type { Message } from '../types/message.js'
+import type { PermissionMode } from '../types/permissions.js'
+import type { LoadedPlugin, PluginError } from '../types/plugin.js'
+
+export function createDefaultKernelRuntimeHookCatalog(
+  _workspacePath: string | undefined,
+): KernelRuntimeWireHookCatalog {
+  let cachedHooks: readonly RuntimeHookDescriptor[] | undefined
+
+  async function listHooks(): Promise<readonly RuntimeHookDescriptor[]> {
+    if (!cachedHooks) {
+      const [
+        { getDefaultAppState },
+        hooksSettings,
+        { loadAllPluginsCacheOnly },
+      ] = await Promise.all([
+        import('../state/AppStateStore.js'),
+        import('../utils/hooks/hooksSettings.js'),
+        import('../utils/plugins/pluginLoader.js'),
+      ])
+      const appStateHooks = hooksSettings
+        .getAllHooks(getDefaultAppState())
+        .map(hook =>
+          toRuntimeHookDescriptor({
+            event: hook.event,
+            config: hook.config,
+            matcher: hook.matcher,
+            source: hook.source,
+            pluginName: hook.pluginName,
+            displayName: hooksSettings.getHookDisplayText(hook.config),
+          }),
+        )
+      const { enabled } = await loadAllPluginsCacheOnly()
+      cachedHooks = [
+        ...appStateHooks,
+        ...enabled.flatMap(plugin => toRuntimePluginHookDescriptors(plugin)),
+      ]
+    }
+    return cachedHooks
+  }
+
+  return {
+    listHooks,
+    async reload() {
+      cachedHooks = undefined
+      await listHooks()
+    },
+  }
+}
+
+export function createDefaultKernelRuntimeSkillCatalog(
+  workspacePath: string | undefined,
+): KernelRuntimeWireSkillCatalog {
+  let cachedCommands: readonly Command[] | undefined
+  let cachedSkills: readonly RuntimeSkillDescriptor[] | undefined
+
+  async function loadSkillCommands(context?: {
+    cwd?: string
+  }): Promise<readonly Command[]> {
+    if (!cachedCommands) {
+      const { getSkillToolCommands } = await import('../commands.js')
+      const cwd = context?.cwd ?? workspacePath ?? process.cwd()
+      cachedCommands = await getSkillToolCommands(cwd)
+    }
+    return cachedCommands
+  }
+
+  async function listSkills(context?: {
+    cwd?: string
+  }): Promise<readonly RuntimeSkillDescriptor[]> {
+    if (!cachedSkills) {
+      cachedSkills = (await loadSkillCommands(context))
+        .map(toRuntimeSkillDescriptor)
+        .filter((skill): skill is RuntimeSkillDescriptor => !!skill)
+    }
+    return cachedSkills
+  }
+
+  return {
+    listSkills,
+    async reload(context) {
+      const { clearCommandMemoizationCaches } = await import('../commands.js')
+      clearCommandMemoizationCaches()
+      cachedCommands = undefined
+      cachedSkills = undefined
+      await listSkills(context)
+    },
+    async resolvePromptContext(
+      request: RuntimeSkillPromptContextRequest,
+      context,
+    ): Promise<RuntimeSkillPromptContextResult> {
+      const commands = await loadSkillCommands(context)
+      const command = commands.find(
+        candidate =>
+          candidate.type === 'prompt' &&
+          (candidate.name === request.name ||
+            candidate.aliases?.includes(request.name)),
+      )
+      const descriptor =
+        command && command.type === 'prompt'
+          ? toRuntimeSkillDescriptor(command)
+          : undefined
+      const cwd = context?.cwd ?? workspacePath ?? process.cwd()
+      const promptBlocks =
+        command && command.type === 'prompt'
+          ? await command.getPromptForCommand(
+              request.args ?? '',
+              await createKernelRuntimeNonInteractiveToolUseContext(
+                commands,
+                cwd,
+              ),
+            )
+          : undefined
+      return {
+        name: request.name,
+        descriptor,
+        context: descriptor?.context ?? 'unknown',
+        content: promptBlocks ? contentBlocksToText(promptBlocks) : undefined,
+        messages: promptBlocks,
+        allowedTools: descriptor?.allowedTools,
+        metadata: request.metadata,
+      }
+    },
+  }
+}
+
+export function createDefaultKernelRuntimePluginCatalog(
+  _workspacePath: string | undefined,
+): KernelRuntimeWirePluginCatalog {
+  let cached:
+    | {
+        plugins: readonly RuntimePluginDescriptor[]
+        errors: readonly RuntimePluginErrorDescriptor[]
+      }
+    | undefined
+
+  async function listPlugins(): Promise<{
+    plugins: readonly RuntimePluginDescriptor[]
+    errors: readonly RuntimePluginErrorDescriptor[]
+  }> {
+    if (!cached) {
+      const { loadAllPluginsCacheOnly } = await import(
+        '../utils/plugins/pluginLoader.js'
+      )
+      const { enabled, disabled, errors } = await loadAllPluginsCacheOnly()
+      cached = {
+        plugins: [
+          ...enabled.map(plugin => toRuntimePluginDescriptor(plugin, true)),
+          ...disabled.map(plugin => toRuntimePluginDescriptor(plugin, false)),
+        ],
+        errors: errors.map(toRuntimePluginErrorDescriptor),
+      }
+    }
+    return cached
+  }
+
+  return {
+    listPlugins,
+    async reload() {
+      const { clearPluginCache } = await import(
+        '../utils/plugins/pluginLoader.js'
+      )
+      clearPluginCache()
+      cached = undefined
+      await listPlugins()
+    },
+    async setPluginEnabled(
+      request: RuntimePluginSetEnabledRequest,
+    ): Promise<RuntimePluginMutationResult> {
+      const { setPluginEnabledOp } = await import(
+        '../services/plugins/pluginOperations.js'
+      )
+      const result = await setPluginEnabledOp(
+        request.name,
+        request.enabled,
+        request.scope,
+      )
+      cached = undefined
+      const snapshot = await listPlugins()
+      const plugin = snapshot.plugins.find(candidate =>
+        matchesPluginRequest(candidate, request.name),
+      )
+      const enabled = plugin?.enabled ?? request.enabled
+      return {
+        name: result.pluginName ?? plugin?.name ?? request.name,
+        action: 'set_enabled',
+        success: result.success,
+        enabled,
+        status: enabled ? 'enabled' : 'disabled',
+        plugin,
+        snapshot,
+        message: result.message,
+        metadata: request.metadata,
+      }
+    },
+    async installPlugin(
+      request: RuntimePluginInstallRequest,
+    ): Promise<RuntimePluginMutationResult> {
+      const { installPluginOp } = await import(
+        '../services/plugins/pluginOperations.js'
+      )
+      const result = await installPluginOp(
+        request.name,
+        request.scope ?? 'user',
+      )
+      return toPluginMutationResult({
+        action: 'install',
+        requestName: request.name,
+        requestEnabled: true,
+        metadata: request.metadata,
+        operation: result,
+        snapshot: await reloadAndListPlugins(),
+      })
+    },
+    async uninstallPlugin(
+      request: RuntimePluginUninstallRequest,
+    ): Promise<RuntimePluginMutationResult> {
+      const { uninstallPluginOp } = await import(
+        '../services/plugins/pluginOperations.js'
+      )
+      const result = await uninstallPluginOp(
+        request.name,
+        request.scope ?? 'user',
+        !request.keepData,
+      )
+      return toPluginMutationResult({
+        action: 'uninstall',
+        requestName: request.name,
+        requestEnabled: false,
+        metadata: request.metadata,
+        operation: result,
+        snapshot: await reloadAndListPlugins(),
+      })
+    },
+    async updatePlugin(
+      request: RuntimePluginUpdateRequest,
+    ): Promise<RuntimePluginMutationResult> {
+      const { updatePluginOp } = await import(
+        '../services/plugins/pluginOperations.js'
+      )
+      const result = await updatePluginOp(request.name, request.scope ?? 'user')
+      return toPluginMutationResult({
+        action: 'update',
+        requestName: request.name,
+        requestEnabled: true,
+        metadata: request.metadata,
+        operation: result,
+        snapshot: await reloadAndListPlugins(),
+      })
+    },
+  }
+
+  async function reloadAndListPlugins(): Promise<{
+    plugins: readonly RuntimePluginDescriptor[]
+    errors: readonly RuntimePluginErrorDescriptor[]
+  }> {
+    cached = undefined
+    return listPlugins()
+  }
+}
+
+function toRuntimePluginHookDescriptors(
+  plugin: LoadedPlugin,
+): RuntimeHookDescriptor[] {
+  const hooksConfig = plugin.hooksConfig
+  if (!hooksConfig) {
+    return []
+  }
+
+  const descriptors: RuntimeHookDescriptor[] = []
+  for (const [event, matchers] of Object.entries(hooksConfig)) {
+    for (const matcher of matchers ?? []) {
+      for (const hook of matcher.hooks) {
+        descriptors.push(
+          toRuntimeHookDescriptor({
+            event,
+            config: hook,
+            matcher: matcher.matcher,
+            source: 'pluginHook',
+            pluginName: plugin.name,
+          }),
+        )
+      }
+    }
+  }
+  return descriptors
+}
+
+function toRuntimeHookDescriptor(input: {
+  event: string
+  config: Record<string, unknown>
+  matcher?: string
+  source: string
+  pluginName?: string
+  displayName?: string
+}): RuntimeHookDescriptor {
+  return {
+    event: input.event,
+    type: toRuntimeHookType(input.config.type),
+    source: toRuntimeHookSource(input.source),
+    matcher: input.matcher,
+    pluginName: input.pluginName,
+    displayName: input.displayName ?? getHookLabel(input.config),
+    timeoutSeconds: numberOrUndefined(input.config.timeout),
+    async: booleanOrUndefined(input.config.async),
+    once: booleanOrUndefined(input.config.once),
+  }
+}
+
+function toRuntimeSkillDescriptor(
+  command: Command,
+): RuntimeSkillDescriptor | undefined {
+  if (command.type !== 'prompt') {
+    return undefined
+  }
+  return {
+    name: command.name,
+    description: command.description,
+    source: toRuntimeSkillSource(command.source),
+    loadedFrom: command.loadedFrom,
+    aliases: command.aliases,
+    whenToUse: command.whenToUse,
+    version: command.version,
+    userInvocable: command.userInvocable,
+    modelInvocable: !command.disableModelInvocation,
+    context: toRuntimeSkillContext(command.context),
+    agent: command.agent,
+    allowedTools: command.allowedTools,
+    paths: command.paths,
+    contentLength: command.contentLength,
+    plugin: command.pluginInfo
+      ? {
+          name: command.pluginInfo.pluginManifest.name,
+          repository: command.pluginInfo.repository,
+        }
+      : undefined,
+  }
+}
+
+function toRuntimePluginDescriptor(
+  plugin: LoadedPlugin,
+  enabled: boolean,
+): RuntimePluginDescriptor {
+  return {
+    name: plugin.name,
+    source: plugin.source,
+    path: plugin.path,
+    repository: plugin.repository,
+    status: enabled ? 'enabled' : 'disabled',
+    enabled,
+    builtin: plugin.isBuiltin,
+    version: stringOrUndefined(plugin.manifest.version),
+    sha: plugin.sha,
+    description: stringOrUndefined(plugin.manifest.description),
+    components: {
+      commands: hasPathComponent(plugin.commandsPath, plugin.commandsPaths),
+      agents: hasPathComponent(plugin.agentsPath, plugin.agentsPaths),
+      skills: hasPathComponent(plugin.skillsPath, plugin.skillsPaths),
+      hooks: hasHookComponent(plugin),
+      mcp: hasRecordComponent(plugin.mcpServers),
+      lsp: hasRecordComponent(plugin.lspServers),
+      outputStyles: hasPathComponent(
+        plugin.outputStylesPath,
+        plugin.outputStylesPaths,
+      ),
+      settings: hasRecordComponent(plugin.settings),
+    },
+  }
+}
+
+function toRuntimePluginErrorDescriptor(
+  error: PluginError,
+): RuntimePluginErrorDescriptor {
+  const record = error as Record<string, unknown>
+  return {
+    type: error.type,
+    source: error.source,
+    plugin:
+      stringOrUndefined(record.plugin) ?? stringOrUndefined(record.pluginId),
+    message:
+      stringOrUndefined(record.error) ??
+      stringOrUndefined(record.reason) ??
+      stringOrUndefined(record.validationError) ??
+      stringOrUndefined(record.parseError) ??
+      stringOrUndefined(record.details),
+  }
+}
+
+function matchesPluginRequest(
+  plugin: RuntimePluginDescriptor,
+  requestName: string,
+): boolean {
+  return (
+    plugin.name === requestName ||
+    plugin.repository === requestName ||
+    plugin.source === requestName
+  )
+}
+
+function toPluginMutationResult(input: {
+  action: 'install' | 'uninstall' | 'update'
+  requestName: string
+  requestEnabled: boolean
+  metadata?: Record<string, unknown>
+  operation: {
+    success: boolean
+    message: string
+    pluginId?: string
+    pluginName?: string
+    oldVersion?: string
+    newVersion?: string
+    alreadyUpToDate?: boolean
+  }
+  snapshot: {
+    plugins: readonly RuntimePluginDescriptor[]
+    errors: readonly RuntimePluginErrorDescriptor[]
+  }
+}): RuntimePluginMutationResult {
+  const plugin = input.snapshot.plugins.find(candidate =>
+    matchesPluginRequest(
+      candidate,
+      input.operation.pluginId ??
+        input.operation.pluginName ??
+        input.requestName,
+    ),
+  )
+  const enabled = plugin?.enabled ?? input.requestEnabled
+  return {
+    name: input.operation.pluginName ?? plugin?.name ?? input.requestName,
+    action: input.action,
+    success: input.operation.success,
+    enabled,
+    status: enabled ? 'enabled' : 'disabled',
+    plugin,
+    snapshot: input.snapshot,
+    message: input.operation.message,
+    oldVersion: input.operation.oldVersion,
+    newVersion: input.operation.newVersion,
+    alreadyUpToDate: input.operation.alreadyUpToDate,
+    metadata: input.metadata,
+  }
+}
+
+export type KernelRuntimeNonInteractiveToolUseContextOptions = {
+  permissionMode?: string
+  tools?: Tools
+  messages?: readonly Message[]
+}
+
+export async function createKernelRuntimeNonInteractiveToolUseContext(
+  commands: readonly Command[],
+  _cwd: string,
+  options: KernelRuntimeNonInteractiveToolUseContextOptions = {},
+): Promise<ToolUseContext & LocalJSXCommandContext> {
+  const [
+    { getEmptyToolPermissionContext },
+    { getDefaultAppState },
+    { createFileStateCacheWithSizeLimit },
+    { getTools },
+  ] = await Promise.all([
+    import('../Tool.js'),
+    import('../state/AppStateStore.js'),
+    import('../utils/fileStateCache.js'),
+    import('../runtime/capabilities/tools/ToolPolicy.js'),
+  ])
+  const toolPermissionContext = {
+    ...getEmptyToolPermissionContext(),
+    mode: toPermissionMode(options.permissionMode, 'default'),
+    shouldAvoidPermissionPrompts: true,
+  } satisfies ToolPermissionContext
+  let appState = getDefaultAppState()
+  appState.toolPermissionContext = toolPermissionContext
+  let messages = [...(options.messages ?? [])]
+  const tools = options.tools ?? getTools(toolPermissionContext)
+  return {
+    abortController: new AbortController(),
+    options: {
+      commands: [...commands],
+      debug: false,
+      mainLoopModel: process.env.OPENAI_MODEL ?? 'kernel-runtime',
+      tools,
+      verbose: false,
+      thinkingConfig: { type: 'disabled' },
+      mcpClients: [],
+      mcpResources: {},
+      isNonInteractiveSession: true,
+      ideInstallationStatus: null,
+      theme: 'dark',
+      agentDefinitions: {
+        activeAgents: [],
+        allAgents: [],
+        allowedAgentTypes: undefined,
+      },
+    },
+    readFileState: createFileStateCacheWithSizeLimit(100),
+    getAppState: () => appState,
+    setAppState: updater => {
+      appState = updater(appState)
+    },
+    messages,
+    setMessages: updater => {
+      messages = updater(messages)
+    },
+    onChangeAPIKey: () => {},
+    setInProgressToolUseIDs: () => {},
+    setResponseLength: () => {},
+    updateFileHistoryState: () => {},
+    updateAttributionState: () => {},
+  }
+}
+
+export function contentBlocksToText(
+  blocks: readonly unknown[],
+): string | undefined {
+  const text = blocks
+    .map(block => {
+      if (typeof block === 'string') {
+        return block
+      }
+      if (
+        block &&
+        typeof block === 'object' &&
+        (block as { type?: unknown }).type === 'text' &&
+        typeof (block as { text?: unknown }).text === 'string'
+      ) {
+        return (block as { text: string }).text
+      }
+      return undefined
+    })
+    .filter((item): item is string => !!item)
+    .join('\n')
+  return text.length > 0 ? text : undefined
+}
+
+function toPermissionMode(
+  value: string | undefined,
+  fallback: PermissionMode,
+): PermissionMode {
+  switch (value) {
+    case 'acceptEdits':
+    case 'auto':
+    case 'bubble':
+    case 'bypassPermissions':
+    case 'default':
+    case 'dontAsk':
+    case 'plan':
+      return value
+    default:
+      return fallback
+  }
+}
+
+function toRuntimeHookType(value: unknown): RuntimeHookType {
+  switch (value) {
+    case 'command':
+    case 'prompt':
+    case 'agent':
+    case 'http':
+    case 'callback':
+    case 'function':
+      return value
+    default:
+      return 'unknown'
+  }
+}
+
+function toRuntimeHookSource(value: string): RuntimeHookSource {
+  switch (value) {
+    case 'userSettings':
+    case 'projectSettings':
+    case 'localSettings':
+    case 'policySettings':
+    case 'pluginHook':
+    case 'sessionHook':
+    case 'builtinHook':
+      return value
+    default:
+      return 'unknown'
+  }
+}
+
+function toRuntimeSkillSource(value: string): RuntimeSkillSource {
+  switch (value) {
+    case 'userSettings':
+    case 'projectSettings':
+    case 'localSettings':
+    case 'policySettings':
+    case 'builtin':
+    case 'bundled':
+    case 'plugin':
+    case 'mcp':
+    case 'managed':
+      return value
+    default:
+      return 'unknown'
+  }
+}
+
+function toRuntimeSkillContext(
+  value: Command extends { context?: infer T } ? T : unknown,
+): RuntimeSkillContext | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === 'inline' || value === 'fork') {
+    return value
+  }
+  return 'unknown'
+}
+
+function getHookLabel(config: Record<string, unknown>): string | undefined {
+  return (
+    stringOrUndefined(config.statusMessage) ??
+    stringOrUndefined(config.command) ??
+    stringOrUndefined(config.prompt) ??
+    stringOrUndefined(config.url)
+  )
+}
+
+function hasPathComponent(
+  path: unknown,
+  paths: readonly unknown[] | undefined,
+) {
+  return typeof path === 'string' || !!paths?.length
+}
+
+function hasRecordComponent(value: unknown): boolean {
+  return !!value && typeof value === 'object' && Object.keys(value).length > 0
+}
+
+function hasHookComponent(plugin: LoadedPlugin): boolean {
+  const hooks = plugin.hooksConfig
+  return (
+    !!hooks &&
+    Object.values(hooks).some(matchers =>
+      (matchers ?? []).some(matcher => matcher.hooks.length > 0),
+    )
+  )
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
+}

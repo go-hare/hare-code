@@ -21,10 +21,25 @@ export interface RuntimeCommandDescriptor {
   whenToUse?: string
 }
 
+export interface RuntimeCommandGraphEntry {
+  descriptor: RuntimeCommandDescriptor
+  source?: string
+  loadedFrom?: string
+  supportsNonInteractive: boolean
+  modelInvocable: boolean
+}
+
 export type RuntimeCommandInvocation = {
   name: string
   args: string
   source: 'cli' | 'repl' | 'bridge' | 'daemon' | 'sdk' | 'test'
+}
+
+export type RuntimeCommandExecuteRequest = {
+  name: string
+  args?: string
+  source?: RuntimeCommandInvocation['source']
+  metadata?: Record<string, unknown>
 }
 
 export interface RuntimeCommandContext {
@@ -54,6 +69,13 @@ export type RuntimeCommandResult =
       text?: string
       metaMessages?: readonly string[]
     }
+
+export type RuntimeCommandExecutionResult = {
+  name: string
+  kind?: RuntimeCommandKind
+  result: RuntimeCommandResult
+  metadata?: Record<string, unknown>
+}
 
 export interface RuntimeCommandHandler {
   readonly descriptor: RuntimeCommandDescriptor

@@ -12,14 +12,50 @@ import type {
   KernelRuntimeTransportKind,
 } from '../../contracts/runtime.js'
 import type {
+  KernelRuntimeAssignTaskCommand,
+  KernelRuntimeAuthenticateMcpCommand,
+  KernelRuntimeCancelAgentRunCommand,
+  KernelRuntimeCallToolCommand,
   KernelRuntimeCommand,
+  KernelRuntimeConnectMcpCommand,
   KernelRuntimeConnectHostCommand,
+  KernelRuntimeCreateTaskCommand,
   KernelRuntimeCreateConversationCommand,
   KernelRuntimeDecidePermissionCommand,
   KernelRuntimeDisconnectHostCommand,
+  KernelRuntimeExecuteCommandCommand,
+  KernelRuntimeGetAgentOutputCommand,
+  KernelRuntimeGetAgentRunCommand,
+  KernelRuntimeGetTaskCommand,
   KernelRuntimeHostDisconnectPolicy,
+  KernelRuntimeInstallPluginCommand,
+  KernelRuntimeListAgentRunsCommand,
+  KernelRuntimeListAgentsCommand,
+  KernelRuntimeListCommandsCommand,
+  KernelRuntimeListHooksCommand,
+  KernelRuntimeListMcpResourcesCommand,
+  KernelRuntimeListMcpServersCommand,
+  KernelRuntimeListMcpToolsCommand,
+  KernelRuntimeListPluginsCommand,
+  KernelRuntimeListSkillsCommand,
+  KernelRuntimeListTasksCommand,
+  KernelRuntimeListToolsCommand,
+  KernelRuntimeReloadAgentsCommand,
   KernelRuntimeReloadCapabilitiesCommand,
+  KernelRuntimeReloadHooksCommand,
+  KernelRuntimeReloadMcpCommand,
+  KernelRuntimeReloadPluginsCommand,
+  KernelRuntimeReloadSkillsCommand,
+  KernelRuntimeRegisterHookCommand,
+  KernelRuntimeResolveSkillContextCommand,
+  KernelRuntimeRunHookCommand,
+  KernelRuntimeSetMcpEnabledCommand,
+  KernelRuntimeSetPluginEnabledCommand,
+  KernelRuntimeSpawnAgentCommand,
   KernelRuntimeSubscribeEventsCommand,
+  KernelRuntimeUninstallPluginCommand,
+  KernelRuntimeUpdatePluginCommand,
+  KernelRuntimeUpdateTaskCommand,
 } from '../../contracts/wire.js'
 import { KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION } from '../../contracts/wire.js'
 import type { KernelRuntimeWireRouter } from './KernelRuntimeWireRouter.js'
@@ -97,6 +133,222 @@ export type KernelRuntimeWireClient = {
   ): Promise<KernelRuntimeEnvelopeBase>
   reloadCapabilities(
     command: KernelRuntimeWireClientCommand<KernelRuntimeReloadCapabilitiesCommand>,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listCommands(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListCommandsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  executeCommand(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeExecuteCommandCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listTools(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListToolsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  callTool(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeCallToolCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listMcpServers(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListMcpServersCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listMcpTools(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListMcpToolsCommand>,
+      'requestId' | 'metadata' | 'serverName'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listMcpResources(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListMcpResourcesCommand>,
+      'requestId' | 'metadata' | 'serverName'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadMcp(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadMcpCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  connectMcp(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeConnectMcpCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  authenticateMcp(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeAuthenticateMcpCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  setMcpEnabled(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeSetMcpEnabledCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listHooks(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListHooksCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadHooks(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadHooksCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  runHook(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeRunHookCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  registerHook(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeRegisterHookCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listSkills(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListSkillsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadSkills(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadSkillsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  resolveSkillContext(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeResolveSkillContextCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listPlugins(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListPluginsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadPlugins(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadPluginsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  setPluginEnabled(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeSetPluginEnabledCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  installPlugin(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeInstallPluginCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  uninstallPlugin(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeUninstallPluginCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  updatePlugin(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeUpdatePluginCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listAgents(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListAgentsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reloadAgents(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReloadAgentsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  spawnAgent(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeSpawnAgentCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listAgentRuns(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListAgentRunsCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getAgentRun(
+    options: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetAgentRunCommand>,
+      'runId' | 'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getAgentOutput(
+    options: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetAgentOutputCommand>,
+      'runId' | 'tailBytes' | 'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  cancelAgentRun(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeCancelAgentRunCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listTasks(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListTasksCommand>,
+      'requestId' | 'metadata' | 'taskListId'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getTask(
+    options: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetTaskCommand>,
+      'taskId' | 'requestId' | 'metadata' | 'taskListId'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  createTask(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeCreateTaskCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  updateTask(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeUpdateTaskCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  assignTask(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeAssignTaskCommand>,
+      'type'
+    >,
   ): Promise<KernelRuntimeEnvelopeBase>
   publishHostEvent(
     event: KernelEvent,
@@ -184,6 +436,186 @@ export function createKernelRuntimeWireClient(
         ...command,
         type: 'reload_capabilities',
       }),
+    listCommands: (command = {}) =>
+      request<KernelRuntimeListCommandsCommand>({
+        ...command,
+        type: 'list_commands',
+      }),
+    executeCommand: command =>
+      request<KernelRuntimeExecuteCommandCommand>({
+        ...command,
+        type: 'execute_command',
+      }),
+    listTools: (command = {}) =>
+      request<KernelRuntimeListToolsCommand>({
+        ...command,
+        type: 'list_tools',
+      }),
+    callTool: command =>
+      request<KernelRuntimeCallToolCommand>({
+        ...command,
+        type: 'call_tool',
+      }),
+    listMcpServers: (command = {}) =>
+      request<KernelRuntimeListMcpServersCommand>({
+        ...command,
+        type: 'list_mcp_servers',
+      }),
+    listMcpTools: (command = {}) =>
+      request<KernelRuntimeListMcpToolsCommand>({
+        ...command,
+        type: 'list_mcp_tools',
+      }),
+    listMcpResources: (command = {}) =>
+      request<KernelRuntimeListMcpResourcesCommand>({
+        ...command,
+        type: 'list_mcp_resources',
+      }),
+    reloadMcp: (command = {}) =>
+      request<KernelRuntimeReloadMcpCommand>({
+        ...command,
+        type: 'reload_mcp',
+      }),
+    connectMcp: command =>
+      request<KernelRuntimeConnectMcpCommand>({
+        ...command,
+        type: 'connect_mcp',
+      }),
+    authenticateMcp: command =>
+      request<KernelRuntimeAuthenticateMcpCommand>({
+        ...command,
+        type: 'authenticate_mcp',
+      }),
+    setMcpEnabled: command =>
+      request<KernelRuntimeSetMcpEnabledCommand>({
+        ...command,
+        type: 'set_mcp_enabled',
+      }),
+    listHooks: (command = {}) =>
+      request<KernelRuntimeListHooksCommand>({
+        ...command,
+        type: 'list_hooks',
+      }),
+    reloadHooks: (command = {}) =>
+      request<KernelRuntimeReloadHooksCommand>({
+        ...command,
+        type: 'reload_hooks',
+      }),
+    runHook: command =>
+      request<KernelRuntimeRunHookCommand>({
+        ...command,
+        type: 'run_hook',
+      }),
+    registerHook: command =>
+      request<KernelRuntimeRegisterHookCommand>({
+        ...command,
+        type: 'register_hook',
+      }),
+    listSkills: (command = {}) =>
+      request<KernelRuntimeListSkillsCommand>({
+        ...command,
+        type: 'list_skills',
+      }),
+    reloadSkills: (command = {}) =>
+      request<KernelRuntimeReloadSkillsCommand>({
+        ...command,
+        type: 'reload_skills',
+      }),
+    resolveSkillContext: command =>
+      request<KernelRuntimeResolveSkillContextCommand>({
+        ...command,
+        type: 'resolve_skill_context',
+      }),
+    listPlugins: (command = {}) =>
+      request<KernelRuntimeListPluginsCommand>({
+        ...command,
+        type: 'list_plugins',
+      }),
+    reloadPlugins: (command = {}) =>
+      request<KernelRuntimeReloadPluginsCommand>({
+        ...command,
+        type: 'reload_plugins',
+      }),
+    setPluginEnabled: command =>
+      request<KernelRuntimeSetPluginEnabledCommand>({
+        ...command,
+        type: 'set_plugin_enabled',
+      }),
+    installPlugin: command =>
+      request<KernelRuntimeInstallPluginCommand>({
+        ...command,
+        type: 'install_plugin',
+      }),
+    uninstallPlugin: command =>
+      request<KernelRuntimeUninstallPluginCommand>({
+        ...command,
+        type: 'uninstall_plugin',
+      }),
+    updatePlugin: command =>
+      request<KernelRuntimeUpdatePluginCommand>({
+        ...command,
+        type: 'update_plugin',
+      }),
+    listAgents: (command = {}) =>
+      request<KernelRuntimeListAgentsCommand>({
+        ...command,
+        type: 'list_agents',
+      }),
+    reloadAgents: (command = {}) =>
+      request<KernelRuntimeReloadAgentsCommand>({
+        ...command,
+        type: 'reload_agents',
+      }),
+    spawnAgent: command =>
+      request<KernelRuntimeSpawnAgentCommand>({
+        ...command,
+        type: 'spawn_agent',
+      }),
+    listAgentRuns: (command = {}) =>
+      request<KernelRuntimeListAgentRunsCommand>({
+        ...command,
+        type: 'list_agent_runs',
+      }),
+    getAgentRun: command =>
+      request<KernelRuntimeGetAgentRunCommand>({
+        ...command,
+        type: 'get_agent_run',
+      }),
+    getAgentOutput: command =>
+      request<KernelRuntimeGetAgentOutputCommand>({
+        ...command,
+        type: 'get_agent_output',
+      }),
+    cancelAgentRun: command =>
+      request<KernelRuntimeCancelAgentRunCommand>({
+        ...command,
+        type: 'cancel_agent_run',
+      }),
+    listTasks: (command = {}) =>
+      request<KernelRuntimeListTasksCommand>({
+        ...command,
+        type: 'list_tasks',
+      }),
+    getTask: command =>
+      request<KernelRuntimeGetTaskCommand>({
+        ...command,
+        type: 'get_task',
+      }),
+    createTask: command =>
+      request<KernelRuntimeCreateTaskCommand>({
+        ...command,
+        type: 'create_task',
+      }),
+    updateTask: command =>
+      request<KernelRuntimeUpdateTaskCommand>({
+        ...command,
+        type: 'update_task',
+      }),
+    assignTask: command =>
+      request<KernelRuntimeAssignTaskCommand>({
+        ...command,
+        type: 'assign_task',
+      }),
     publishHostEvent: (event, commandOptions = {}) =>
       request<Extract<KernelRuntimeCommand, { type: 'publish_host_event' }>>({
         type: 'publish_host_event',
@@ -223,7 +655,10 @@ export function createKernelRuntimeInProcessWireTransport(
           controlEnvelope = envelope
         }
       }
-      if (command.type === 'subscribe_events' && controlEnvelope?.kind === 'ack') {
+      if (
+        command.type === 'subscribe_events' &&
+        controlEnvelope?.kind === 'ack'
+      ) {
         recordLiveSubscription(liveSubscriptions, command)
       }
       for (const envelope of responses) {
@@ -386,7 +821,10 @@ class KernelRuntimeStdioWireTransport implements KernelRuntimeWireTransport {
       return
     }
     this.pending.delete(envelope.requestId)
-    if (pending.command.type === 'subscribe_events' && envelope.kind === 'ack') {
+    if (
+      pending.command.type === 'subscribe_events' &&
+      envelope.kind === 'ack'
+    ) {
       recordLiveSubscription(this.liveSubscriptions, pending.command)
     }
     pending.resolve(envelope)
