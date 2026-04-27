@@ -49,7 +49,7 @@
 - `main/commandAssembly.ts` 的 bundled skills / builtin plugins 预热已下沉到 `src/runtime/capabilities/commands/RuntimeCommandSources.ts`，CLI 继续复用同一入口，避免外部 headless 路径漏掉 bundled command sources。
 - headless refresh 已收进 `src/runtime/capabilities/execution/internal/headlessRuntimeCapabilityBundle.ts`：`refreshCommands()`、`refreshPlugins()` 和 plugin MCP diff 由同一个 runtime bundle 处理。
 - MCP runtime ownership 已收进 `src/runtime/capabilities/mcp/RuntimeHeadlessMcpService.ts`：SDK seed、dynamic server、connect / reconnect / status 与 `mcp_set_servers` state mutation 不再散在 headless loop helper 中。
-- interactive MCP connection lifecycle 已收进 `src/runtime/capabilities/mcp/RuntimeInteractiveMcpService.ts`：config load、pending reconciliation、stale cleanup、two-phase connect、manual reconnect、enable / disable、automatic reconnect、channel notification handler 注册 / 卸载与 `tools/prompts/resources list_changed` refresh 不再由 React hook 自持；`useManageMCPConnections(...)` 只保留 AppState batching、elicitation UI 写入、channel message 入队、channel permission resolve 与 blocked toast 这些 interactive host callback。
+- interactive MCP connection lifecycle 已收进 `src/runtime/capabilities/mcp/RuntimeInteractiveMcpService.ts`：config load、pending reconciliation、stale cleanup、two-phase connect、manual reconnect、enable / disable、automatic reconnect、channel notification handler 注册 / 卸载与 `tools/prompts/resources list_changed` refresh 不再由 React hook 自持；channel allowlist 也改为 host option 注入，runtime service 不再直接 import `bootstrap/state`；`useManageMCPConnections(...)` 只保留 AppState batching、elicitation UI 写入、channel message 入队、channel permission resolve、blocked toast 与 bootstrap-backed allowlist 读取这些 interactive host callback。
 - hook / plugin 初装配已新增 runtime service adapter：`src/runtime/capabilities/hooks/RuntimeHookService.ts` 负责 plugin hook reload / count / cache lifecycle，`src/runtime/capabilities/plugins/RuntimePluginService.ts` 负责 interactive REPL 初始 plugin commands / agents / hooks / MCP / LSP materialization。`useManagePlugins(...)` 只保留 React notification / telemetry adapter 职责。
 
 这一步的边界是“runtime 拥有 headless 默认能力装配，CLI 是第一个 host”。它不声明新的外部 public surface，也不删除 CLI 现有路径。
@@ -635,7 +635,7 @@ export type KernelPluginManager = {
 
 - skills 加载覆盖 bundled、user、project、managed、MCP、plugin skills。
 - plugins 加载覆盖 marketplace、本地、managed、user/project scope plugins。
-- plugin 产生的 commands、agents、hooks、MCP、skills、tools 必须进入统一 capability resolver；当前 commands / agents / hooks / plugin MCP diff 已有 runtime-owned adapter，interactive MCP connection manager 的 config/connect/reconnect/toggle/channel/list_changed lifecycle 已进入 `RuntimeInteractiveMcpService`，React 层只保留 UI adapter callback。
+- plugin 产生的 commands、agents、hooks、MCP、skills、tools 必须进入统一 capability resolver；当前 commands / agents / hooks / plugin MCP diff 已有 runtime-owned adapter，interactive MCP connection manager 的 config/connect/reconnect/toggle/channel/list_changed lifecycle 已进入 `RuntimeInteractiveMcpService`，channel allowlist 由 host option 注入，React 层只保留 UI adapter callback。
 - loading errors 必须通过 public manager API 和 public event 暴露。
 
 ## 13. Agents / Coordinator / Task 系统

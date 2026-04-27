@@ -532,9 +532,11 @@ flowchart TB
   loading、pending reconciliation、stale cleanup、two-phase connect、manual
   reconnect、enable / disable、automatic reconnect、channel notification
   handler 注册 / 卸载与 `tools/prompts/resources list_changed` refresh 已进入
-  `RuntimeInteractiveMcpService`。`useManageMCPConnections(...)` 仍作为
-  compatibility UI adapter 保留 AppState batching、elicitation UI 写入、
-  channel message 入队、channel permission resolve 与 blocked toast callback。
+  `RuntimeInteractiveMcpService`。channel allowlist 通过 host option 注入，
+  runtime service 不再直接 import `bootstrap/state`。`useManageMCPConnections(...)`
+  仍作为 compatibility UI adapter 保留 AppState batching、elicitation UI 写入、
+  channel message 入队、channel permission resolve、blocked toast 与
+  bootstrap-backed allowlist 读取 callback。
 
 ### 8.4 不做
 
@@ -575,6 +577,9 @@ flowchart TB
 - runtime-owned identity state。
 - host-owned UI state 标注。
 - 新 runtime path 禁止直接 import `src/bootstrap/state.js`。
+- `RuntimeInteractiveMcpService` 已补 import discipline：channel allowlist 改为
+  host option 注入，bootstrap-backed 读取留在 `useManageMCPConnections(...)`
+  adapter。
 
 ### 9.4 不做
 

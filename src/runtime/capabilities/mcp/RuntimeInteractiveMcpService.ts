@@ -5,7 +5,6 @@ import {
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { getAllowedChannels } from '../../../bootstrap/state.js'
 import type { Command } from '../../../commands.js'
 import {
   clearServerCache,
@@ -93,6 +92,7 @@ export type RuntimeMcpChannelBlockedKind =
 export type RuntimeInteractiveMcpServiceOptions = {
   getAppState(): AppState
   setAppState: SetAppState
+  getAllowedChannels?: () => Parameters<typeof gateChannelServer>[3]
   dynamicMcpConfig?: Record<string, ScopedMcpServerConfig>
   isStrictMcpConfig?: boolean
   reconnectTimers: Map<string, ReturnType<typeof setTimeout>>
@@ -145,7 +145,6 @@ export type RuntimeInteractiveMcpServiceDeps = {
   isMcpServerDisabled: typeof isMcpServerDisabled
   setMcpServerEnabled: typeof setMcpServerEnabled
   excludeStalePluginClients: typeof excludeStalePluginClients
-  getAllowedChannels: typeof getAllowedChannels
   logForDebugging: typeof logForDebugging
   logEvent: typeof logEvent
   logMCPDebug: typeof logMCPDebug
@@ -170,7 +169,6 @@ const defaultDeps: RuntimeInteractiveMcpServiceDeps = {
   isMcpServerDisabled,
   setMcpServerEnabled,
   excludeStalePluginClients,
-  getAllowedChannels,
   logForDebugging,
   logEvent,
   logMCPDebug,
@@ -540,7 +538,7 @@ export function createRuntimeInteractiveMcpService(
   }
 
   function registerChannelHandlers(client: ConnectedMCPServer): void {
-    const channels = deps.getAllowedChannels()
+    const channels = options.getAllowedChannels?.() ?? []
     const gate = gateChannelServer(
       client.name,
       client.capabilities,

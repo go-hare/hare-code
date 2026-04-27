@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 
 import type { Command } from '../../../../commands.js'
-import type { ChannelEntry } from '../../../../bootstrap/state.js'
 import type {
   ConnectedMCPServer,
   MCPServerConnection,
@@ -14,6 +13,7 @@ import type { PluginError } from '../../../../types/plugin.js'
 import {
   createRuntimeInteractiveMcpService,
   type RuntimeInteractiveMcpServiceDeps,
+  type RuntimeInteractiveMcpServiceOptions,
   type RuntimeMcpConnectionAttempt,
   type RuntimeMcpServerUpdate,
 } from '../RuntimeInteractiveMcpService.js'
@@ -108,6 +108,9 @@ function createCachedAsync<TArgs extends unknown[], TResult>(
 function createHarness(input?: {
   appState?: AppState
   deps?: Partial<Record<keyof RuntimeInteractiveMcpServiceDeps, unknown>>
+  getAllowedChannels?: NonNullable<
+    RuntimeInteractiveMcpServiceOptions['getAllowedChannels']
+  >
   dynamicMcpConfig?: Record<string, ScopedMcpServerConfig>
   isStrictMcpConfig?: boolean
 }) {
@@ -183,7 +186,6 @@ function createHarness(input?: {
         _configs: Record<string, ScopedMcpServerConfig>,
       ) => ({ ...mcp, stale: [] }),
     ),
-    getAllowedChannels: mock(() => [] as ChannelEntry[]),
     logForDebugging: mock(() => {}),
     logEvent: mock(() => {}),
     logMCPDebug: mock(() => {}),
@@ -194,6 +196,7 @@ function createHarness(input?: {
     {
       getAppState: () => appState,
       setAppState,
+      getAllowedChannels: input?.getAllowedChannels ?? (() => []),
       dynamicMcpConfig: input?.dynamicMcpConfig,
       isStrictMcpConfig: input?.isStrictMcpConfig,
       reconnectTimers,
@@ -471,11 +474,9 @@ describe('RuntimeInteractiveMcpService', () => {
       },
     })
     const harness = createHarness({
-      deps: {
-        getAllowedChannels: mock(() => [
-          { kind: 'server', name: 'channel-server' },
-        ]),
-      },
+      getAllowedChannels: mock(() => [
+        { kind: 'server', name: 'channel-server' },
+      ] as const),
     })
 
     harness.service.handleConnectionAttempt(createAttempt(client))
@@ -537,15 +538,13 @@ describe('RuntimeInteractiveMcpService', () => {
       },
     )
     const harness = createHarness({
-      deps: {
-        getAllowedChannels: mock(() => [
-          {
-            kind: 'plugin',
-            name: 'slack',
-            marketplace: 'anthropic',
-          },
-        ]),
-      },
+      getAllowedChannels: mock(() => [
+        {
+          kind: 'plugin',
+          name: 'slack',
+          marketplace: 'anthropic',
+        },
+      ] as const),
     })
 
     harness.service.handleConnectionAttempt(createAttempt(client))

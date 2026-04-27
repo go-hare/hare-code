@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { getSessionId } from '../../bootstrap/state.js'
+import { getAllowedChannels, getSessionId } from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import {
   createRuntimeInteractiveMcpService,
@@ -208,6 +208,7 @@ export function useManageMCPConnections(
       createRuntimeInteractiveMcpService({
         getAppState: () => store.getState(),
         setAppState,
+        getAllowedChannels,
         dynamicMcpConfig,
         isStrictMcpConfig,
         reconnectTimers: reconnectTimersRef.current,
