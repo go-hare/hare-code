@@ -202,9 +202,9 @@
   `OPENAI_BASE_URL`、`OPENAI_MODEL=gpt-5.4` 走真实 endpoint 返回预期 JSON。
 - `SessionRuntime` 已有 runtime-first turn stream：
   `submitRuntimeTurn(...)` 产出 `turn.started`、`headless.sdk_message`、
-  `turn.completed` / `turn.failed` envelope；`ask(...)` 已改为消费 runtime
-  envelope 再投影回 legacy `SDKMessage`，`submitMessage(...)` 只保留为
-  SDK-compatible projection。
+  `turn.completed` / `turn.failed` envelope；`askRuntime(...)` 消费 runtime
+  envelope 并在 one-shot lifecycle 里显式收尾，`ask(...)` /
+  `submitMessage(...)` 只保留为 deprecated SDK-compatible projection。
 - headless stream publisher 已 runtime-first：
   `createHeadlessRuntimeStreamPublisher(...)` 先写 `RuntimeEventBus`，legacy
   `stream-json` stdout 后写；测试覆盖 legacy write 发生时 runtime replay
@@ -257,14 +257,12 @@ Lane B 当前兼容边界：
   `headless.sdk_message` result fallback 与纯 semantic `turn.output_delta`
   terminal fallback，不再只依赖 legacy `onMessage(result)`。
 - ACP prompt path 已接入 runtime envelope producer / consumer：
-  `AcpAgent.prompt(...)` 会把 `QueryEngine.submitMessage(...)` 的
-  `SDKMessage` stream 包进会话级 `RuntimeEventBus`，输出 `turn.started`、
-  `headless.sdk_message` 与 `turn.completed` / `turn.failed` envelope；
-  `forwardSessionUpdates(...)` 现在对 legacy `SDKMessage` 输入也会先包成
-  `headless.sdk_message` runtime envelope，再走同一个 host event handler；
-  纯 `turn.output_delta` 走 ACP 文本 chunk，terminal turn event 只收敛
-  stopReason。该 path 使用 `KernelRuntimeSDKMessageDedupe` 避免 runtime
-  envelope 与 compatibility stream 双写。
+  `AcpAgent.prompt(...)` 直接消费 `QueryEngine.submitRuntimeTurn(...)` 输出的
+  runtime envelope；`forwardSessionUpdates(...)` 只接收 runtime envelope，并
+  通过同一个 host event handler 处理 `headless.sdk_message`、纯
+  `turn.output_delta` 与 terminal turn event。该 path 使用
+  `KernelRuntimeSDKMessageDedupe` 避免 runtime envelope 与 compatibility
+  stream 双写。
 
 Lane C 当前状态：
 

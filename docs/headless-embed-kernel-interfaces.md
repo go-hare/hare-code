@@ -77,18 +77,18 @@
   真实 endpoint 返回预期 JSON。
 - `SessionRuntime` 已补齐 runtime-first 执行出口：
   `submitRuntimeTurn(...)` 输出 `turn.started`、`headless.sdk_message`、
-  `turn.completed` / `turn.failed` runtime envelope；`submitMessage(...)` 与
-  `ask(...)` 只保留为 SDK-compatible 投影，不再是唯一内部执行接口。
+  `turn.completed` / `turn.failed` runtime envelope；`RuntimeExecutionSession`
+  不再声明 `submitMessage(...)`，`QueryEngine.ts` 不再 re-export `ask`。
+  `submitMessage(...)` 与 `ask(...)` 只保留为 deprecated SDK-compatible
+  projection shim，不再是内部执行 contract。
 - headless stream 输出已改成 runtime-first publisher：
   `createHeadlessRuntimeStreamPublisher(...)` 先把 SDK payload 写入
   `RuntimeEventBus`，legacy `stream-json` stdout 再作为兼容写出。
-- ACP prompt path 已开始走 runtime event envelope：`AcpAgent.prompt(...)` 把
-  `QueryEngine.submitMessage(...)` 的 legacy SDK stream 先写入会话级
-  `RuntimeEventBus`，再交给 ACP bridge 消费；`forwardSessionUpdates(...)`
-  对直接传入的 legacy `SDKMessage` 也会先包成 `headless.sdk_message`
-  runtime envelope，其中 `headless.sdk_message` 复用原 ACP 转换逻辑，纯
-  `turn.output_delta` 输出 ACP 文本 chunk，`turn.completed` / `turn.failed`
-  收敛 stopReason，避免 ACP 停留在 SDK-first execution stream。
+- ACP prompt path 已走 runtime event envelope：`AcpAgent.prompt(...)` 直接消费
+  `QueryEngine.submitRuntimeTurn(...)`；`forwardSessionUpdates(...)` 只接收
+  runtime envelope。`headless.sdk_message` payload 继续复用原 ACP SDK-message
+  转换逻辑，纯 `turn.output_delta` 输出 ACP 文本 chunk，`turn.completed` /
+  `turn.failed` 收敛 stopReason，避免 ACP 回到 SDK-message 投影作为执行主流。
 
 这一步的边界是“runtime 拥有 headless 默认能力装配，CLI 是第一个 host”。它不声明新的外部 public surface，也不删除 CLI 现有路径。
 
@@ -147,7 +147,8 @@ import {
 
 建议新增：`claude-code/src/kernel/runtime.ts`
 
-必须从 `@go-hare/hare-code/kernel` 导出。
+这是下一阶段 public runtime API 的目标态；当前内部 kernel 完整性不依赖该入口。
+目标态应从 `@go-hare/hare-code/kernel` 导出。
 
 ```ts
 export function createKernelRuntime(
@@ -167,7 +168,7 @@ export type KernelRuntime = {
 
 语义：
 
-- `createKernelRuntime()` 是 CLI runtime 能力总入口。
+- `createKernelRuntime()` 是下一阶段 JS in-process public runtime 能力总入口。
 - `createKernelHeadlessController()` 是 conversation/headless execution 的专用 facade，可以由 runtime 创建，也可以单独用于轻量 headless embed。
 - CLI、desktop、daemon、remote host 的差异通过 `KernelRuntimeOptions.host` 和 capability intent 表达，而不是通过 import 不同内部模块表达。
 
@@ -923,8 +924,9 @@ export type KernelEvent =
 
 ### claude-code
 
-- `claude-code/src/kernel/runtime.ts`
-  - 新增 `createKernelRuntime()` 总入口。
+- `claude-code/src/kernel/runtime.ts`（future public API）
+  - `createKernelRuntime()` 仍是下一阶段 public runtime 总入口目标；当前内部
+    kernel 完整性不依赖它。
 - `claude-code/src/kernel/wireProtocol.ts`
   - 新增 `KernelRuntimeWireProtocol` 的命令、响应、错误和 envelope schema。
   - 当前已在 `src/runtime/contracts/wire.ts` 与 `src/runtime/core/wire/*`

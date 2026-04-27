@@ -2,7 +2,7 @@
 title: "多轮对话管理 - QueryEngine 会话编排与持久化"
 description: "从源码角度解析 Claude Code 多轮对话管理：QueryEngine 的会话状态机、JSONL transcript 持久化、成本追踪模型和模型热切换机制。"
 keywords: ["多轮对话", "会话管理", "QueryEngine", "transcript", "成本追踪"]
-sourceRef: "3ec5675 (2026-04-08)"
+sourceRef: "7978e8c (2026-04-27)"
 ---
 
 {/* 本章目标：从源码角度揭示会话编排、持久化存储、成本追踪和模型切换的完整链路 */}
@@ -10,7 +10,7 @@ sourceRef: "3ec5675 (2026-04-08)"
 ## 单轮 vs 多轮：架构层面的差异
 
 - **单轮**（一次 Agentic Loop）：`query()` 函数的一次完整执行——组装上下文 → 调 API → 处理工具调用 → 循环直到结束
-- **多轮**（一个 Session）：`QueryEngine` 类管理的一次会话——跨越数十轮 `submitMessage()` 调用，持续数小时
+- **多轮**（一个 Session）：`QueryEngine` / `SessionRuntime` 管理的一次会话——跨越数十轮 `submitRuntimeTurn()` 调用，持续数小时
 
 `QueryEngine`（`src/QueryEngine.ts`，类定义）是单轮 Agentic Loop 之上的**会话编排器**，它管理的状态远不止消息列表：
 
@@ -26,29 +26,37 @@ QueryEngine 内部状态（src/QueryEngine.ts 构造函数）
 └── abortController: AbortController   ← 会话级中断控制
 ```
 
-## QueryEngine 的核心方法：submitMessage()
+## QueryEngine 的核心方法：submitRuntimeTurn()
 
-每次用户输入一条消息，REPL 或 SDK 调用 `submitMessage()`，它会执行完整的 turn 初始化链路：
+`QueryEngine` 现在是 `SessionRuntime` 的 public alias。每次用户输入一条消息，runtime owner 调用 `submitRuntimeTurn()`，它会执行完整的 turn 初始化链路并产出 runtime envelope：
 
 ```typescript
-// src/QueryEngine.ts — QueryEngine.submitMessage() 简化流程
-async *submitMessage(
+// src/runtime/capabilities/execution/SessionRuntime.ts — 简化流程
+async *submitRuntimeTurn(
   prompt: string | ContentBlockParam[],
   options?: { uuid?: string; isMeta?: boolean },
-): AsyncGenerator<SDKMessage> {
-  // 1. 清除 turn 级追踪状态
+): AsyncGenerator<KernelRuntimeEnvelopeBase> {
+  // 1. 发出 runtime turn.started envelope
+  yield runtimeEventBus.emit({
+    type: "turn.started",
+    conversationId,
+    turnId,
+    payload: { state: "running" },
+  })
+
+  // 2. 清除 turn 级追踪状态
   this.discoveredSkillNames.clear()
 
-  // 2. 解析模型（用户可能中途通过 setModel() 切换了模型）
+  // 3. 解析模型（用户可能中途通过 setModel() 切换了模型）
   const mainLoopModel = this.config.userSpecifiedModel
     ? parseUserSpecifiedModel(this.config.userSpecifiedModel)
     : getMainLoopModel()
 
-  // 3. 动态组装 System Prompt（每次 turn 都重新构建）
+  // 4. 动态组装 System Prompt（每次 turn 都重新构建）
   const { defaultSystemPrompt, userContext, systemContext } =
     await fetchSystemPromptParts({ tools, mainLoopModel, mcpClients })
 
-  // 4. 包装权限检查（追踪每次拒绝）
+  // 5. 包装权限检查（追踪每次拒绝）
   const wrappedCanUseTool = async (tool, input, ...) => {
     const result = await canUseTool(tool, input, ...)
     if (result.behavior !== 'allow') {
@@ -62,15 +70,28 @@ async *submitMessage(
     return result
   }
 
-  // 5. 调用核心 query() 函数执行 agentic loop
-  yield* query({
+  // 6. 调用核心 query() 函数执行 agentic loop；
+  //    每条 SDK payload 先进入 headless.sdk_message runtime envelope
+  for await (const message of query({
     systemPrompt, messages: this.mutableMessages,
     tools, model: mainLoopModel, ...
+  })) {
+    yield runtimeEventBus.emit(createHeadlessSDKMessageRuntimeEvent(message))
+  }
+
+  // 7. 发出 terminal runtime envelope
+  yield runtimeEventBus.emit({
+    type: "turn.completed",
+    conversationId,
+    turnId,
+    payload: { state: "completed", stopReason },
   })
 }
 ```
 
-关键设计：`submitMessage()` 是 `async *Generator`——它逐步 yield `SDKMessage`，让调用方（REPL/SDK）能实时展示进度，而不是等整个 turn 结束。
+关键设计：`submitRuntimeTurn()` 是 `async *Generator`——它逐步 yield `KernelRuntimeEnvelopeBase`，让调用方（headless、ACP、wire、direct-connect、bridge）基于同一个事件源实时展示进度，而不是等整个 turn 结束。
+
+兼容边界：`submitMessage()` 与 `ask()` 仍存在，但它们只是 deprecated SDK-message projection shim。内部 runtime owner 应消费 `submitRuntimeTurn()` / `askRuntime()`，只在 CLI `stream-json`、旧 SDK payload 或宿主兼容层边界投影回 `SDKMessage`。
 
 ## 会话持久化：JSONL Transcript
 
@@ -184,7 +205,7 @@ saveCurrentSessionCosts(sessionId)
 ```
 /model sonnet → QueryEngine.setModel('claude-sonnet-4-20250514')
   ↓  实际操作：this.config.userSpecifiedModel = model（QueryEngine.setModel() 方法）
-下一次 submitMessage() 开始时：
+下一次 submitRuntimeTurn() 开始时：
   ↓
 parseUserSpecifiedModel(this.config.userSpecifiedModel)
   → 返回新的模型配置

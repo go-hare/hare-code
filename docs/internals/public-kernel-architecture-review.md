@@ -2,6 +2,13 @@
 
 日期：2026-04-26
 
+2026-04-27 复核：本文保留 public runtime API 的审查结论，但内部 kernel
+主链已经继续前进一轮。`SessionRuntime.submitRuntimeTurn(...)` 已成为
+runtime-first turn stream，`RuntimeExecutionSession` 不再声明
+`submitMessage(...)`，ACP prompt / bridge 直接消费 runtime envelope。
+`createKernelRuntime()` 仍是下一阶段 public API 目标，不再作为内部 kernel
+完整性的 blocker。
+
 ## 1. 审查结论
 
 当前代码已经形成 `Host -> Kernel -> Runtime` 的主方向，且 `@go-hare/hare-code/kernel` 具备可发布、可导入、受测试锁定的 root surface。
@@ -31,12 +38,14 @@
   hard kill 后恢复 latest snapshot、`detached` 状态和 active turn lock；
   public `KernelRuntimeWireClient` 与 `in-process` / `stdio` transport wrapper
   已落地，并已补齐 runtime-scoped `connect_host` replay、client-local live
-  subscription scope 与 `sessionId`/`workspacePath` conversation reuse guard；
-  剩余缺口是 process crash 后 active model/tool execution 的 durable resume，
-  以及 IPC / WebSocket / Unix socket 等非 NDJSON transport 实现。
-- 统一 `KernelEvent` / envelope / replay 已有 internal event bus 和
-  router-level replay gap contract，但还没有覆盖所有 headless /
-  direct-connect / bridge 输出。
+  subscription scope、`sessionId`/`workspacePath` conversation reuse guard 与
+  hard-kill 后 active model/tool execution durable resume。剩余缺口是 IPC /
+  WebSocket / Unix socket 等非 NDJSON transport 实现。
+- 统一 `KernelEvent` / envelope / replay 已有 internal event bus、
+  router-level replay gap contract、compat projection 与 host event facade；
+  headless、direct-connect、remote / SSH、bridge / RCS 与 ACP 已接入同源
+  envelope。剩余缺口是把这套内部 event model 整理成更稳定的 public event
+  object model。
 - capability resolver 已有 internal lazy-loading skeleton，`create_conversation`
   已开始消费 `capabilityIntent` 并通过 `requireCapability(...)` demand-load；
   package declaration 已暴露 resolver injection type。剩余缺口是 headless
@@ -107,7 +116,7 @@ Host 层负责启动模式、TTY/UI、signal、profile checkpoint、宿主状态
 - `core/session`
 - `contracts`
 
-execution 的 `SessionRuntime` 已经显式表达“一 conversation 一个 runtime session，每次 `submitMessage()` 是一个 turn”。server/direct-connect 已经有 `SessionManager`、`RuntimeDirectConnectSession`、`RuntimeSessionRegistry`。
+execution 的 `SessionRuntime` 已经显式表达“一 conversation 一个 runtime session，每次 `submitRuntimeTurn()` 是一个 turn”。server/direct-connect 已经有 `SessionManager`、`RuntimeDirectConnectSession`、`RuntimeSessionRegistry`。
 
 这说明 runtime ownership 正在形成，但还没有统一成 public `KernelRuntime`。
 
@@ -160,14 +169,18 @@ execution 的 `SessionRuntime` 已经显式表达“一 conversation 一个 runt
 - 一份 `mutableMessages`
 - 一个 `abortController`
 - 一份 read file cache
-- `submitMessage()` 表示 turn
+- `submitRuntimeTurn()` 表示 turn
 - `stopAndWait()` 表示 lifecycle 终止
 
-但当前 `submitMessage()` 只检查 `live`，没有协议级 active turn lock。`interrupt()` / `resetAbortController()` 是对象方法，不是 wire-level 状态机。
+当前 source-level execution session 通过 `RuntimeConversation` /
+`RuntimeTurnController` 与 wire active execution journal 承接 active turn /
+abort 状态机；`interrupt()` / `resetAbortController()` 仍保留为本地
+execution object 方法。public API 尚未把这套状态机整理成稳定的
+`KernelConversation` / `KernelTurn` object model。
 
 架构判断：
 
-> execution runtime 已经能承载 conversation 语义，但还没有升级成 public turn state machine。
+> execution runtime 已经能承载 conversation 语义，并已形成内部 runtime turn state machine；下一步缺的是 public object model，而不是内部主链能力。
 
 完整状态还需要定义：
 
@@ -310,13 +323,13 @@ flowchart TB
 | 领域 | 当前代码状态 | 完整状态要求 | 风险 |
 | --- | --- | --- | --- |
 | Root surface | 已有 `@go-hare/hare-code/kernel` | 承载完整 contract exports | 中 |
-| Runtime 总入口 | 未见 `createKernelRuntime()` | runtime object 统一生命周期 | 高 |
-| Wire protocol | 未见 `KernelRuntimeWireProtocol` | JSON envelope + command/event/error | 高 |
-| Event surface | 仍分散在 SDK / stdout / direct-connect | 统一 `KernelEvent` + replay | 高 |
-| Headless | 可运行 façade | controller + turn state machine | 高 |
+| Runtime 总入口 | 未见 public `createKernelRuntime()` | runtime object 统一生命周期 | 高 |
+| Wire protocol | 已有 internal/router/client/export/bin 与 NDJSON/in-process/stdio transport | 扩展 IPC / WebSocket / Unix socket 等承载层 | 中 |
+| Event surface | 已有 runtime envelope、event facade、compat projection 与多 host 接入 | public event object model 稳定化 | 中 |
+| Headless | runtime-first 可运行 façade | public controller object + turn state machine | 中 |
 | Server/direct-connect | contract 化较好 | 映射到统一 wire/event/permission | 中 |
-| Session core | lifecycle seam 已有 | conversation/turn/event identity | 高 |
-| Permission | 仍偏内部 tool/SDK 流 | public request/decision/audit contract | 高 |
+| Session core | runtime conversation / turn controller 与 active execution journal 已有 | public conversation/turn object model | 中 |
+| Permission | runtime broker 与 package-level broker facade 已有 | 替换更多 legacy UI callback | 中 |
 | Capability | 分散加载 | resolver + descriptor + lazy loading | 高 |
 | State ownership | provider seam 已有 | process-global singleton 退场 | 高 |
 | Tests | surface/package/contract 已有 | wire/concurrency/security contract | 中 |
