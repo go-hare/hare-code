@@ -1,15 +1,19 @@
 #!/usr/bin/env bun
 
 import { access } from 'fs/promises'
+import { randomUUID } from 'crypto'
 import { join, resolve } from 'path'
 import { spawn } from 'bun'
 
 type Target = {
   name: string
   cwd: string
+  kind: 'source' | 'built-bun' | 'built-node'
+  requireRuntimeEnvelope: boolean
 }
 
 type Options = {
+  includeBuilt: boolean
   includeOriginal: boolean
   originalPath: string
   prompt: string
@@ -24,7 +28,9 @@ type RunResult = {
 
 const repoRoot = resolve(import.meta.dir, '..')
 const defaultOriginalPath = '/Users/apple/Downloads/claude-code-main'
-const defaultPrompt = 'In one word, name the planet after Earth.'
+function createDefaultPrompt(): string {
+  return `Reply with exactly this token and no tools: HARE_API_PONG_${randomUUID()}`
+}
 
 function parseOptions(argv: string[]): Options {
   const getValue = (name: string): string | undefined => {
@@ -33,6 +39,7 @@ function parseOptions(argv: string[]): Options {
   }
 
   return {
+    includeBuilt: argv.includes('--built'),
     includeOriginal: argv.includes('--original'),
     originalPath:
       getValue('--original-path') ??
@@ -41,13 +48,13 @@ function parseOptions(argv: string[]): Options {
     prompt:
       getValue('--prompt') ??
       process.env.KERNEL_DEEP_TEST_PROMPT ??
-      defaultPrompt,
+      createDefaultPrompt(),
     timeoutMs: Number.parseInt(getValue('--timeout-ms') ?? '120000', 10),
   }
 }
 
 function printUsage(): void {
-  console.log(`Usage: bun run scripts/kernel-deep-smoke.ts [--original] [--original-path <path>] [--prompt <text>]
+  console.log(`Usage: bun run scripts/kernel-deep-smoke.ts [--built] [--original] [--original-path <path>] [--prompt <text>]
 
 Runs a live OpenAI-compatible headless smoke test without storing secrets.
 
@@ -57,6 +64,7 @@ Required env:
   KERNEL_DEEP_TEST_MODEL or OPENAI_MODEL
 
 Optional:
+  --built                 Also run dist/cli-bun.js and dist/cli-node.js.
   --original              Also run the reference checkout.
   --original-path <path>  Defaults to ${defaultOriginalPath}.
   --timeout-ms <ms>       Defaults to 120000.`)
@@ -92,12 +100,11 @@ function getDeepEnv(): Record<string, string> {
 }
 
 function commandForTarget(target: Target, model: string): string[] {
-  return [
-    'bun',
-    'run',
-    'scripts/dev.ts',
+  const commonArgs = [
     '-p',
     '--disable-slash-commands',
+    '--tools',
+    '',
     '--output-format',
     'stream-json',
     '--verbose',
@@ -106,6 +113,14 @@ function commandForTarget(target: Target, model: string): string[] {
     '--model',
     model,
   ]
+
+  if (target.kind === 'built-bun') {
+    return ['bun', 'dist/cli-bun.js', ...commonArgs]
+  }
+  if (target.kind === 'built-node') {
+    return ['node', 'dist/cli-node.js', ...commonArgs]
+  }
+  return ['bun', 'run', 'scripts/dev.ts', ...commonArgs]
 }
 
 async function runTarget(
@@ -114,7 +129,13 @@ async function runTarget(
   prompt: string,
   timeoutMs: number,
 ): Promise<RunResult> {
-  await assertFile(join(target.cwd, 'scripts/dev.ts'))
+  if (target.kind === 'built-bun') {
+    await assertFile(join(target.cwd, 'dist/cli-bun.js'))
+  } else if (target.kind === 'built-node') {
+    await assertFile(join(target.cwd, 'dist/cli-node.js'))
+  } else {
+    await assertFile(join(target.cwd, 'scripts/dev.ts'))
+  }
   const command = commandForTarget(target, env.OPENAI_MODEL)
   const proc = spawn(command, {
     cwd: target.cwd,
@@ -162,6 +183,23 @@ function assertSmokeResult(target: Target, result: RunResult): void {
   if (!hasResultLine) {
     throw new Error(`${target.name} did not emit a successful result event`)
   }
+
+  if (target.requireRuntimeEnvelope) {
+    const lines = result.stdout.split('\n')
+    const hasRuntimeEnvelope = lines.some(
+      line =>
+        line.includes('"type":"kernel_runtime_event"') &&
+        line.includes('"headless.sdk_message"'),
+    )
+    if (!hasRuntimeEnvelope) {
+      throw new Error(
+        `${target.name} did not emit runtime-first headless SDK envelopes`,
+      )
+    }
+    if (lines.some(line => line.includes('"turnId":""'))) {
+      throw new Error(`${target.name} emitted an empty runtime turnId`)
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -173,12 +211,38 @@ async function main(): Promise<void> {
 
   const options = parseOptions(args)
   const env = getDeepEnv()
-  const targets: Target[] = [{ name: 'current', cwd: repoRoot }]
+  const targets: Target[] = [
+    {
+      name: 'current-source',
+      cwd: repoRoot,
+      kind: 'source',
+      requireRuntimeEnvelope: true,
+    },
+  ]
+
+  if (options.includeBuilt) {
+    targets.push(
+      {
+        name: 'current-built-bun',
+        cwd: repoRoot,
+        kind: 'built-bun',
+        requireRuntimeEnvelope: true,
+      },
+      {
+        name: 'current-built-node',
+        cwd: repoRoot,
+        kind: 'built-node',
+        requireRuntimeEnvelope: true,
+      },
+    )
+  }
 
   if (options.includeOriginal) {
     targets.push({
-      name: 'original',
+      name: 'original-source',
       cwd: resolve(options.originalPath),
+      kind: 'source',
+      requireRuntimeEnvelope: false,
     })
   }
 
