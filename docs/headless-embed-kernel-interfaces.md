@@ -35,7 +35,12 @@
 - 外部 host 不直接 import `claude-code/src/runtime/*`、`src/bootstrap/*`、`src/screens/*`、`src/commands/*`、`src/utils/plugins/*`、`src/skills/*` 等内部源码路径。
 - desktop worker 仍然建议保留，用来隔离进程级全局状态、stdout patch 和多会话并发；但 worker 内部也只 import `@go-hare/hare-code/kernel`。
 - desktop worker 对 Electron Main 暴露的控制面不能写成桌面私有协议；它必须是 `KernelRuntimeWireProtocol` 的一个本地传输实现。
-- 不恢复旧 SDK 兼容层：不再提供 `createHeadlessChatSession()`、`session.stream()`、`electron/vendor/hare-code-sdk.js` 这套接口。
+- 不把旧 SDK facade 扩成新的 public API：
+  `createHeadlessChatSession()`、`session.stream()`、
+  `electron/vendor/hare-code-sdk.js` 这套旧 facade 不作为新开放面恢复；
+  但现有 SDK message / `stream-json` adapter 保留为 CLI、pipe、remote、
+  ACP 的最终兼容投影，内部 runtime owner 链路不再以 SDK message 为事实源，
+  任何迁移都不能导致 CLI 行为衰减。
 - 任何对外接口都按完整 runtime contract 设计；不以“先能跑一个 headless turn”为接口边界。
 
 ### 2.1 当前内部落地点：runtime capability materializer / refresh bundle
@@ -910,7 +915,9 @@ export type KernelEvent =
 - bootstrap singleton 的直接读写。
 - runtime internal abort controller。
 - `HeadlessManagedSession` 等内部实现对象。
-- 旧 SDK 兼容层。
+- 旧 SDK session facade 作为新增 public API。现有 SDK message /
+  `stream-json` adapter 只作为最终兼容 transport 保留，不是 runtime
+  source of truth，也不是新开放面。
 
 ## 20. 文件级接口清单
 
@@ -982,7 +989,9 @@ export type KernelEvent =
 - `hare-code-desktop/electron/kernel-event-mapper.cjs`
   - public `KernelEvent` -> 当前前端 SSE event。
 - `hare-code-desktop/electron/main.cjs`
-  - 删除旧 SDK session 管理，接入 worker registry。
+  - 旧桌面 SDK session 管理退出主 owner，接入 worker registry；
+    SDK message / `stream-json` 兼容 adapter 保留，避免 CLI 与现有调用方
+    行为衰减。
 
 ## 21. 验证要求
 

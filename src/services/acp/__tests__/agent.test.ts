@@ -54,12 +54,59 @@ const mockDeserializeMessages = mock((msgs: unknown[]) => msgs)
 const mockGetLastSessionLog = mock(async () => null)
 const mockSessionIdExists = mock(() => false)
 let mockQueryEngineMessages: unknown[] = []
+let mockRuntimeEnvelopeSequence = 0
+
+function makeMockRuntimeEnvelope(type: string, payload: unknown): unknown {
+  mockRuntimeEnvelopeSequence += 1
+  return {
+    schemaVersion: 'kernel.runtime.v1',
+    source: 'kernel_runtime',
+    kind: 'event',
+    messageId: `mock-message-${mockRuntimeEnvelopeSequence}`,
+    eventId: `mock-event-${mockRuntimeEnvelopeSequence}`,
+    runtimeId: 'mock-runtime',
+    conversationId: 'mock-session',
+    turnId: 'mock-turn',
+    sequence: mockRuntimeEnvelopeSequence,
+    timestamp: '2026-04-27T00:00:00.000Z',
+    payload: {
+      runtimeId: 'mock-runtime',
+      conversationId: 'mock-session',
+      turnId: 'mock-turn',
+      eventId: `mock-event-${mockRuntimeEnvelopeSequence}`,
+      replayable: true,
+      type,
+      payload,
+    },
+  }
+}
 
 mock.module('../runtimeDeps.js', () => ({
   QueryEngine: class MockQueryEngine {
-    submitMessage = mock(async function* () {
+    submitRuntimeTurn = mock(async function* () {
+      yield makeMockRuntimeEnvelope('turn.started', {
+        state: 'running',
+      })
+      let sawTerminalResult = false
       for (const message of mockQueryEngineMessages) {
-        yield message
+        yield makeMockRuntimeEnvelope('headless.sdk_message', message)
+        if (
+          typeof message === 'object' &&
+          message !== null &&
+          (message as { type?: unknown }).type === 'result'
+        ) {
+          sawTerminalResult = true
+          yield makeMockRuntimeEnvelope('turn.completed', {
+            state: 'completed',
+            stopReason: null,
+          })
+        }
+      }
+      if (!sawTerminalResult) {
+        yield makeMockRuntimeEnvelope('turn.completed', {
+          state: 'completed',
+          stopReason: null,
+        })
       }
     })
     interrupt = mock(() => {})
@@ -133,6 +180,7 @@ describe('AcpAgent', () => {
     mockGetMainLoopModel.mockClear()
     mockGetDefaultAppState.mockClear()
     mockQueryEngineMessages = []
+    mockRuntimeEnvelopeSequence = 0
   })
 
   afterEach(() => {
@@ -451,7 +499,7 @@ describe('AcpAgent', () => {
     })
 
     test('passes alias modelId to queryEngine as-is for later resolution', async () => {
-      // "sonnet[1m]" is stored raw — QueryEngine.submitMessage() calls
+      // "sonnet[1m]" is stored raw — QueryEngine.submitRuntimeTurn() calls
       // parseUserSpecifiedModel() which resolves aliases via env vars
       const agent = new AcpAgent(makeConn())
       const { sessionId } = await agent.newSession({ cwd: '/tmp' } as any)

@@ -1,9 +1,10 @@
 export {
   SessionRuntime as QueryEngine,
-  ask,
+  askRuntime,
   createExecutionSessionRuntime,
 } from './runtime/capabilities/execution/SessionRuntime.js'
 export type {
+  AskRuntimeOptions,
   ExecutionSessionFactory,
   QueryEngineConfig,
   RuntimeExecutionSession,

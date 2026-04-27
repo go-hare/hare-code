@@ -1,4 +1,9 @@
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
+import {
+  getSDKMessageFromRuntimeEnvelope as getSDKMessageFromKernelRuntimeEnvelope,
+  KernelRuntimeOutputDeltaDedupe,
+  KernelRuntimeSDKMessageDedupe,
+} from '../runtime/core/events/compatProjection.js'
 import type {
   KernelEvent,
   KernelRuntimeEnvelopeBase,
@@ -57,16 +62,6 @@ export function isKernelTurnTerminalEvent(event: KernelEvent): boolean {
   return event.type === 'turn.completed' || event.type === 'turn.failed'
 }
 
-export function getSDKMessageFromKernelRuntimeEnvelope(
-  envelope: KernelRuntimeEnvelopeBase,
-): SDKMessage | undefined {
-  const event = getKernelEventFromEnvelope(envelope)
-  if (event?.type !== 'headless.sdk_message') {
-    return undefined
-  }
-  return isSDKMessageLike(event.payload) ? event.payload : undefined
-}
-
 export type KernelRuntimeTextOutputDelta = {
   text: string
 }
@@ -89,93 +84,12 @@ export function getTextOutputDeltaFromKernelRuntimeEnvelope(
     : undefined
 }
 
-export class KernelRuntimeSDKMessageDedupe {
-  private readonly seen = new Set<string>()
-  private readonly order: string[] = []
-
-  constructor(private readonly maxSize = 512) {}
-
-  shouldProcess(message: SDKMessage): boolean {
-    const key = getSDKMessageDedupeKey(message)
-    if (!key) {
-      return true
-    }
-    if (this.seen.has(key)) {
-      return false
-    }
-    this.seen.add(key)
-    this.order.push(key)
-    while (this.order.length > this.maxSize) {
-      const oldest = this.order.shift()
-      if (oldest) {
-        this.seen.delete(oldest)
-      }
-    }
-    return true
-  }
-
-  clear(): void {
-    this.seen.clear()
-    this.order.length = 0
-  }
-}
-
-export class KernelRuntimeOutputDeltaDedupe {
-  private readonly seen = new Set<string>()
-  private readonly order: string[] = []
-
-  constructor(private readonly maxSize = 512) {}
-
-  shouldProcess(envelope: KernelRuntimeEnvelopeBase): boolean {
-    const key = envelope.eventId ?? envelope.messageId
-    if (!key) {
-      return true
-    }
-    if (this.seen.has(key)) {
-      return false
-    }
-    this.seen.add(key)
-    this.order.push(key)
-    while (this.order.length > this.maxSize) {
-      const oldest = this.order.shift()
-      if (oldest) {
-        this.seen.delete(oldest)
-      }
-    }
-    return true
-  }
-
-  clear(): void {
-    this.seen.clear()
-    this.order.length = 0
-  }
-}
-
-function getSDKMessageDedupeKey(message: SDKMessage): string | undefined {
-  if (typeof message.uuid === 'string' && message.uuid.length > 0) {
-    return `uuid:${message.uuid}`
-  }
-  const nestedMessage = message.message
-  if (
-    typeof nestedMessage === 'object' &&
-    nestedMessage !== null &&
-    'id' in nestedMessage &&
-    typeof (nestedMessage as { id?: unknown }).id === 'string'
-  ) {
-    return `${message.type}:message:${(nestedMessage as { id: string }).id}`
-  }
-  return undefined
-}
-
-function isSDKMessageLike(value: unknown): value is SDKMessage {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'type' in value &&
-    typeof (value as { type?: unknown }).type === 'string'
-  )
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+export {
+  getSDKMessageFromKernelRuntimeEnvelope,
+  KernelRuntimeOutputDeltaDedupe,
+  KernelRuntimeSDKMessageDedupe,
 }

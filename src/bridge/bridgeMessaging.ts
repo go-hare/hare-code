@@ -18,10 +18,7 @@ import type {
   StdoutMessage,
 } from '../entrypoints/sdk/controlTypes.js'
 import type { SDKResultSuccess } from '../entrypoints/sdk/coreTypes.js'
-import type {
-  KernelRuntimeEnvelopeBase,
-  KernelRuntimeEventSink,
-} from '../runtime/contracts/events.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
 import { logEvent } from '../services/analytics/index.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import type { Message } from '../types/message.js'
@@ -31,7 +28,7 @@ import { rcLog } from './rcDebugLog.js'
 import { stripDisplayTagsAllowEmpty } from '../utils/displayTags.js'
 import { errorMessage } from '../utils/errors.js'
 import { getKernelRuntimeEnvelopeFromMessage } from '../utils/kernelRuntimeEventMessage.js'
-import { getKernelEventFromEnvelope } from '../runtime/core/events/KernelRuntimeEventFacade.js'
+import { getSDKMessageFromRuntimeEnvelope } from '../runtime/core/events/compatProjection.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import type { ReplBridgeTransport } from './replBridgeTransport.js'
@@ -321,16 +318,6 @@ export function handleIngressMessage(
       `[bridge:repl] Failed to parse ingress message: ${errorMessage(err)}`,
     )
   }
-}
-
-function getSDKMessageFromRuntimeEnvelope(
-  envelope: KernelRuntimeEnvelopeBase,
-): SDKMessage | undefined {
-  const event = getKernelEventFromEnvelope(envelope)
-  if (event?.type !== 'headless.sdk_message') {
-    return undefined
-  }
-  return isSDKMessage(event.payload) ? event.payload : undefined
 }
 
 // ─── Server-initiated control requests ───────────────────────────────────────

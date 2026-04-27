@@ -93,11 +93,13 @@ import {
   type RuntimeBootstrapStateProvider,
 } from '../../core/state/index.js'
 import type { RuntimeSessionLifecycle } from '../../contracts/session.js'
-import type {
-  KernelRuntimeEnvelopeBase,
-  KernelEvent,
-} from '../../contracts/events.js'
+import type { KernelRuntimeEnvelopeBase } from '../../contracts/events.js'
 import { RuntimeEventBus } from '../../core/events/RuntimeEventBus.js'
+import {
+  createHeadlessSDKMessageRuntimeEvent,
+  getSDKMessageFromRuntimeEnvelope,
+  getSDKResultTurnOutcome,
+} from '../../core/events/compatProjection.js'
 
 // Lazy: MessageSelector.tsx pulls React/ink; only needed for message filtering at query time
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -189,7 +191,7 @@ export type QueryEngineConfig = {
    * Snip-boundary handler: receives each yielded system message plus the
    * current mutableMessages store. Returns undefined if the message is not a
    * snip boundary; otherwise returns the replayed snip result. Injected by
-   * ask() when HISTORY_SNIP is enabled so feature-gated strings stay inside
+   * askRuntime() when HISTORY_SNIP is enabled so feature-gated strings stay inside
    * the gated module (keeps QueryEngine free of excluded strings and testable
    * despite feature() returning false under bun test). SDK-only: the REPL
    * keeps full history for UI scrollback and projects on demand via
@@ -207,10 +209,6 @@ export interface RuntimeExecutionSession extends RuntimeSessionLifecycle {
     prompt: string | ContentBlockParam[],
     options?: { uuid?: string; isMeta?: boolean },
   ): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown>
-  submitMessage(
-    prompt: string | ContentBlockParam[],
-    options?: { uuid?: string; isMeta?: boolean },
-  ): AsyncGenerator<SDKMessage, void, unknown>
   getReadFileState(): FileStateCache
 }
 
@@ -218,49 +216,15 @@ export type ExecutionSessionFactory = (
   config: QueryEngineConfig,
 ) => RuntimeExecutionSession
 
-function cloneSDKMessageForRuntimeEvent(message: SDKMessage): SDKMessage {
-  return JSON.parse(JSON.stringify(message)) as SDKMessage
-}
-
-function isErrorSDKResultMessage(message: SDKMessage): boolean {
-  const record = message as Record<string, unknown>
-  return record.is_error === true
-}
-
-function stopReasonFromSDKResultMessage(message: SDKMessage): string | null {
-  const record = message as Record<string, unknown>
-  if (typeof record.stop_reason === 'string') {
-    return record.stop_reason
-  }
-  switch (record.subtype) {
-    case 'error_max_budget_usd':
-    case 'error_max_turns':
-    case 'error_max_structured_output_retries':
-      return 'max_turn_requests'
-    default:
-      return null
-  }
-}
-
-function getSDKMessageFromRuntimeEnvelope(
-  envelope: KernelRuntimeEnvelopeBase,
-): SDKMessage | undefined {
-  const event = envelope.payload as KernelEvent | undefined
-  if (event?.type !== 'headless.sdk_message') {
-    return undefined
-  }
-  return event.payload as SDKMessage | undefined
-}
-
 /**
  * SessionRuntime owns the query lifecycle and session state for a conversation.
- * It extracts the core logic from ask() into a standalone class that can be
- * used by both the headless/SDK path and (in a future phase) the REPL.
+ * It owns the execution turn logic for headless runtime use and can be reused
+ * by future hosts without making SDK-message transport the source of truth.
  *
  * One SessionRuntime per conversation. Each submitRuntimeTurn() call starts a
- * new runtime turn within the same conversation; submitMessage() remains as the
- * SDK-compatible projection. State (messages, file cache, usage, etc.) persists
- * across turns.
+ * new runtime turn within the same conversation. Legacy SDK-message projection
+ * stays outside the runtime session contract. State (messages, file cache,
+ * usage, etc.) persists across turns.
  */
 export class SessionRuntime implements RuntimeExecutionSession {
   private config: QueryEngineConfig
@@ -320,28 +284,28 @@ export class SessionRuntime implements RuntimeExecutionSession {
 
     let sawTerminalResult = false
     try {
-      for await (const message of this.submitMessage(prompt, options)) {
-        yield this.runtimeEventBus.emit({
-          conversationId: sessionId,
-          turnId,
-          type: 'headless.sdk_message',
-          replayable: true,
-          payload: cloneSDKMessageForRuntimeEvent(message),
-        })
+      for await (const message of this.runQueryTurn(prompt, options)) {
+        yield this.runtimeEventBus.emit(
+          createHeadlessSDKMessageRuntimeEvent({
+            conversationId: sessionId,
+            turnId,
+            message,
+          }),
+        )
 
         if (message.type === 'result') {
           sawTerminalResult = true
-          const failed = isErrorSDKResultMessage(message)
+          const outcome = getSDKResultTurnOutcome(message)
           yield this.runtimeEventBus.emit({
             conversationId: sessionId,
             turnId,
-            type: failed ? 'turn.failed' : 'turn.completed',
+            type: outcome.eventType,
             replayable: true,
             payload: {
               conversationId: sessionId,
               turnId,
-              state: failed ? 'failed' : 'completed',
-              stopReason: stopReasonFromSDKResultMessage(message),
+              state: outcome.state,
+              stopReason: outcome.stopReason,
             },
           })
         }
@@ -378,7 +342,23 @@ export class SessionRuntime implements RuntimeExecutionSession {
     }
   }
 
+  /**
+   * @deprecated Legacy SDK-message projection. Runtime owners should consume
+   * submitRuntimeTurn() and project only at transport boundaries.
+   */
   async *submitMessage(
+    prompt: string | ContentBlockParam[],
+    options?: { uuid?: string; isMeta?: boolean },
+  ): AsyncGenerator<SDKMessage, void, unknown> {
+    for await (const envelope of this.submitRuntimeTurn(prompt, options)) {
+      const sdkMessage = getSDKMessageFromRuntimeEnvelope(envelope)
+      if (sdkMessage) {
+        yield sdkMessage
+      }
+    }
+  }
+
+  private async *runQueryTurn(
     prompt: string | ContentBlockParam[],
     options?: { uuid?: string; isMeta?: boolean },
   ): AsyncGenerator<SDKMessage, void, unknown> {
@@ -606,7 +586,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
     const messages = [...this.mutableMessages]
 
     // Persist the user's message(s) to transcript BEFORE entering the query
-    // loop. The for-await below only calls recordTranscript when ask() yields
+    // loop. The for-await below only calls recordTranscript when the query yields
     // an assistant/user/compact_boundary message — which doesn't happen until
     // the API responds. If the process is killed before that (e.g. user clicks
     // Stop in cowork seconds after send), the transcript is left with only
@@ -694,6 +674,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
       updateAttributionState: processUserInputContext.updateAttributionState,
       setSDKStatus,
       activeTaskExecutionContext: getActiveTaskExecutionContext(),
+      runtimePermission: this.config.runtimePermission,
     }
 
     headlessProfilerCheckpoint('before_skills_plugins')
@@ -891,7 +872,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
           // assistant message per content block, then mutates the last
           // one's message.usage/stop_reason on message_delta — relying on
           // the write queue's 100ms lazy jsonStringify. Awaiting here
-          // blocks ask()'s generator, so message_delta can't run until
+          // blocks the runtime turn generator, so message_delta can't run until
           // every block is consumed; the drain timer (started at block 1)
           // elapses first. Interactive CC doesn't hit this because
           // useLogMessages.ts fire-and-forgets. enqueueWrite is
@@ -946,7 +927,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
         case 'progress': {
           const msg = message as Message
           this.mutableMessages.push(msg)
-          // Record inline so the dedup loop in the next ask() call sees it
+          // Record inline so the dedup loop in the next runtime turn sees it
           // as already-recorded. Without this, deferred progress interleaves
           // with already-recorded tool_results in mutableMessages, and the
           // dedup walk freezes startingParentUuid at the wrong message —
@@ -1413,40 +1394,7 @@ export const createExecutionSessionRuntime: ExecutionSessionFactory = config =>
  *
  * Convenience wrapper around SessionRuntime for one-shot usage.
  */
-export async function* ask({
-  commands,
-  prompt,
-  promptUuid,
-  isMeta,
-  cwd,
-  tools,
-  mcpClients,
-  verbose = false,
-  thinkingConfig,
-  maxTurns,
-  maxBudgetUsd,
-  taskBudget,
-  canUseTool,
-  mutableMessages = [],
-  getReadFileCache,
-  setReadFileCache,
-  customSystemPrompt,
-  appendSystemPrompt,
-  userSpecifiedModel,
-  fallbackModel,
-  jsonSchema,
-  getAppState,
-  setAppState,
-  bootstrapStateProvider,
-  abortController,
-  replayUserMessages = false,
-  includePartialMessages = false,
-  handleElicitation,
-  agents = [],
-  setSDKStatus,
-  orphanedPermission,
-  createSessionRuntime,
-}: {
+export type AskRuntimeOptions = {
   commands: Command[]
   prompt: string | Array<ContentBlockParam>
   promptUuid?: string
@@ -1479,7 +1427,42 @@ export async function* ask({
   setSDKStatus?: (status: SDKStatus) => void
   orphanedPermission?: OrphanedPermission
   createSessionRuntime?: ExecutionSessionFactory
-}): AsyncGenerator<SDKMessage, void, unknown> {
+}
+
+export async function* askRuntime({
+  commands,
+  prompt,
+  promptUuid,
+  isMeta,
+  cwd,
+  tools,
+  mcpClients,
+  verbose = false,
+  thinkingConfig,
+  maxTurns,
+  maxBudgetUsd,
+  taskBudget,
+  canUseTool,
+  mutableMessages = [],
+  getReadFileCache,
+  setReadFileCache,
+  customSystemPrompt,
+  appendSystemPrompt,
+  userSpecifiedModel,
+  fallbackModel,
+  jsonSchema,
+  getAppState,
+  setAppState,
+  bootstrapStateProvider,
+  abortController,
+  replayUserMessages = false,
+  includePartialMessages = false,
+  handleElicitation,
+  agents = [],
+  setSDKStatus,
+  orphanedPermission,
+  createSessionRuntime,
+}: AskRuntimeOptions): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown> {
   const engine = (createSessionRuntime ?? createExecutionSessionRuntime)({
     cwd,
     tools,
@@ -1524,13 +1507,21 @@ export async function* ask({
       uuid: promptUuid,
       isMeta,
     })) {
-      const sdkMessage = getSDKMessageFromRuntimeEnvelope(envelope)
-      if (sdkMessage) {
-        yield sdkMessage
-      }
+      yield envelope
     }
   } finally {
     setReadFileCache(engine.getReadFileState())
     await engine.stopAndWait(true)
+  }
+}
+
+export async function* ask(
+  options: AskRuntimeOptions,
+): AsyncGenerator<SDKMessage, void, unknown> {
+  for await (const envelope of askRuntime(options)) {
+    const sdkMessage = getSDKMessageFromRuntimeEnvelope(envelope)
+    if (sdkMessage) {
+      yield sdkMessage
+    }
   }
 }

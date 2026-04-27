@@ -3,7 +3,8 @@
  * internal QueryEngine / query() pipeline.
  *
  * Architecture: Uses internal QueryEngine (not @anthropic-ai/claude-agent-sdk)
- * to directly run queries, with a bridge layer converting SDKMessage → ACP SessionUpdate.
+ * to directly run queries, with a bridge layer converting runtime envelopes to
+ * ACP SessionUpdate notifications.
  */
 import type {
   Agent,
@@ -43,7 +44,6 @@ import { randomUUID, type UUID } from 'node:crypto'
 import type { Message } from '../../types/message.js'
 import type { PermissionMode } from '../../types/permissions.js'
 import type { Command } from '../../types/command.js'
-import type { SDKMessage } from '../../entrypoints/agentSdkTypes.js'
 import { setOriginalCwd } from './bootstrapState.js'
 import { getCommands } from './commandSource.js'
 import { enableConfigs } from './configBootstrap.js'
@@ -74,7 +74,6 @@ import {
 import type { AppState, QueryEngineConfig, Tools } from './runtimeDeps.js'
 import { createRuntimePermissionService } from '../../runtime/capabilities/permissions/RuntimePermissionService.js'
 import { RuntimeEventBus } from '../../runtime/core/events/RuntimeEventBus.js'
-import type { KernelRuntimeEnvelopeBase } from '../../runtime/contracts/events.js'
 
 // ── Session state ─────────────────────────────────────────────────
 
@@ -278,15 +277,10 @@ export class AcpAgent implements Agent {
     try {
       // Reset the query engine's abort controller for a fresh query.
       // After a previous interrupt(), the internal controller is stuck in
-      // aborted state — without this, submitMessage() fails immediately.
+      // aborted state — without this, submitRuntimeTurn() fails immediately.
       session.queryEngine.resetAbortController()
 
-      const sdkMessages = session.queryEngine.submitMessage(promptInput)
-      const runtimeMessages = sdkMessagesToRuntimeEnvelopes(
-        params.sessionId,
-        sdkMessages,
-        session.runtimeEventBus,
-      )
+      const runtimeMessages = session.queryEngine.submitRuntimeTurn(promptInput)
 
       const { stopReason, usage } = await forwardSessionUpdates(
         params.sessionId,
@@ -397,7 +391,7 @@ export class AcpAgent implements Agent {
     if (!session) {
       throw new Error('Session not found')
     }
-    // Store the raw value — QueryEngine.submitMessage() calls
+    // Store the raw value — QueryEngine.submitRuntimeTurn() calls
     // parseUserSpecifiedModel() to resolve aliases (e.g. "sonnet" → "glm-5.1-turbo")
     session.queryEngine.setModel(params.modelId)
     await this.updateConfigOption(params.sessionId, 'model', params.modelId)
@@ -779,111 +773,6 @@ export class AcpAgent implements Agent {
     // Simplified: read from environment or return undefined
     // In a full implementation, this would read from settings.json
     return undefined as T | undefined
-  }
-}
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-async function* sdkMessagesToRuntimeEnvelopes(
-  sessionId: string,
-  sdkMessages: AsyncIterable<SDKMessage>,
-  runtimeEventBus: RuntimeEventBus,
-): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown> {
-  const turnId = randomUUID()
-  yield runtimeEventBus.emit({
-    conversationId: sessionId,
-    turnId,
-    type: 'turn.started',
-    replayable: true,
-    payload: {
-      conversationId: sessionId,
-      turnId,
-      state: 'running',
-    },
-  })
-
-  let sawTerminalResult = false
-  try {
-    for await (const message of sdkMessages) {
-      yield runtimeEventBus.emit({
-        conversationId: sessionId,
-        turnId,
-        type: 'headless.sdk_message',
-        replayable: true,
-        payload: cloneSDKMessageForRuntimeEvent(message),
-      })
-
-      if (message.type === 'result') {
-        sawTerminalResult = true
-        const stopReason = stopReasonFromSDKResultMessage(message)
-        yield runtimeEventBus.emit({
-          conversationId: sessionId,
-          turnId,
-          type: isErrorSDKResultMessage(message)
-            ? 'turn.failed'
-            : 'turn.completed',
-          replayable: true,
-          payload: {
-            conversationId: sessionId,
-            turnId,
-            state: isErrorSDKResultMessage(message) ? 'failed' : 'completed',
-            stopReason,
-          },
-        })
-      }
-    }
-    if (!sawTerminalResult) {
-      yield runtimeEventBus.emit({
-        conversationId: sessionId,
-        turnId,
-        type: 'turn.completed',
-        replayable: true,
-        payload: {
-          conversationId: sessionId,
-          turnId,
-          state: 'completed',
-          stopReason: null,
-        },
-      })
-    }
-  } catch (error) {
-    yield runtimeEventBus.emit({
-      conversationId: sessionId,
-      turnId,
-      type: 'turn.failed',
-      replayable: true,
-      payload: {
-        conversationId: sessionId,
-        turnId,
-        state: 'failed',
-        stopReason: error instanceof Error ? error.message : String(error),
-      },
-    })
-    throw error
-  }
-}
-
-function cloneSDKMessageForRuntimeEvent(message: SDKMessage): SDKMessage {
-  return JSON.parse(JSON.stringify(message)) as SDKMessage
-}
-
-function isErrorSDKResultMessage(message: SDKMessage): boolean {
-  const record = message as Record<string, unknown>
-  return record.is_error === true
-}
-
-function stopReasonFromSDKResultMessage(message: SDKMessage): string | null {
-  const record = message as Record<string, unknown>
-  if (typeof record.stop_reason === 'string') {
-    return record.stop_reason
-  }
-  switch (record.subtype) {
-    case 'error_max_budget_usd':
-    case 'error_max_turns':
-    case 'error_max_structured_output_retries':
-      return 'max_turn_requests'
-    default:
-      return null
   }
 }
 

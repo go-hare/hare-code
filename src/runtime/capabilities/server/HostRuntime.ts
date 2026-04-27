@@ -23,6 +23,7 @@ import {
   KernelRuntimeOutputDeltaDedupe,
   KernelRuntimeSDKMessageDedupe,
 } from '../../../remote/kernelRuntimeHostEvents.js'
+import { projectSDKMessageToLegacyStreamJsonMessages } from '../../core/events/compatProjection.js'
 
 type ServerSocketData = {
   sessionId: string
@@ -226,7 +227,11 @@ export async function runConnectHeadlessRuntime(
     }
 
     if (outputFormat === 'stream-json') {
-      writeToStdout(`${jsonStringify(sdkMessage)}\n`)
+      for (const message of projectSDKMessageToLegacyStreamJsonMessages(
+        sdkMessage,
+      )) {
+        writeToStdout(`${jsonStringify(message)}\n`)
+      }
     }
 
     if (sdkMessage.type === 'result') {

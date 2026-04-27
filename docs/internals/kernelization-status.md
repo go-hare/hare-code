@@ -25,7 +25,7 @@ transport 只作为兼容投影保留，不再作为内部 source of truth。
 
 一句话概括：
 
-> 当前项目已经完成统一入口、宿主改道、package-level kernel 发布面、runtime-first execution/event/permission/capability/session ownership 与完整测试护栏。后续 public API 扩面或 legacy transport 退役不再属于“补内核完整性”的 blocker。
+> 当前项目已经完成统一入口、宿主改道、package-level kernel 发布面、runtime-first execution/event/permission/capability/session ownership 与完整测试护栏。后续 public API 扩面或 legacy transport 治理不再属于“补内核完整性”的 blocker；现有 SDK / `stream-json` adapter 保留为兼容投影，不能因内核迁移导致 CLI 行为衰减。
 
 结合 2026-04-23 本轮收口进展，更准确的补充口径是：
 
@@ -35,8 +35,9 @@ transport 只作为兼容投影保留，不再作为内部 source of truth。
 > `bootstrapProvider`、`SessionRuntime.submitRuntimeTurn(...)`、
 > `RuntimeEventBus`、`RuntimePermissionBroker`、wire router conversation
 > snapshot / active execution journal 与 runtime capability materializer 已形成
-> 内部主链；`submitMessage(...)`、legacy stream-json、remote SDK callbacks 只作为
-> 兼容投影。
+> 内部主链；`RuntimeExecutionSession` 不再声明 `submitMessage(...)`，ACP
+> 也直接消费 `submitRuntimeTurn(...)` 的 runtime envelope 流。legacy
+> SDK-message / `stream-json` 只作为最终 transport 兼容投影。
 
 > 宿主瘦身这边也继续往前推进了一轮：`main.tsx` 已把 shared launch context 和 shared startup assembly 收口到独立 helper，`kernel/serverHost.ts` 也已摘掉对 `server/*` / `hosts/server/*` 历史兼容层的依赖，直接接到 runtime-owned server capability。
 
@@ -271,7 +272,8 @@ transport 只作为兼容投影保留，不再作为内部 source of truth。
 2026-04-23 时 `server` 先完成 contracts 下沉，`bridge / daemon / 其他 capability`
 还在追赶。2026-04-27 后，internal kernel 的执行、事件、权限、capability、
 session ownership 已经按 runtime-first 收口；后续如果继续改，是 public surface
-扩面或历史 compatibility transport 退役。
+扩面或历史 compatibility transport 治理。现有 SDK / `stream-json` adapter
+保留为兼容投影，不作为当前阶段的删除目标。
 
 这意味着：
 
@@ -330,7 +332,9 @@ session ownership 已经按 runtime-first 收口；后续如果继续改，是 p
 
 以下条目是 2026-04-23 记录的历史未完成项。按 2026-04-27 的内部 kernel
 完整标准，它们已经不再是 blocker；剩余工作若继续推进，应归类为 public API
-扩面或 legacy transport 退役。
+扩面或 legacy transport 治理。legacy SDK internal path 已从 runtime
+owner 链路移除；`stream-json` adapter 保留是 CLI 机器协议兼容策略，
+不是“没清干净”的残留。
 
 #### 1. kernel 内部链路进一步压平
 

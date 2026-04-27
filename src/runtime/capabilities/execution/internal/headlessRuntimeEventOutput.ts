@@ -4,7 +4,7 @@ import type {
   KernelRuntimeEventSink,
 } from '../../../contracts/events.js'
 import type { StructuredIO } from './io/structuredIO.js'
-import { toKernelRuntimeEventMessage } from '../../../../utils/kernelRuntimeEventMessage.js'
+import { projectRuntimeEnvelopeToLegacyStreamJsonMessages } from '../../../core/events/compatProjection.js'
 
 type RuntimeEventOutputOptions = {
   outputFormat: string | undefined
@@ -45,5 +45,13 @@ export function toHeadlessRuntimeEventMessage(
   envelope: KernelRuntimeEnvelopeBase,
   sessionId: string,
 ): StdoutMessage {
-  return toKernelRuntimeEventMessage(envelope, sessionId) as StdoutMessage
+  const [message] = projectRuntimeEnvelopeToLegacyStreamJsonMessages(envelope, {
+    sessionId,
+    includeRuntimeEvent: true,
+    includeSDKMessage: false,
+  })
+  if (!message) {
+    throw new Error('Failed to project runtime envelope to stream-json message')
+  }
+  return message
 }

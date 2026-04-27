@@ -4,7 +4,6 @@ import {
   toolUpdateFromToolResult,
   toolUpdateFromEditToolResponse,
   forwardSessionUpdates,
-  createLegacySDKRuntimeEnvelopeAdapter,
 } from '../bridge.js'
 import { markdownEscape, toDisplayPath } from '../utils.js'
 import type { AgentSideConnection, ToolKind } from '@agentclientprotocol/sdk'
@@ -24,43 +23,19 @@ function makeConn(overrides: Partial<AgentSideConnection> = {}): AgentSideConnec
   } as unknown as AgentSideConnection
 }
 
-async function* makeStream(msgs: SDKMessage[]): AsyncGenerator<SDKMessage, void, unknown> {
-  for (const m of msgs) yield m
+async function* makeStream(
+  msgs: SDKMessage[],
+): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown> {
+  for (const m of msgs) yield makeRuntimeEnvelope('headless.sdk_message', m)
 }
 
 async function* makeRuntimeStream(
-  msgs: Array<SDKMessage | KernelRuntimeEnvelopeBase>,
-): AsyncGenerator<SDKMessage | KernelRuntimeEnvelopeBase, void, unknown> {
+  msgs: KernelRuntimeEnvelopeBase[],
+): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown> {
   for (const m of msgs) yield m
 }
 
 let runtimeEnvelopeSequence = 0
-
-describe('legacy SDK runtime envelope adapter', () => {
-  test('wraps legacy SDKMessage input as a runtime envelope before ACP handling', () => {
-    const adapter = createLegacySDKRuntimeEnvelopeAdapter('session-1')
-    const envelope = adapter.toEnvelope({
-      type: 'assistant',
-      uuid: 'sdk-1',
-      optionalField: undefined,
-    } as unknown as SDKMessage)
-
-    expect(envelope).toMatchObject({
-      schemaVersion: 'kernel.runtime.v1',
-      source: 'kernel_runtime',
-      kind: 'event',
-      conversationId: 'session-1',
-      turnId: 'session-1:acp-forward',
-      payload: {
-        type: 'headless.sdk_message',
-        payload: {
-          type: 'assistant',
-          uuid: 'sdk-1',
-        },
-      },
-    })
-  })
-})
 
 function makeRuntimeEnvelope(
   type: string,
@@ -652,7 +627,7 @@ describe('forwardSessionUpdates', () => {
     await forwardSessionUpdates(
       's1',
       makeRuntimeStream([
-        sdkMessage,
+        makeRuntimeEnvelope('headless.sdk_message', sdkMessage),
         makeRuntimeEnvelope('headless.sdk_message', sdkMessage),
       ]),
       conn,
@@ -1037,7 +1012,11 @@ describe('forwardSessionUpdates', () => {
 
   test('re-throws unexpected errors from stream', async () => {
     const conn = makeConn()
-    async function* errorStream(): AsyncGenerator<SDKMessage, void, unknown> {
+    async function* errorStream(): AsyncGenerator<
+      KernelRuntimeEnvelopeBase,
+      void,
+      unknown
+    > {
       throw new Error('stream exploded')
     }
     await expect(

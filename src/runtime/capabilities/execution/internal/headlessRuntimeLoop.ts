@@ -78,7 +78,7 @@ import {
 import { parsePluginIdentifier } from 'src/utils/plugins/pluginIdentifier.js'
 import { validateUuid } from 'src/utils/uuid.js'
 import { fromArray } from 'src/utils/generators.js'
-import { ask } from 'src/QueryEngine.js'
+import { askRuntime } from 'src/QueryEngine.js'
 import type { PermissionPromptTool } from 'src/utils/queryHelpers.js'
 import { type FileState } from 'src/utils/fileStateCache.js'
 import { expandPath } from 'src/utils/path.js'
@@ -307,6 +307,7 @@ import {
   flushHeldBackResultAndSuggestion,
 } from './headlessPostTurn.js'
 import { emitHeadlessRuntimeMessage } from './headlessStreamEmission.js'
+import { projectRuntimeEnvelopeToLegacySDKMessage } from '../../../core/events/compatProjection.js'
 import { hasHeadlessBackgroundWorkPending } from './headlessBackgroundWork.js'
 import {
   createHeadlessRuntimeStreamPublisher,
@@ -1462,7 +1463,7 @@ function runHeadlessStreaming(
 
   void mcpService.updateSdk()
 
-  // Shared tool assembly for ask() and the get_context_usage control request.
+  // Shared tool assembly for runtime turns and the get_context_usage control request.
   // Closes over the runtime MCP service so both call
   // sites see late-connecting servers.
   const buildAllTools = (appState: AppState): Tools => {
@@ -1543,7 +1544,7 @@ function runHeadlessStreaming(
   // Background plugin installation for all headless users
   // Installs marketplaces from extraKnownMarketplaces and missing enabled plugins
   // CLAUDE_CODE_SYNC_PLUGIN_INSTALL=true: resolved in run() before the first
-  // query so plugins are guaranteed available on the first ask().
+  // query so plugins are guaranteed available on the first runtime turn.
   let pluginInstallPromise: Promise<void> | null = null
   // --bare / SIMPLE: skip plugin install. Scripted calls don't add plugins
   // mid-session; the next interactive run reconciles.
@@ -1643,7 +1644,7 @@ function runHeadlessStreaming(
 
     // Resolve deferred plugin installation (CLAUDE_CODE_SYNC_PLUGIN_INSTALL).
     // The promise was started eagerly so installation overlaps with other init.
-    // Awaiting here guarantees plugins are available before the first ask().
+    // Awaiting here guarantees plugins are available before the first runtime turn.
     // If CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS is set, races against that
     // deadline and proceeds without plugins on timeout (logging an error).
     if (pluginInstallPromise) {
@@ -1685,7 +1686,7 @@ function runHeadlessStreaming(
 
       // Extract command processing into a named function for the do-while pattern.
       // Drains the queue, batching consecutive prompt-mode commands into one
-      // ask() call so messages that queued up during a long turn coalesce
+      // runtime turn so messages that queued up during a long turn coalesce
       // into a single follow-up turn instead of N separate turns.
       const drainCommandQueue = async () => {
         while ((command = dequeue(isMainThread))) {
@@ -1767,7 +1768,7 @@ function runHeadlessStreaming(
 
           // Task notifications arrive when background agents complete.
           // Emit an SDK system event for SDK consumers, then fall through
-          // to ask() so the model sees the agent result and can act on it.
+          // to the runtime turn so the model sees the agent result and can act on it.
           // This matches TUI behavior where useQueueProcessor always feeds
           // notifications to the model regardless of coordinator mode.
           if (command.mode === 'task-notification') {
@@ -1851,7 +1852,7 @@ function runHeadlessStreaming(
               observeHeadlessBackgroundSdkEvent(taskNotificationMessage)
               emitOutput(taskNotificationMessage)
             }
-            // No continue -- fall through to ask() so the model processes the result
+            // No continue -- fall through so the runtime turn processes the result.
           }
 
           const input = command.value
@@ -1894,7 +1895,7 @@ function runHeadlessStreaming(
             }
           }
 
-          // Per-iteration ALS context so bg agents spawned inside ask()
+          // Per-iteration ALS context so bg agents spawned inside runtime turns
           // inherit workload across their detached awaits. In-process cron
           // stamps cmd.workload; the SDK --workload flag is options.workload.
           // const-capture: TS loses `while ((command = dequeue()))` narrowing
@@ -1957,7 +1958,7 @@ function runHeadlessStreaming(
             await runWithWorkload(
               cmd.workload ?? options.workload,
               async () => {
-                for await (const message of ask({
+                for await (const envelope of askRuntime({
                   commands: uniqBy(
                     [
                       ...runtimeCapabilities.getCommands(),
@@ -2022,13 +2023,19 @@ function runHeadlessStreaming(
                     })
                   },
                 })) {
+                  const sdkMessage =
+                    projectRuntimeEnvelopeToLegacySDKMessage(envelope)
+                  if (!sdkMessage) {
+                    continue
+                  }
+                  const message = sdkMessage as unknown as StdoutMessage
                   // Forward messages to bridge incrementally (mid-turn) so
                   // claude.ai sees progress and the connection stays alive
                   // while blocked on permission requests.
                   forwardMessagesToBridge()
 
                   const emission = emitHeadlessRuntimeMessage({
-                    message: message as StdoutMessage,
+                    message,
                     output: sessionOutput,
                     drainSdkEvents: drainTrackedSdkEvents,
                     hasBackgroundTasks: hasPendingHeadlessBackgroundWork,
@@ -2052,7 +2059,7 @@ function runHeadlessStreaming(
               for (const runId of autonomyRunIds) {
                 await finalizeAutonomyRunFailed({
                   runId,
-                  error: 'ask() returned an error result',
+                  error: 'runtime turn returned an error result',
                 })
               }
             } else {
@@ -3682,7 +3689,7 @@ function runHeadlessStreaming(
           //
           // Fallback (resume before first turn completes — no snapshot yet):
           // rebuild from scratch. buildSideQuestionFallbackParams mirrors
-          // QueryEngine.ts:ask()'s system prompt assembly (including
+          // QueryEngine.ts:askRuntime()'s system prompt assembly (including
           // --system-prompt / --append-system-prompt) so the rebuilt prefix
           // matches in the common case. May still miss the cache for
           // coordinator mode or memory-mechanics extras — acceptable, the

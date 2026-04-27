@@ -20,6 +20,14 @@ const headlessManagedSessionContent = readFileSync(
   ),
   'utf8',
 )
+const queryEngineEntryContent = readFileSync(
+  join(repoRoot, 'src/QueryEngine.ts'),
+  'utf8',
+)
+const acpAgentContent = readFileSync(
+  join(repoRoot, 'src/services/acp/agent.ts'),
+  'utf8',
+)
 
 describe('SessionRuntime contracts', () => {
   test('defines the execution session factory surface', () => {
@@ -29,8 +37,29 @@ describe('SessionRuntime contracts', () => {
       'export interface RuntimeExecutionSession extends RuntimeSessionLifecycle',
     )
     expect(content).toContain('submitRuntimeTurn(')
+    const sessionInterfaceBlock = content.slice(
+      content.indexOf('export interface RuntimeExecutionSession'),
+      content.indexOf('export type ExecutionSessionFactory'),
+    )
+    expect(sessionInterfaceBlock).not.toContain('submitMessage(')
+    expect(content).toContain('export async function* askRuntime(')
     expect(content).toContain('export type ExecutionSessionFactory')
     expect(content).toContain('export const createExecutionSessionRuntime')
+  })
+
+  test('keeps legacy SDK projection outside runtime owners', () => {
+    expect(content).toContain('private async *runQueryTurn(')
+    expect(content).toContain(
+      'for await (const envelope of this.submitRuntimeTurn(prompt, options))',
+    )
+    expect(content).toContain('for await (const envelope of askRuntime(options))')
+    expect(content).toContain('getSDKMessageFromRuntimeEnvelope(envelope)')
+    expect(content).toContain('for await (const message of this.runQueryTurn')
+    expect(queryEngineEntryContent).not.toContain('ask,')
+    expect(acpAgentContent).toContain(
+      'session.queryEngine.submitRuntimeTurn(promptInput)',
+    )
+    expect(acpAgentContent).not.toContain('queryEngine.submitMessage')
   })
 
   test('keeps MessageSelector optional at the runtime boundary', () => {
@@ -42,6 +71,13 @@ describe('SessionRuntime contracts', () => {
     expect(content).toContain(
       'selectableUserMessagesFilter(message as Message) ?? true',
     )
+  })
+
+  test('keeps runtime permission mounted across user-input and query contexts', () => {
+    const runtimePermissionMounts = content.match(
+      /runtimePermission: this\.config\.runtimePermission/g,
+    )
+    expect(runtimePermissionMounts).toHaveLength(2)
   })
 
   test('headless managed session shares the runtime session lifecycle contract', () => {
@@ -104,20 +140,37 @@ describe('SessionRuntime contracts', () => {
       prompt: string | unknown[],
       options?: { uuid?: string; isMeta?: boolean },
     ) {
-      for await (const message of submitMessage(prompt, options)) {
-        yield {
-          schemaVersion: 'kernel.runtime.v1',
-          messageId: 'runtime-message-1',
-          sequence: 1,
-          timestamp: '2026-04-27T00:00:00.000Z',
-          source: 'kernel_runtime',
-          kind: 'event',
+      expect(prompt).toBe('hello')
+      expect(options).toEqual({
+        uuid: 'prompt-1',
+        isMeta: true,
+      })
+      yield {
+        schemaVersion: 'kernel.runtime.v1',
+        messageId: 'runtime-message-1',
+        sequence: 1,
+        timestamp: '2026-04-27T00:00:00.000Z',
+        source: 'kernel_runtime',
+        kind: 'event',
+        payload: {
+          type: 'headless.sdk_message',
+          replayable: true,
           payload: {
-            type: 'headless.sdk_message',
-            replayable: true,
-            payload: message,
+            type: 'result',
+            subtype: 'success',
+            duration_ms: 0,
+            duration_api_ms: 0,
+            is_error: false,
+            num_turns: 1,
+            stop_reason: null,
+            session_id: 'session-1',
+            total_cost_usd: 0,
+            usage: EMPTY_USAGE,
+            modelUsage: {},
+            permission_denials: [],
+            uuid: 'result-1',
           },
-        }
+        },
       }
     })
 
@@ -156,7 +209,7 @@ describe('SessionRuntime contracts', () => {
 
     expect(createSessionRuntime).toHaveBeenCalledTimes(1)
     expect(submitRuntimeTurn).toHaveBeenCalledTimes(1)
-    expect(submitMessage).toHaveBeenCalledTimes(1)
+    expect(submitMessage).not.toHaveBeenCalled()
     expect(setReadFileCache).toHaveBeenCalledWith(nextCache)
     expect(stopAndWait).toHaveBeenCalledWith(true)
     expect(yieldedMessages).toHaveLength(1)

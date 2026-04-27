@@ -1,8 +1,7 @@
 /**
  * Bridge module: converts Claude Code runtime envelopes into ACP
- * SessionUpdate notifications. Legacy SDKMessage streams are accepted only as
- * compatibility input and are wrapped into headless.sdk_message envelopes
- * before ACP handling.
+ * SessionUpdate notifications. Legacy SDKMessage payloads are handled only when
+ * projected from headless.sdk_message envelopes by the runtime host event path.
  *
  * Handles all SDKMessage types:
  *  - system (compact_boundary, api_retry, local_command_output)
@@ -30,8 +29,6 @@ import type {
   KernelEvent,
   KernelRuntimeEnvelopeBase,
 } from '../../runtime/contracts/events.js'
-import { isKernelRuntimeEnvelope } from '../../runtime/core/events/KernelRuntimeEventFacade.js'
-import { RuntimeEventBus } from '../../runtime/core/events/RuntimeEventBus.js'
 import {
   handleKernelRuntimeHostEvent,
   KernelRuntimeOutputDeltaDedupe,
@@ -61,37 +58,6 @@ export type SessionUsage = {
 }
 
 type StreamedAssistantContentKind = 'image' | 'text' | 'thinking'
-type ForwardSessionUpdateMessage = SDKMessage | KernelRuntimeEnvelopeBase
-
-type LegacySDKRuntimeEnvelopeAdapter = {
-  toEnvelope(message: SDKMessage): KernelRuntimeEnvelopeBase
-}
-
-export function createLegacySDKRuntimeEnvelopeAdapter(
-  sessionId: string,
-): LegacySDKRuntimeEnvelopeAdapter {
-  const eventBus = new RuntimeEventBus({
-    runtimeId: `acp:${sessionId}`,
-  })
-  const turnId = `${sessionId}:acp-forward`
-
-  return {
-    toEnvelope(message) {
-      return eventBus.emit({
-        conversationId: sessionId,
-        turnId,
-        type: 'headless.sdk_message',
-        replayable: true,
-        payload: cloneSDKMessageForRuntimeEnvelope(message),
-      })
-    },
-  }
-}
-
-function cloneSDKMessageForRuntimeEnvelope(message: SDKMessage): SDKMessage {
-  return JSON.parse(JSON.stringify(message)) as SDKMessage
-}
-
 // ── Tool info conversion ──────────────────────────────────────────
 
 interface ToolInfo {
@@ -588,14 +554,12 @@ export function promptToQueryContent(
 
 /**
  * Iterates runtime envelopes, converts each to ACP SessionUpdate notifications,
- * and sends them via conn.sessionUpdate(). Legacy SDKMessage inputs are first
- * wrapped into headless.sdk_message runtime envelopes so ACP uses the same
- * runtime-first host event path.
+ * and sends them via conn.sessionUpdate().
  * Returns the final StopReason and accumulated usage for the prompt turn.
  */
 export async function forwardSessionUpdates(
   sessionId: string,
-  sdkMessages: AsyncIterable<ForwardSessionUpdateMessage>,
+  runtimeEnvelopes: AsyncIterable<KernelRuntimeEnvelopeBase>,
   conn: AgentSideConnection,
   abortSignal: AbortSignal,
   toolUseCache: ToolUseCache,
@@ -622,8 +586,7 @@ export async function forwardSessionUpdates(
   const scopeToStreamedMessageId = new Map<string, string>()
   const sdkMessageDedupe = new KernelRuntimeSDKMessageDedupe()
   const outputDeltaDedupe = new KernelRuntimeOutputDeltaDedupe()
-  const sdkMessageIterator = sdkMessages[Symbol.asyncIterator]()
-  const legacySdkAdapter = createLegacySDKRuntimeEnvelopeAdapter(sessionId)
+  const runtimeEnvelopeIterator = runtimeEnvelopes[Symbol.asyncIterator]()
 
   try {
     while (!abortSignal.aborted) {
@@ -631,25 +594,22 @@ export async function forwardSessionUpdates(
       // immediately when cancelled, even if the generator is waiting for
       // a slow API response.
       const nextResult = await Promise.race([
-        sdkMessageIterator.next(),
-        new Promise<IteratorResult<ForwardSessionUpdateMessage, void>>((resolve) => {
-          if (abortSignal.aborted) {
-            resolve({ done: true, value: undefined })
-            return
-          }
-          const handler = () => resolve({ done: true, value: undefined })
-          abortSignal.addEventListener('abort', handler, { once: true })
-        }),
+        runtimeEnvelopeIterator.next(),
+        new Promise<IteratorResult<KernelRuntimeEnvelopeBase, void>>(
+          (resolve) => {
+            if (abortSignal.aborted) {
+              resolve({ done: true, value: undefined })
+              return
+            }
+            const handler = () => resolve({ done: true, value: undefined })
+            abortSignal.addEventListener('abort', handler, { once: true })
+          },
+        ),
       ])
       if (nextResult.done || abortSignal.aborted) break
-      const msg = nextResult.value
-
-      if (msg == null) continue
+      const runtimeEnvelope = nextResult.value
 
       const messagesToProcess: SDKMessage[] = []
-      const runtimeEnvelope = isKernelRuntimeEnvelope(msg)
-        ? msg
-        : legacySdkAdapter.toEnvelope(msg)
       {
         const runtimeOutputDeltas: KernelRuntimeTextOutputDelta[] = []
         const runtimeTerminalEvents: KernelEvent[] = []
