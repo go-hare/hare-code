@@ -34,6 +34,41 @@ function extractContent(payload: unknown): string {
   return "";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isKernelRuntimeEnvelope(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    value.schemaVersion === "kernel.runtime.v1" &&
+    typeof value.messageId === "string" &&
+    typeof value.sequence === "number" &&
+    typeof value.timestamp === "string" &&
+    value.source === "kernel_runtime" &&
+    (value.kind === "ack" || value.kind === "event" || value.kind === "error" || value.kind === "pong")
+  );
+}
+
+function extractKernelRuntimeEnvelope(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (isKernelRuntimeEnvelope(payload.envelope)) return payload.envelope as Record<string, unknown>;
+  if (isKernelRuntimeEnvelope(payload)) return payload;
+
+  const raw = payload.raw;
+  if (isKernelRuntimeEnvelope(raw)) return raw as Record<string, unknown>;
+  if (isRecord(raw) && isKernelRuntimeEnvelope(raw.envelope)) {
+    return raw.envelope as Record<string, unknown>;
+  }
+
+  const message = payload.message;
+  if (isKernelRuntimeEnvelope(message)) return message as Record<string, unknown>;
+  if (isRecord(message) && isKernelRuntimeEnvelope(message.envelope)) {
+    return message.envelope as Record<string, unknown>;
+  }
+
+  return undefined;
+}
+
 /**
  * Normalize event payload into a flat structure with guaranteed `content` string.
  * Preserves original payload in `raw` field and keeps tool-specific fields.
@@ -70,6 +105,11 @@ export function normalizePayload(type: string, payload: unknown): Record<string,
 
   // Preserve message field for backward compat
   if (p.message) normalized.message = p.message;
+
+  if (type === "kernel_runtime_event") {
+    const envelope = extractKernelRuntimeEnvelope(p);
+    if (envelope) normalized.envelope = envelope;
+  }
 
   if (type === "task_state") {
     if (typeof p.task_list_id === "string") normalized.task_list_id = p.task_list_id;

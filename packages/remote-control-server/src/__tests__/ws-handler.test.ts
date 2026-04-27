@@ -39,6 +39,20 @@ function createMockWs(readyState = 1) {
   } as any;
 }
 
+function createRuntimeEnvelope(sequence = 1) {
+  return {
+    schemaVersion: "kernel.runtime.v1",
+    messageId: `runtime-message-${sequence}`,
+    eventId: `runtime-event-${sequence}`,
+    sequence,
+    timestamp: "2026-04-26T00:00:00.000Z",
+    source: "kernel_runtime",
+    kind: "event",
+    conversationId: "conversation-1",
+    payload: { type: "headless.sdk_message" },
+  };
+}
+
 describe("ws-handler", () => {
   beforeEach(() => {
     storeReset();
@@ -147,6 +161,24 @@ describe("ws-handler", () => {
       });
       expect(events).toHaveLength(1);
       expect((events[0] as any).type).toBe("partial_assistant");
+    });
+
+    test("preserves inbound kernel runtime envelopes on the event bus", () => {
+      const bus = getEventBus("s1");
+      const events: unknown[] = [];
+      const envelope = createRuntimeEnvelope();
+      bus.subscribe((e) => events.push(e));
+
+      ingestBridgeMessage("s1", {
+        type: "kernel_runtime_event",
+        uuid: "wire-message-1",
+        envelope,
+      });
+
+      expect(events).toHaveLength(1);
+      expect((events[0] as any).type).toBe("kernel_runtime_event");
+      expect((events[0] as any).payload.envelope).toEqual(envelope);
+      expect((events[0] as any).payload.raw.envelope).toEqual(envelope);
     });
 
     test("falls back to unknown type", () => {
@@ -454,6 +486,32 @@ describe("ws-handler", () => {
       const lastMsg = JSON.parse(sent[sent.length - 1]);
       expect(lastMsg.type).toBe("status");
       expect(lastMsg.message).toEqual({ state: "running" });
+    });
+
+    test("converts kernel runtime events to first-class envelope messages", () => {
+      const bus = getEventBus("rt1");
+      const ws = createMockWs();
+      const envelope = createRuntimeEnvelope();
+      handleWebSocketOpen(ws, "rt1");
+
+      bus.publish({
+        id: "runtime-eventbus-id",
+        sessionId: "rt1",
+        type: "kernel_runtime_event",
+        payload: {
+          uuid: "wire-message-1",
+          envelope,
+        },
+        direction: "outbound",
+      });
+
+      const sent = ws.getSentData();
+      const lastMsg = JSON.parse(sent[sent.length - 1]);
+      expect(lastMsg.type).toBe("kernel_runtime_event");
+      expect(lastMsg.uuid).toBe("wire-message-1");
+      expect(lastMsg.session_id).toBe("rt1");
+      expect(lastMsg.envelope).toEqual(envelope);
+      expect(lastMsg.message).toBeUndefined();
     });
 
     test("permission_response with updated_input", () => {

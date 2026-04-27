@@ -3,17 +3,20 @@ import {
   createDefaultKernelHeadlessEnvironment,
   prepareKernelHeadlessStartup,
   runKernelHeadless,
-  type DefaultKernelHeadlessEnvironmentOptions,
   type KernelHeadlessInput,
   type KernelHeadlessRunOptions,
   type PrepareKernelHeadlessStartupDeps,
   type PrepareKernelHeadlessStartupOptions,
 } from './headlessKernelDeps.js'
 import type { ScopedMcpServerConfig } from '../../../services/mcp/types.js'
+import {
+  materializeRuntimeHeadlessEnvironment,
+  type RuntimeHeadlessEnvironmentInput,
+} from '../../../runtime/capabilities/execution/headlessCapabilityMaterializer.js'
 
 export type HeadlessLaunchOptions = {
   inputPrompt: KernelHeadlessInput
-  environment: DefaultKernelHeadlessEnvironmentOptions
+  environment: RuntimeHeadlessEnvironmentInput
   regularMcpConfigs: Record<string, ScopedMcpServerConfig>
   claudeaiConfigPromise: Promise<Record<string, ScopedMcpServerConfig>>
   startup: PrepareKernelHeadlessStartupOptions
@@ -25,9 +28,11 @@ export type HeadlessLaunchOptions = {
 export async function runHeadlessLaunch(
   options: HeadlessLaunchOptions,
 ): Promise<void> {
-  const headlessEnvironment = createDefaultKernelHeadlessEnvironment(
+  const environment = await materializeRuntimeHeadlessEnvironment(
     options.environment,
   )
+  const headlessEnvironment =
+    createDefaultKernelHeadlessEnvironment(environment)
 
   options.profileCheckpoint('before_connectMcp')
   await connectDefaultKernelHeadlessMcp({

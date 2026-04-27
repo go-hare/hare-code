@@ -20,6 +20,7 @@ describe('runKernelHeadless', () => {
       sdkMcpConfigs: { local: { type: 'sdk', name: 'local' } },
       agents: [{ agentType: 'default' }],
     }
+    const runtimeEventSink = mock(() => {})
     const options = {
       continue: false,
       resume: undefined,
@@ -46,6 +47,7 @@ describe('runKernelHeadless', () => {
       enableAuthStatus: undefined,
       agent: undefined,
       workload: undefined,
+      runtimeEventSink,
     }
 
     await runKernelHeadless('hello', environment as never, options, {
@@ -74,6 +76,7 @@ describe('runKernelHeadless', () => {
     expect(call?.[5]).toBe(environment.sdkMcpConfigs)
     expect(call?.[6]).toBe(environment.agents)
     expect(call?.[7]).toBe(options)
+    expect(call?.[7].runtimeEventSink).toBe(runtimeEventSink)
   })
 
   test('prepares runtime bootstrap before delegating', async () => {

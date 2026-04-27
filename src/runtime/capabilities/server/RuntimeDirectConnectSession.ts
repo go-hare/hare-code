@@ -12,8 +12,15 @@ import type {
 } from './contracts.js'
 import type { SessionInfo, SessionState } from '../../../server/types.js'
 import type { RuntimeSessionIndexEntry } from '../../contracts/session.js'
+import type {
+  KernelRuntimeEnvelopeBase,
+  KernelRuntimeEventSink,
+} from '../../contracts/events.js'
+import { getKernelRuntimeEnvelopeFromMessage } from '../../../utils/kernelRuntimeEventMessage.js'
+import { jsonParse } from '../../../utils/slowOperations.js'
 
 const MAX_BACKLOG_LINES = 500
+const MAX_RUNTIME_ENVELOPE_BACKLOG = 500
 
 export class RuntimeDirectConnectSession implements RuntimeManagedSession {
   readonly persistenceOwner: RuntimeSessionPersistenceOwner
@@ -21,6 +28,7 @@ export class RuntimeDirectConnectSession implements RuntimeManagedSession {
   readonly closed: Promise<void>
 
   private readonly backlog: string[] = []
+  private readonly runtimeEnvelopeBacklog: KernelRuntimeEnvelopeBase[] = []
   private readonly sinks = new Set<SessionRuntimeSink>()
   private readonly createdAt = Date.now()
 
@@ -101,6 +109,20 @@ export class RuntimeDirectConnectSession implements RuntimeManagedSession {
     }
 
     return this.runtime.writeLine(rawMessage)
+  }
+
+  getRuntimeEnvelopeBacklog(): readonly KernelRuntimeEnvelopeBase[] {
+    return [...this.runtimeEnvelopeBacklog]
+  }
+
+  replayRuntimeEnvelopeBacklog(sink: KernelRuntimeEventSink): void {
+    for (const envelope of this.runtimeEnvelopeBacklog) {
+      try {
+        sink(envelope)
+      } catch {
+        // Observation sinks must not affect direct-connect replay semantics.
+      }
+    }
   }
 
   attachClient(socket: SessionRuntimeSink): void {
@@ -193,6 +215,25 @@ export class RuntimeDirectConnectSession implements RuntimeManagedSession {
       this.backlog.shift()
     }
     this.backlog.push(line)
+
+    const envelope = this.extractRuntimeEnvelope(line)
+    if (!envelope) {
+      return
+    }
+    if (this.runtimeEnvelopeBacklog.length >= MAX_RUNTIME_ENVELOPE_BACKLOG) {
+      this.runtimeEnvelopeBacklog.shift()
+    }
+    this.runtimeEnvelopeBacklog.push(envelope)
+  }
+
+  private extractRuntimeEnvelope(
+    line: string,
+  ): KernelRuntimeEnvelopeBase | undefined {
+    try {
+      return getKernelRuntimeEnvelopeFromMessage(jsonParse(line))
+    } catch {
+      return undefined
+    }
   }
 
   private startIdleTimer(): void {

@@ -1385,6 +1385,11 @@ export async function initBridgeCore(
             onInboundMessage,
             onPermissionResponse,
             onServerControlRequest,
+            envelope => {
+              logForDebugging(
+                `[bridge:repl] Received runtime envelope kind=${envelope.kind} eventId=${envelope.eventId ?? ''}`,
+              )
+            },
           )
         })
 

@@ -2,6 +2,20 @@ import { describe, test, expect } from "bun:test";
 
 const { normalizePayload } = await import("../services/transport");
 
+function createRuntimeEnvelope(sequence = 1) {
+  return {
+    schemaVersion: "kernel.runtime.v1",
+    messageId: `runtime-message-${sequence}`,
+    eventId: `runtime-event-${sequence}`,
+    sequence,
+    timestamp: "2026-04-26T00:00:00.000Z",
+    source: "kernel_runtime",
+    kind: "event",
+    conversationId: "conversation-1",
+    payload: { type: "headless.sdk_message" },
+  };
+}
+
 // extractContent is not exported; we test it via normalizePayload's content field
 
 // =============================================================================
@@ -155,6 +169,33 @@ describe("normalizePayload — field preservation", () => {
     const msg = { role: "user", content: "hi" };
     const result = normalizePayload("assistant", { message: msg });
     expect(result.message).toEqual(msg);
+  });
+
+  test("preserves kernel runtime envelope as first-class payload field", () => {
+    const envelope = createRuntimeEnvelope();
+    const result = normalizePayload("kernel_runtime_event", {
+      type: "kernel_runtime_event",
+      uuid: "wire-message-1",
+      envelope,
+    });
+
+    expect(result.content).toBe("");
+    expect(result.uuid).toBe("wire-message-1");
+    expect(result.envelope).toEqual(envelope);
+  });
+
+  test("wraps bare kernel runtime envelope payloads", () => {
+    const envelope = createRuntimeEnvelope(2);
+    const result = normalizePayload("kernel_runtime_event", envelope);
+
+    expect(result.envelope).toEqual(envelope);
+  });
+
+  test("preserves runtime envelopes stored under raw compatibility payloads", () => {
+    const envelope = createRuntimeEnvelope(3);
+    const result = normalizePayload("kernel_runtime_event", { raw: envelope });
+
+    expect(result.envelope).toEqual(envelope);
   });
 });
 

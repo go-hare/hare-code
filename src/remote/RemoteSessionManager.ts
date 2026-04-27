@@ -4,7 +4,10 @@ import type {
   SDKControlPermissionRequest,
   SDKControlRequest,
   SDKControlResponse,
+  StdoutMessage,
 } from '../entrypoints/sdk/controlTypes.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
+import { consumeKernelRuntimeEventMessage } from '../utils/kernelRuntimeEventMessage.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logError } from '../utils/log.js'
 import {
@@ -41,10 +44,15 @@ export type RemotePermissionResponse =
   | {
       behavior: 'allow'
       updatedInput: Record<string, unknown>
+      updatedPermissions?: unknown[]
+      toolUseID?: string
+      decisionClassification?: 'user_temporary' | 'user_permanent'
     }
   | {
       behavior: 'deny'
       message: string
+      toolUseID?: string
+      decisionClassification?: 'user_reject'
     }
 
 export type RemoteSessionConfig = {
@@ -74,6 +82,7 @@ export type RemoteSessionCallbacks = {
     requestId: string,
     toolUseId: string | undefined,
   ) => void
+  onRuntimeEvent?: KernelRuntimeEventSink
   /** Called when connection is established */
   onConnected?: () => void
   /** Called when connection is lost and cannot be restored */
@@ -150,6 +159,15 @@ export class RemoteSessionManager {
       | SDKControlResponse
       | SDKControlCancelRequest,
   ): void {
+    if (
+      consumeKernelRuntimeEventMessage(
+        message as StdoutMessage,
+        this.callbacks.onRuntimeEvent,
+      )
+    ) {
+      return
+    }
+
     // Handle control requests (permission prompts from CCR)
     if (message.type === 'control_request') {
       this.handleControlRequest(message as SDKControlRequest)
@@ -269,8 +287,21 @@ export class RemoteSessionManager {
         response: {
           behavior: result.behavior,
           ...(result.behavior === 'allow'
-            ? { updatedInput: result.updatedInput }
-            : { message: result.message }),
+            ? {
+                updatedInput: result.updatedInput,
+                ...(result.updatedPermissions !== undefined && {
+                  updatedPermissions: result.updatedPermissions,
+                }),
+                toolUseID: result.toolUseID ?? pendingRequest.tool_use_id,
+                decisionClassification:
+                  result.decisionClassification ?? 'user_temporary',
+              }
+            : {
+                message: result.message,
+                toolUseID: result.toolUseID ?? pendingRequest.tool_use_id,
+                decisionClassification:
+                  result.decisionClassification ?? 'user_reject',
+              }),
         },
       },
     }

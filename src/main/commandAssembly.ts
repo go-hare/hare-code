@@ -1,7 +1,10 @@
 import type { Command } from '../commands.js'
 import { getCommands } from '../commands.js'
-import { initBuiltinPlugins } from '../plugins/bundled/index.js'
-import { initBundledSkills } from '../skills/bundled/index.js'
+import { primeRuntimeCommandSources } from '../runtime/capabilities/commands/RuntimeCommandSources.js'
+import {
+  materializeRuntimeCommandAssembly,
+  type RuntimeCommandAssemblyResult,
+} from '../runtime/capabilities/execution/headlessCapabilityMaterializer.js'
 import { getAgentDefinitionsWithOverrides } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 
 type AgentDefinitionsResult = Awaited<
@@ -14,13 +17,7 @@ export type PreloadedCommandAssembly = {
 }
 
 export function primeBundledCommandSources(entrypoint?: string): void {
-  // Register bundled skills/plugins before kicking getCommands() — they're
-  // pure in-memory array pushes (<1ms, zero I/O) that getBundledSkills()
-  // reads synchronously.
-  if (entrypoint !== 'local-agent') {
-    initBuiltinPlugins()
-    initBundledSkills()
-  }
+  primeRuntimeCommandSources(entrypoint)
 }
 
 export function preloadCommandAssembly(
@@ -43,10 +40,7 @@ export function preloadCommandAssembly(
 export async function resolveCommandAssembly(options: {
   currentCwd: string
   preloaded: PreloadedCommandAssembly
-}): Promise<{
-  commands: Command[]
-  agentDefinitionsResult: AgentDefinitionsResult
-}> {
+}): Promise<RuntimeCommandAssemblyResult> {
   const { currentCwd, preloaded } = options
 
   const [commands, agentDefinitionsResult] = await Promise.all([
@@ -55,8 +49,9 @@ export async function resolveCommandAssembly(options: {
       getAgentDefinitionsWithOverrides(currentCwd),
   ])
 
-  return {
+  return materializeRuntimeCommandAssembly({
+    cwd: currentCwd,
     commands,
     agentDefinitionsResult,
-  }
+  })
 }

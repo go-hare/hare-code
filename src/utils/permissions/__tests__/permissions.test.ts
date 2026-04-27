@@ -1,7 +1,10 @@
 import { mock, describe, expect, test } from 'bun:test'
+import { z } from 'zod/v4'
 import { createFileStateCacheWithSizeLimit } from '../../../utils/fileStateCache.js'
 import { createSubagentContext } from '../../../utils/forkedAgent.js'
 import { getEmptyToolPermissionContext } from '../../../Tool.js'
+import { RuntimePermissionBroker } from '../../../runtime/capabilities/permissions/RuntimePermissionBroker.js'
+import { createToolPermissionRuntimeContext } from '../runtimePermissionBroker.js'
 
 mock.module('src/utils/log.ts', () => ({
   logError: () => {},
@@ -25,6 +28,7 @@ const {
   getAskRuleForTool,
   getDenyRuleForAgent,
   filterDeniedAgents,
+  hasPermissionsToUseTool,
 } = await import('../permissions')
 
 function makeContext(opts: { denyRules?: string[]; askRules?: string[] }) {
@@ -38,6 +42,58 @@ function makeContext(opts: { denyRules?: string[]; askRules?: string[] }) {
 
 function makeTool(name: string, mcpInfo?: { serverName: string; toolName: string }) {
   return { name, mcpInfo }
+}
+
+function makePermissionTool(behavior: 'ask' | 'allow' = 'ask') {
+  return {
+    name: 'TestTool',
+    inputSchema: z.object({ path: z.string() }),
+    async checkPermissions() {
+      return behavior === 'allow'
+        ? { behavior: 'allow' as const, updatedInput: { path: 'ok.txt' } }
+        : { behavior: 'ask' as const, message: 'confirm' }
+    },
+    isReadOnly() {
+      return false
+    },
+    isOpenWorld() {
+      return false
+    },
+    isDestructive() {
+      return false
+    },
+  } as never
+}
+
+function makeToolUseContext(args?: {
+  mode?: string
+  broker?: RuntimePermissionBroker
+}) {
+  const toolPermissionContext = {
+    ...getEmptyToolPermissionContext(),
+    mode: args?.mode ?? 'default',
+  } as never
+  return {
+    abortController: new AbortController(),
+    readFileState: createFileStateCacheWithSizeLimit(1),
+    getAppState: () => ({ toolPermissionContext }),
+    setAppState: () => {},
+    updateFileHistoryState: () => {},
+    updateAttributionState: () => {},
+    setInProgressToolUseIDs: () => {},
+    setResponseLength: () => {},
+    options: {
+      isNonInteractiveSession: false,
+      tools: [],
+    },
+    messages: [],
+    runtimePermission: args?.broker
+      ? createToolPermissionRuntimeContext({
+          permissionBroker: args.broker,
+          getConversationId: () => 'conversation-1',
+        })
+      : undefined,
+  } as never
 }
 
 describe('getDenyRuleForTool', () => {
@@ -75,6 +131,37 @@ describe('getAskRuleForTool', () => {
   test('returns null for non-matching tool', () => {
     const ctx = makeContext({ askRules: ['Write'] })
     expect(getAskRuleForTool(ctx, makeTool('Bash'))).toBeNull()
+  })
+})
+
+describe('hasPermissionsToUseTool runtime broker integration', () => {
+  test('registers ask decisions as pending runtime permission requests', async () => {
+    const broker = new RuntimePermissionBroker()
+    const result = await hasPermissionsToUseTool(
+      makePermissionTool('ask'),
+      { path: 'needs-approval.txt' },
+      makeToolUseContext({ broker }),
+      { message: { id: 'msg-1' } } as never,
+      'tool-use-1',
+    )
+
+    expect(result.behavior).toBe('ask')
+    expect(broker.snapshot().pendingRequestIds).toEqual(['tool-use-1'])
+  })
+
+  test('finalizes allow decisions through the runtime permission broker', async () => {
+    const broker = new RuntimePermissionBroker()
+    const result = await hasPermissionsToUseTool(
+      makePermissionTool('allow'),
+      { path: 'ok.txt' },
+      makeToolUseContext({ broker }),
+      { message: { id: 'msg-2' } } as never,
+      'tool-use-2',
+    )
+
+    expect(result.behavior).toBe('allow')
+    expect(broker.snapshot().pendingRequestIds).toEqual([])
+    expect(broker.snapshot().finalizedRequestIds).toEqual(['tool-use-2'])
   })
 })
 

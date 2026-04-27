@@ -68,4 +68,47 @@ describe('createHeadlessStreamCollector', () => {
       },
     ])
   })
+
+  test('emits SDK messages to the runtime event adapter in stream-json verbose mode', async () => {
+    const runtimeMessages: unknown[] = []
+    const collector = createHeadlessStreamCollector(
+      {
+        outputFormat: 'stream-json',
+        verbose: true,
+      },
+      {
+        emitSdkMessage(message) {
+          runtimeMessages.push(message)
+        },
+      },
+    )
+    const writes: unknown[] = []
+
+    await collector.handleMessage(
+      {
+        write: async (message: unknown) => {
+          writes.push(message)
+        },
+      } as never,
+      {
+        type: 'assistant',
+        message: { content: 'hello' },
+        optionalField: undefined,
+      } as never,
+    )
+
+    expect(writes).toEqual([
+      {
+        type: 'assistant',
+        message: { content: 'hello' },
+        optionalField: undefined,
+      },
+    ])
+    expect(runtimeMessages).toEqual([
+      {
+        type: 'assistant',
+        message: { content: 'hello' },
+      },
+    ])
+  })
 })

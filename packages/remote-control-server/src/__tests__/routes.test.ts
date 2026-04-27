@@ -61,6 +61,26 @@ function toWebSessionId(sessionId: string): string {
   return `session_${sessionId.slice("cse_".length)}`;
 }
 
+function createRuntimeEnvelope(sequence = 1) {
+  return {
+    schemaVersion: "kernel.runtime.v1",
+    messageId: `runtime-message-${sequence}`,
+    eventId: `runtime-event-${sequence}`,
+    sequence,
+    timestamp: "2026-04-26T00:00:00.000Z",
+    source: "kernel_runtime",
+    kind: "event",
+    conversationId: "conversation-1",
+    payload: { type: "headless.sdk_message" },
+  };
+}
+
+function parseSSEDataFrame(text: string): Record<string, unknown> {
+  const line = text.split("\n").find((line) => line.startsWith("data: "));
+  if (!line) throw new Error(`Missing data line in SSE frame: ${text}`);
+  return JSON.parse(line.slice("data: ".length)) as Record<string, unknown>;
+}
+
 describe("V1 Session Routes", () => {
   let app: Hono;
 
@@ -1371,6 +1391,40 @@ describe("V2 Worker Events Routes", () => {
     const frame = new TextDecoder().decode(secondChunk.value!);
     expect(frame).toContain("event: client_event");
     expect(frame).toContain("\"payload\":{\"type\":\"user\",\"content\":\"hello\",\"message\":{\"content\":\"hello\"}}");
+    reader.cancel();
+  });
+
+  test("GET /v1/code/sessions/:id/worker/events/stream — preserves runtime envelope payloads", async () => {
+    const sessRes = await app.request("/v1/code/sessions", {
+      method: "POST",
+      headers: { ...AUTH_HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const { session: { id } } = await sessRes.json();
+    const envelope = createRuntimeEnvelope();
+
+    const streamRes = await app.request(`/v1/code/sessions/${id}/worker/events/stream`, {
+      headers: AUTH_HEADERS,
+    });
+    expect(streamRes.status).toBe(200);
+
+    const reader = streamRes.body?.getReader();
+    expect(reader).toBeTruthy();
+    if (!reader) return;
+
+    await reader.read(); // initial keepalive
+
+    publishSessionEvent(id, "kernel_runtime_event", envelope, "outbound");
+
+    const chunk = await reader.read();
+    const frameText = new TextDecoder().decode(chunk.value!);
+    const frame = parseSSEDataFrame(frameText);
+    const payload = frame.payload as Record<string, unknown>;
+
+    expect(frame.event_type).toBe("kernel_runtime_event");
+    expect(payload.type).toBe("kernel_runtime_event");
+    expect(payload.envelope).toEqual(envelope);
+    expect(payload.message).toBeUndefined();
     reader.cancel();
   });
 

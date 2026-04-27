@@ -27,6 +27,29 @@ describe('parseBridgePermissionResponse', () => {
     })
   })
 
+  test('preserves host decision metadata on allow responses', () => {
+    const message: SDKControlResponse = {
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: 'req-1',
+        response: {
+          behavior: 'allow',
+          updatedInput: { command: 'pwd' },
+          toolUseID: 'tool-use-1',
+          decisionClassification: 'user_permanent',
+        },
+      },
+    }
+
+    expect(parseBridgePermissionResponse(message)).toEqual({
+      behavior: 'allow',
+      updatedInput: { command: 'pwd' },
+      toolUseID: 'tool-use-1',
+      decisionClassification: 'user_permanent',
+    })
+  })
+
   test('maps error responses with feedback to deny', () => {
     const message = {
       type: 'control_response',

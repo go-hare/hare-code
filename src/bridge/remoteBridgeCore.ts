@@ -472,6 +472,11 @@ export async function initEnvLessBridgeCore(
             onSetPermissionMode,
             outboundOnly,
           }),
+        envelope => {
+          logForDebugging(
+            `[remote-bridge] Received runtime envelope kind=${envelope.kind} eventId=${envelope.eventId ?? ''}`,
+          )
+        },
       )
     })
 

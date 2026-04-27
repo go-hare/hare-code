@@ -42,6 +42,7 @@ import type {
   Message,
   SystemCompactBoundaryMessage,
 } from '../../../types/message.js'
+import type { ToolPermissionRuntimeContext } from '../../../types/runtimePermission.js'
 import type { OrphanedPermission } from '../../../types/textInputTypes.js'
 import { createAbortController } from '../../../utils/abortController.js'
 import type { AttributionState } from '../../../utils/commitAttribution.js'
@@ -178,6 +179,7 @@ export type QueryEngineConfig = {
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
   orphanedPermission?: OrphanedPermission
+  runtimePermission?: ToolPermissionRuntimeContext
   /**
    * Snip-boundary handler: receives each yielded system message plus the
    * current mutableMessages store. Returns undefined if the message is not a
@@ -435,6 +437,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
       },
       setSDKStatus,
       activeTaskExecutionContext: getActiveTaskExecutionContext(),
+      runtimePermission: this.config.runtimePermission,
     }
 
     // Handle orphaned permission (only once per engine lifetime)

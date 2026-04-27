@@ -2,14 +2,29 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { HeadlessLaunchOptions } from '../headlessLauncher.js'
 
 const callOrder: string[] = []
-const headlessEnvironment = {
-  store: { name: 'headless-store' },
-  commands: [{ name: 'prompt-ok' }],
+const materializedEnvironment = {
+  commands: [
+    { name: 'prompt-ok', type: 'prompt', disableNonInteractive: false },
+  ],
   tools: [{ name: 'Bash' }],
   sdkMcpConfigs: { local: { type: 'sdk', name: 'local' } },
-  agents: [{ agentType: 'default' }],
+  agents: [{ agentType: 'default', source: 'built-in' }],
+  toolPermissionContext: { mode: 'default' },
+}
+const headlessEnvironment = {
+  store: { name: 'headless-store' },
+  commands: materializedEnvironment.commands,
+  tools: materializedEnvironment.tools,
+  sdkMcpConfigs: materializedEnvironment.sdkMcpConfigs,
+  agents: materializedEnvironment.agents,
 }
 
+const mockMaterializeRuntimeHeadlessEnvironment = mock(
+  async (_options: unknown) => {
+    callOrder.push('materialize')
+    return materializedEnvironment
+  },
+)
 const mockCreateDefaultKernelHeadlessEnvironment = mock((_options: unknown) => {
   callOrder.push('create')
   return headlessEnvironment
@@ -36,6 +51,14 @@ mock.module('../headlessKernelDeps.js', () => ({
   runKernelHeadless: mockRunKernelHeadless,
 }))
 
+mock.module(
+  '../../../../runtime/capabilities/execution/headlessCapabilityMaterializer.js',
+  () => ({
+    materializeRuntimeHeadlessEnvironment:
+      mockMaterializeRuntimeHeadlessEnvironment,
+  }),
+)
+
 const { runHeadlessLaunch } = await import('../headlessLauncher.js')
 
 function createHeadlessLaunchOptions(): HeadlessLaunchOptions {
@@ -46,7 +69,9 @@ function createHeadlessLaunchOptions(): HeadlessLaunchOptions {
   return {
     inputPrompt: 'hello from launcher',
     environment: {
-      commands: [{ name: 'prompt-ok', type: 'prompt', disableNonInteractive: false }],
+      commands: [
+        { name: 'prompt-ok', type: 'prompt', disableNonInteractive: false },
+      ],
       tools: [{ name: 'Bash' }],
       sdkMcpConfigs: {
         local: { type: 'sdk', name: 'local', scope: 'local' },
@@ -107,6 +132,7 @@ function createHeadlessLaunchOptions(): HeadlessLaunchOptions {
 describe('runHeadlessLaunch', () => {
   beforeEach(() => {
     callOrder.length = 0
+    mockMaterializeRuntimeHeadlessEnvironment.mockClear()
     mockCreateDefaultKernelHeadlessEnvironment.mockClear()
     mockConnectDefaultKernelHeadlessMcp.mockClear()
     mockPrepareKernelHeadlessStartup.mockClear()
@@ -119,6 +145,7 @@ describe('runHeadlessLaunch', () => {
     await runHeadlessLaunch(options)
 
     expect(callOrder).toEqual([
+      'materialize',
       'create',
       'checkpoint:before_connectMcp',
       'connect',
@@ -128,8 +155,11 @@ describe('runHeadlessLaunch', () => {
       'run',
     ])
 
-    expect(mockCreateDefaultKernelHeadlessEnvironment).toHaveBeenCalledWith(
+    expect(mockMaterializeRuntimeHeadlessEnvironment).toHaveBeenCalledWith(
       options.environment,
+    )
+    expect(mockCreateDefaultKernelHeadlessEnvironment).toHaveBeenCalledWith(
+      materializedEnvironment,
     )
     expect(mockConnectDefaultKernelHeadlessMcp).toHaveBeenCalledWith({
       store: headlessEnvironment.store,

@@ -2,8 +2,13 @@ import { feature } from 'bun:bundle'
 import { createStreamlinedTransformer } from 'src/utils/streamlinedTransform.js'
 import type { SDKMessage } from 'src/entrypoints/agentSdkTypes.js'
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
+import { jsonParse, jsonStringify } from 'src/utils/slowOperations.js'
 import type { HeadlessRuntimeOptions } from '../HeadlessRuntime.js'
 import type { StructuredIO } from './io/structuredIO.js'
+
+type HeadlessStreamRuntimeEvents = {
+  emitSdkMessage(message: SDKMessage): void
+}
 
 function shouldTrackHeadlessResultMessage(message: SDKMessage): boolean {
   return !(
@@ -26,6 +31,7 @@ function shouldTrackHeadlessResultMessage(message: SDKMessage): boolean {
 
 export function createHeadlessStreamCollector(
   options: Pick<HeadlessRuntimeOptions, 'outputFormat' | 'verbose'>,
+  runtimeEvents?: HeadlessStreamRuntimeEvents,
 ): {
   handleMessage(
     structuredIO: StructuredIO,
@@ -57,6 +63,8 @@ export function createHeadlessStreamCollector(
         await structuredIO.write(message as unknown as StdoutMessage)
       }
 
+      runtimeEvents?.emitSdkMessage(sanitizeSdkMessageForRuntimeEvent(message))
+
       if (!shouldTrackHeadlessResultMessage(message)) {
         return
       }
@@ -73,4 +81,8 @@ export function createHeadlessStreamCollector(
       return lastMessage
     },
   }
+}
+
+function sanitizeSdkMessageForRuntimeEvent(message: SDKMessage): SDKMessage {
+  return jsonParse(jsonStringify(message)) as SDKMessage
 }

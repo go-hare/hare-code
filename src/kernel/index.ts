@@ -33,6 +33,13 @@ export type {
   KernelHeadlessSession,
   KernelHeadlessStore,
 } from './headless.js'
+export type {
+  KernelRuntimeEnvelopeBase,
+  KernelRuntimeEnvelopeKind,
+  KernelRuntimeErrorCode,
+  KernelRuntimeErrorPayload,
+  KernelRuntimeEventSink,
+} from '../runtime/contracts/events.js'
 export {
   createDirectConnectSession as createKernelSession,
   connectDirectHostSession,
@@ -57,3 +64,78 @@ export {
 } from '../server/types.js'
 export { runBridgeHeadless } from './bridge.js'
 export { runDaemonWorker } from './daemon.js'
+export {
+  createKernelRuntimeEventFacade,
+  consumeKernelRuntimeEventMessage,
+  getKernelEventFromEnvelope,
+  getKernelRuntimeEnvelopeFromMessage,
+  isKernelRuntimeEnvelope,
+  KernelRuntimeEventReplayError,
+  toKernelRuntimeEventMessage,
+} from './events.js'
+export type {
+  KernelRuntimeEventMessage,
+  KernelRuntimeEventFacade,
+  KernelRuntimeEventFacadeOptions,
+  KernelRuntimeEventInput,
+  KernelRuntimeEventReplayRequest,
+} from './events.js'
+export {
+  createKernelPermissionBroker,
+  KernelPermissionBrokerDisposedError,
+  KernelPermissionDecisionError,
+} from './permissions.js'
+export type {
+  KernelPermissionBroker,
+  KernelPermissionBrokerOptions,
+  KernelPermissionBrokerSnapshot,
+  KernelPermissionDecisionHandler,
+  KernelPermissionSessionGrantKeyFactory,
+} from './permissions.js'
+export {
+  createDefaultKernelRuntimeWireRouter,
+  createKernelRuntimeInProcessWireTransport,
+  createKernelRuntimeStdioWireTransport,
+  createKernelRuntimeWireClient,
+  KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+  runKernelRuntimeWireProtocol,
+} from './wireProtocol.js'
+export type {
+  KernelCapabilityDescriptor,
+  KernelCapabilityReloadScope,
+  KernelEvent,
+  KernelPermissionDecision,
+  KernelPermissionDecisionSource,
+  KernelPermissionDecisionValue,
+  KernelPermissionRequest,
+  KernelPermissionRequestId,
+  KernelPermissionRisk,
+  KernelRuntimeCommand,
+  KernelRuntimeCommandType,
+  KernelRuntimeConnectHostCommand,
+  KernelRuntimeDecidePermissionCommand,
+  KernelRuntimeDisconnectHostCommand,
+  KernelRuntimeHeadlessProcessExecutorOptions,
+  KernelRuntimeHostDisconnectPolicy,
+  KernelRuntimeHostIdentity,
+  KernelRuntimeHostKind,
+  KernelRuntimeTransportKind,
+  KernelRuntimeTrustLevel,
+  KernelRuntimeInProcessWireTransportOptions,
+  KernelRuntimeStdioWireTransportOptions,
+  KernelRuntimeWireClient,
+  KernelRuntimeWireClientCommand,
+  KernelRuntimeWireClientOptions,
+  KernelRuntimeWireCapabilityResolver,
+  KernelRuntimeWireConversationRecoverySnapshot,
+  KernelRuntimeWireConversationSnapshotStore,
+  KernelRuntimeWirePermissionBroker,
+  KernelRuntimeWireProtocolOptions,
+  KernelRuntimeWireRouter,
+  KernelRuntimeWireRunnerOptions,
+  KernelRuntimeWireTransport,
+  KernelRuntimeWireTurnExecutionContext,
+  KernelRuntimeWireTurnExecutionEvent,
+  KernelRuntimeWireTurnExecutionResult,
+  KernelRuntimeWireTurnExecutor,
+} from './wireProtocol.js'

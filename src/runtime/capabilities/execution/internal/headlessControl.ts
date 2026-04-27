@@ -2,10 +2,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import { randomUUID } from 'crypto'
 import type { AppState } from 'src/state/AppStateStore.js'
 import type { Command } from 'src/commands.js'
-import {
-  formatDescriptionWithSource,
-  getCommandName,
-} from 'src/commands.js'
+import { formatDescriptionWithSource, getCommandName } from 'src/commands.js'
 import type {
   HookEvent,
   ModelInfo,
@@ -17,7 +14,15 @@ import type {
   SDKControlInitializeResponse,
   StdoutMessage,
 } from 'src/entrypoints/sdk/controlTypes.js'
-import { StructuredIO } from './io/structuredIO.js'
+import {
+  StructuredIO,
+  createStructuredPermissionRequest,
+  decidePermissionSafely,
+  kernelDecisionFromPermissionToolOutput,
+  permissionDecisionFromKernelDecision,
+  recordResolvedPermissionDecision,
+  type StructuredIOPermissionOptions,
+} from './io/structuredIO.js'
 import { RemoteIO } from './io/remoteIO.js'
 import type { Tool } from 'src/Tool.js'
 import { toolMatchesName } from 'src/Tool.js'
@@ -28,12 +33,14 @@ import {
   permissionPromptToolResultToPermissionDecision,
 } from 'src/utils/permissions/PermissionPromptToolResultSchema.js'
 import { hasPermissionsToUseTool } from 'src/utils/permissions/permissions.js'
+import { createToolPermissionRuntimeContext } from 'src/utils/permissions/runtimePermissionBroker.js'
 import { safeParseJSON } from 'src/utils/json.js'
 import { fromArray } from 'src/utils/generators.js'
 import { gracefulShutdownSync } from 'src/utils/gracefulShutdown.js'
 import { jsonStringify } from '../../../../utils/slowOperations.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import type { RequiresActionDetails } from 'src/utils/sessionState.js'
+import { createChildAbortController } from 'src/utils/abortController.js'
 import { createCombinedAbortSignal } from 'src/utils/combinedAbortSignal.js'
 import {
   DEFAULT_OUTPUT_STYLE_NAME,
@@ -48,9 +55,7 @@ import {
   parseAgentsFromJson,
 } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { getCwd } from 'src/utils/cwd.js'
-import {
-  getSettings_DEPRECATED,
-} from 'src/utils/settings/settings.js'
+import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
 import {
   isFastModeAvailable,
   isFastModeEnabled,
@@ -130,6 +135,7 @@ export function getStructuredIO(
 
 export function createCanUseToolWithPermissionPrompt(
   permissionPromptTool: PermissionPromptTool,
+  permissionOptions: StructuredIOPermissionOptions = {},
 ): CanUseToolFn {
   const canUseTool: CanUseToolFn = async (
     tool,
@@ -139,12 +145,23 @@ export function createCanUseToolWithPermissionPrompt(
     toolUseId,
     forceDecision,
   ) => {
+    const permissionToolUseContext =
+      permissionOptions.permissionBroker && !toolUseContext.runtimePermission
+        ? {
+            ...toolUseContext,
+            runtimePermission: createToolPermissionRuntimeContext({
+              permissionBroker: permissionOptions.permissionBroker,
+              getConversationId: permissionOptions.getConversationId,
+              getTurnId: permissionOptions.getTurnId,
+            }),
+          }
+        : toolUseContext
     const mainPermissionResult =
       forceDecision ??
       (await hasPermissionsToUseTool(
         tool,
         input,
-        toolUseContext,
+        permissionToolUseContext,
         assistantMessage,
         toolUseId,
       ))
@@ -153,23 +170,137 @@ export function createCanUseToolWithPermissionPrompt(
       mainPermissionResult.behavior === 'allow' ||
       mainPermissionResult.behavior === 'deny'
     ) {
+      recordResolvedPermissionDecision({
+        broker: permissionOptions.permissionBroker,
+        tool,
+        input,
+        toolUseContext: permissionToolUseContext,
+        toolUseID: toolUseId,
+        permissionResult: mainPermissionResult,
+        permissionOptions,
+      })
       return mainPermissionResult
     }
 
+    const permissionBroker = permissionOptions.permissionBroker
+    if (permissionBroker) {
+      const permissionPromptAbortController = createChildAbortController(
+        permissionToolUseContext.abortController,
+      )
+      if (permissionPromptAbortController.signal.aborted) {
+        return permissionPromptAbortDecision(permissionPromptTool.name)
+      }
+
+      const permissionPromptContext = {
+        ...permissionToolUseContext,
+        abortController: permissionPromptAbortController,
+      }
+      const requestId = randomUUID()
+      const permissionRequest = createStructuredPermissionRequest({
+        tool,
+        input,
+        toolUseContext: permissionToolUseContext,
+        toolUseID: toolUseId,
+        requestId,
+        permissionResult: mainPermissionResult,
+        permissionOptions,
+      })
+      const brokerPromise =
+        permissionBroker.requestPermission(permissionRequest)
+
+      try {
+        const toolCallPromise = permissionPromptTool
+          .call(
+            {
+              tool_name: tool.name,
+              input,
+              tool_use_id: toolUseId,
+            },
+            permissionPromptContext,
+            canUseTool,
+            assistantMessage,
+          )
+          .then(result => {
+            const permissionToolResultBlockParam =
+              permissionPromptTool.mapToolResultToToolResultBlockParam(
+                result.data,
+                '1',
+              )
+            if (
+              !permissionToolResultBlockParam.content ||
+              !Array.isArray(permissionToolResultBlockParam.content) ||
+              !permissionToolResultBlockParam.content[0] ||
+              permissionToolResultBlockParam.content[0].type !== 'text' ||
+              typeof permissionToolResultBlockParam.content[0].text !== 'string'
+            ) {
+              throw new Error(
+                'Permission prompt tool returned an invalid result. Expected a single text block param with type="text" and a string text value.',
+              )
+            }
+            const decision = kernelDecisionFromPermissionToolOutput(
+              permissionToolOutputSchema().parse(
+                safeParseJSON(permissionToolResultBlockParam.content[0].text),
+              ),
+              permissionRequest.permissionRequestId,
+              'permission_prompt_tool_mcp',
+            )
+            decidePermissionSafely(permissionBroker, decision)
+            return { source: 'mcp' as const, decision }
+          })
+
+        const brokerDecisionPromise = brokerPromise.then(decision => ({
+          source: 'broker' as const,
+          decision,
+        }))
+
+        const winner = await Promise.race([
+          toolCallPromise,
+          brokerDecisionPromise,
+        ])
+        if (winner.source === 'broker') {
+          toolCallPromise.catch(() => {})
+          const resolvedBy =
+            winner.decision.metadata &&
+            typeof winner.decision.metadata === 'object' &&
+            'resolvedBy' in winner.decision.metadata
+              ? winner.decision.metadata.resolvedBy
+              : undefined
+          if (resolvedBy !== 'permission_prompt_tool_mcp') {
+            permissionPromptAbortController.abort()
+          }
+        }
+        return permissionDecisionFromKernelDecision(
+          winner.decision,
+          permissionPromptTool,
+          input,
+          permissionToolUseContext,
+          toolUseId,
+        )
+      } catch (error) {
+        return permissionDecisionFromKernelDecision(
+          {
+            permissionRequestId: permissionRequest.permissionRequestId,
+            decision: 'deny',
+            decidedBy: 'runtime',
+            reason: `Permission prompt tool failed: ${error}`,
+            metadata: {
+              resolvedBy: 'permission_prompt_tool_error',
+            },
+          },
+          permissionPromptTool,
+          input,
+          permissionToolUseContext,
+          toolUseId,
+        )
+      }
+    }
+
     const { signal: combinedSignal, cleanup: cleanupAbortListener } =
-      createCombinedAbortSignal(toolUseContext.abortController.signal)
+      createCombinedAbortSignal(permissionToolUseContext.abortController.signal)
 
     if (combinedSignal.aborted) {
       cleanupAbortListener()
-      return {
-        behavior: 'deny',
-        message: 'Permission prompt was aborted.',
-        decisionReason: {
-          type: 'permissionPromptTool' as const,
-          permissionPromptToolName: tool.name,
-          toolResult: undefined,
-        },
-      }
+      return permissionPromptAbortDecision(permissionPromptTool.name)
     }
 
     const abortPromise = new Promise<'aborted'>(resolve => {
@@ -184,7 +315,7 @@ export function createCanUseToolWithPermissionPrompt(
         input,
         tool_use_id: toolUseId,
       },
-      toolUseContext,
+      permissionToolUseContext,
       canUseTool,
       assistantMessage,
     )
@@ -193,15 +324,7 @@ export function createCanUseToolWithPermissionPrompt(
     cleanupAbortListener()
 
     if (raceResult === 'aborted' || combinedSignal.aborted) {
-      return {
-        behavior: 'deny',
-        message: 'Permission prompt was aborted.',
-        decisionReason: {
-          type: 'permissionPromptTool' as const,
-          permissionPromptToolName: tool.name,
-          toolResult: undefined,
-        },
-      }
+      return permissionPromptAbortDecision(permissionPromptTool.name)
     }
 
     const result = raceResult as Awaited<typeof toolCallPromise>
@@ -224,10 +347,22 @@ export function createCanUseToolWithPermissionPrompt(
       ),
       permissionPromptTool,
       input,
-      toolUseContext,
+      permissionToolUseContext,
     )
   }
   return canUseTool
+}
+
+function permissionPromptAbortDecision(permissionPromptToolName: string) {
+  return {
+    behavior: 'deny' as const,
+    message: 'Permission prompt was aborted.',
+    decisionReason: {
+      type: 'permissionPromptTool' as const,
+      permissionPromptToolName,
+      toolResult: undefined,
+    },
+  }
 }
 
 export function getCanUseToolFn(
@@ -235,9 +370,10 @@ export function getCanUseToolFn(
   structuredIO: StructuredIO,
   getMcpTools: () => Tool[],
   onPermissionPrompt?: (details: RequiresActionDetails) => void,
+  permissionOptions?: StructuredIOPermissionOptions,
 ): CanUseToolFn {
   if (permissionPromptToolName === 'stdio') {
-    return structuredIO.createCanUseTool(onPermissionPrompt)
+    return structuredIO.createCanUseTool(onPermissionPrompt, permissionOptions)
   }
   if (!permissionPromptToolName) {
     return async (
@@ -283,7 +419,10 @@ export function getCanUseToolFn(
         gracefulShutdownSync(1)
         throw new Error(error)
       }
-      resolved = createCanUseToolWithPermissionPrompt(permissionPromptTool)
+      resolved = createCanUseToolWithPermissionPrompt(
+        permissionPromptTool,
+        permissionOptions,
+      )
     }
     return resolved(
       tool,
@@ -337,7 +476,9 @@ export async function handleInitializeRequest(
     options.appendSystemPrompt = request.appendSystemPrompt
   }
   if ((request as Record<string, unknown>).promptSuggestions !== undefined) {
-    options.promptSuggestions = (request as Record<string, unknown>).promptSuggestions
+    options.promptSuggestions = (
+      request as Record<string, unknown>
+    ).promptSuggestions
   }
 
   if ((request as Record<string, unknown>).agents) {
@@ -409,8 +550,10 @@ export async function handleInitializeRequest(
   }
   if ((request as Record<string, unknown>).jsonSchema) {
     bootstrapStateProvider.patchHeadlessControlState({
-      initJsonSchema: (request as Record<string, unknown>)
-        .jsonSchema as Record<string, unknown>,
+      initJsonSchema: (request as Record<string, unknown>).jsonSchema as Record<
+        string,
+        unknown
+      >,
     })
   }
 
@@ -472,8 +615,7 @@ export async function handleInitializeRequest(
         output: status.output,
         error: status.error,
         uuid: randomUUID(),
-        session_id:
-          bootstrapStateProvider.getSessionIdentity().sessionId,
+        session_id: bootstrapStateProvider.getSessionIdentity().sessionId,
       })
     }
   }

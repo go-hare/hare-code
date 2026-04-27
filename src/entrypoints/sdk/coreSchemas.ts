@@ -1792,6 +1792,60 @@ export const SDKElicitationCompleteMessageSchema = lazySchema(() =>
     ),
 )
 
+export const KernelRuntimeEnvelopeKindSchema = lazySchema(() =>
+  z.enum(['ack', 'event', 'error', 'pong']),
+)
+
+export const KernelRuntimeErrorPayloadSchema = lazySchema(() =>
+  z.object({
+    code: z.enum([
+      'invalid_request',
+      'schema_mismatch',
+      'not_found',
+      'busy',
+      'permission_denied',
+      'aborted',
+      'unavailable',
+      'internal_error',
+    ]),
+    message: z.string(),
+    retryable: z.boolean(),
+    details: z.record(z.string(), z.unknown()).optional(),
+  }),
+)
+
+export const KernelRuntimeEnvelopeSchema = lazySchema(() =>
+  z.object({
+    schemaVersion: z.literal('kernel.runtime.v1'),
+    messageId: z.string(),
+    requestId: z.string().optional(),
+    eventId: z.string().optional(),
+    sequence: z.number(),
+    timestamp: z.string(),
+    source: z.literal('kernel_runtime'),
+    kind: KernelRuntimeEnvelopeKindSchema(),
+    runtimeId: z.string().optional(),
+    conversationId: z.string().optional(),
+    turnId: z.string().optional(),
+    payload: z.unknown().optional(),
+    error: KernelRuntimeErrorPayloadSchema().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  }),
+)
+
+export const SDKKernelRuntimeEventMessageSchema = lazySchema(() =>
+  z
+    .object({
+      type: z.literal('kernel_runtime_event'),
+      envelope: KernelRuntimeEnvelopeSchema(),
+      uuid: UUIDPlaceholder(),
+      session_id: z.string(),
+    })
+    .describe(
+      'Runtime-owned kernel envelope emitted on the headless stream-json output path.',
+    ),
+)
+
 /** @internal */
 export const SDKPromptSuggestionMessageSchema = lazySchema(() =>
   z
@@ -1877,6 +1931,7 @@ export const SDKMessageSchema = lazySchema(() =>
     SDKToolUseSummaryMessageSchema(),
     SDKRateLimitEventSchema(),
     SDKElicitationCompleteMessageSchema(),
+    SDKKernelRuntimeEventMessageSchema(),
     SDKPromptSuggestionMessageSchema(),
   ]),
 )

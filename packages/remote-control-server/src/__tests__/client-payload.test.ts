@@ -13,6 +13,20 @@ function makeEvent(overrides: Partial<SessionEvent> & Pick<SessionEvent, "type" 
   };
 }
 
+function createRuntimeEnvelope(sequence = 1) {
+  return {
+    schemaVersion: "kernel.runtime.v1",
+    messageId: `runtime-message-${sequence}`,
+    eventId: `runtime-event-${sequence}`,
+    sequence,
+    timestamp: "2026-04-26T00:00:00.000Z",
+    source: "kernel_runtime",
+    kind: "event",
+    conversationId: "conversation-1",
+    payload: { type: "headless.sdk_message" },
+  };
+}
+
 // =============================================================================
 // user / user_message
 // =============================================================================
@@ -252,5 +266,41 @@ describe("toClientPayload — default types", () => {
     expect(result.uuid).toBe("u-1");
     expect(result.session_id).toBe("sess-1");
     expect(result.message).toEqual({ uuid: "u-1", content: "response text" });
+  });
+});
+
+// =============================================================================
+// kernel_runtime_event
+// =============================================================================
+
+describe("toClientPayload — kernel runtime events", () => {
+  test("preserves first-class envelope payloads", () => {
+    const envelope = createRuntimeEnvelope();
+    const event = makeEvent({
+      type: "kernel_runtime_event",
+      sessionId: "sess-runtime",
+      payload: { uuid: "wire-message-1", envelope },
+    });
+
+    const result = toClientPayload(event);
+    expect(result.type).toBe("kernel_runtime_event");
+    expect(result.uuid).toBe("wire-message-1");
+    expect(result.session_id).toBe("sess-runtime");
+    expect(result.envelope).toEqual(envelope);
+    expect(result.message).toBeUndefined();
+  });
+
+  test("wraps bare envelope payloads for compatibility transports", () => {
+    const envelope = createRuntimeEnvelope(2);
+    const event = makeEvent({
+      type: "kernel_runtime_event",
+      sessionId: "sess-runtime",
+      payload: { raw: envelope },
+    });
+
+    const result = toClientPayload(event);
+    expect(result.type).toBe("kernel_runtime_event");
+    expect(result.envelope).toEqual(envelope);
+    expect(result.message).toBeUndefined();
   });
 });

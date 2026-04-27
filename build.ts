@@ -17,7 +17,11 @@ const features = [...new Set([...DEFAULT_BUILD_FEATURES, ...envFeatures])]
 
 // Step 2: Bundle with splitting
 const result = await Bun.build({
-  entrypoints: ['src/entrypoints/cli.tsx', 'src/entrypoints/kernel.ts'],
+  entrypoints: [
+    'src/entrypoints/cli.tsx',
+    'src/entrypoints/kernel.ts',
+    'src/entrypoints/kernel-runtime.ts',
+  ],
   outdir,
   target: 'bun',
   splitting: true,
@@ -88,9 +92,10 @@ for (const nativeVendor of [
   console.log(`Copied vendor/${nativeVendor}/ → ${vendorDir}/`)
 }
 
-// Step 5: Generate cli-bun and cli-node executable entry points
+// Step 5: Generate executable entry points
 const cliBun = join(outdir, 'cli-bun.js')
 const cliNode = join(outdir, 'cli-node.js')
+const kernelRuntime = join(outdir, 'kernel-runtime.js')
 
 await writeFile(cliBun, '#!/usr/bin/env bun\nimport "./cli.js"\n')
 
@@ -100,5 +105,8 @@ await writeFile(cliNode, '#!/usr/bin/env node\nimport "./cli.js"\n')
 const { chmodSync } = await import('fs')
 chmodSync(cliBun, 0o755)
 chmodSync(cliNode, 0o755)
+chmodSync(kernelRuntime, 0o755)
 
-console.log(`Generated ${cliBun} (shebang: bun) and ${cliNode} (shebang: node)`)
+console.log(
+  `Generated ${cliBun} (shebang: bun), ${cliNode} (shebang: node), and ${kernelRuntime} (shebang: bun)`,
+)

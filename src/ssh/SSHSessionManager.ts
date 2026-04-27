@@ -5,9 +5,12 @@ import type {
   StdoutMessage,
 } from '../entrypoints/sdk/controlTypes.js'
 import type { PermissionUpdate } from '../types/permissions.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
+import { consumeKernelRuntimeEventMessage } from '../utils/kernelRuntimeEventMessage.js'
 import { logForDebugging } from '../utils/debug.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import type { RemoteMessageContent } from '../utils/teleport/api.js'
+import type { RemotePermissionResponse } from '../remote/RemoteSessionManager.js'
 
 export interface SSHSessionManagerOptions {
   onMessage: (sdkMessage: SDKMessage) => void
@@ -19,6 +22,7 @@ export interface SSHSessionManagerOptions {
   onReconnecting: (attempt: number, max: number) => void
   onDisconnected: () => void
   onError: (error: Error) => void
+  onRuntimeEvent?: KernelRuntimeEventSink
   reconnect?: () => Promise<Subprocess>
   maxReconnectAttempts?: number
 }
@@ -39,7 +43,7 @@ export interface SSHSessionManager {
   sendInterrupt(): void
   respondToPermissionRequest(
     requestId: string,
-    response: { behavior: string; message?: string; updatedInput?: unknown },
+    response: RemotePermissionResponse,
   ): void
 }
 
@@ -218,6 +222,10 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
     if (!isStdoutMessage(raw)) return
     const parsed = raw
 
+    if (consumeKernelRuntimeEventMessage(parsed, this.options.onRuntimeEvent)) {
+      return
+    }
+
     if (parsed.type === 'control_request') {
       const request = parsed as unknown as {
         request_id: string
@@ -294,7 +302,7 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
 
   respondToPermissionRequest(
     requestId: string,
-    response: { behavior: string; message?: string; updatedInput?: unknown },
+    response: RemotePermissionResponse,
   ): void {
     const msg = jsonStringify({
       type: 'control_response',
@@ -304,8 +312,25 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
         response: {
           behavior: response.behavior,
           ...(response.behavior === 'allow'
-            ? { updatedInput: response.updatedInput }
-            : { message: response.message }),
+            ? {
+                updatedInput: response.updatedInput,
+                ...(response.updatedPermissions !== undefined && {
+                  updatedPermissions: response.updatedPermissions,
+                }),
+                ...(response.toolUseID !== undefined && {
+                  toolUseID: response.toolUseID,
+                }),
+                decisionClassification:
+                  response.decisionClassification ?? 'user_temporary',
+              }
+            : {
+                message: response.message,
+                ...(response.toolUseID !== undefined && {
+                  toolUseID: response.toolUseID,
+                }),
+                decisionClassification:
+                  response.decisionClassification ?? 'user_reject',
+              }),
         },
       },
     })

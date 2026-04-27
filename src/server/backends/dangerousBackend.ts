@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn as spawnChildProcess } from 'child_process'
 import { fileURLToPath } from 'url'
 import type {
   SessionRuntimeBackend,
@@ -16,8 +16,13 @@ export type DangerousBackendCreateSessionOptions = {
 }
 
 export type DangerousBackendSession = SessionRuntimeHandle
+export type DangerousBackendDeps = {
+  spawn?: typeof spawnChildProcess
+}
 
 export class DangerousBackend implements SessionRuntimeBackend {
+  constructor(private readonly deps: DangerousBackendDeps = {}) {}
+
   createSessionRuntime(
     options: DangerousBackendCreateSessionOptions,
   ): DangerousBackendSession {
@@ -27,6 +32,8 @@ export class DangerousBackend implements SessionRuntimeBackend {
       'stream-json',
       '--output-format',
       'stream-json',
+      '--permission-prompt-tool',
+      'stdio',
       '--verbose',
       '--session-id',
       options.sessionId,
@@ -46,7 +53,7 @@ export class DangerousBackend implements SessionRuntimeBackend {
         ? [...bootstrapArgs, ...cliArgs]
         : [...bootstrapArgs, CLI_ENTRYPOINT_PATH, ...cliArgs]
 
-    const child = spawn(process.execPath, args, {
+    const child = (this.deps.spawn ?? spawnChildProcess)(process.execPath, args, {
       cwd: options.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {

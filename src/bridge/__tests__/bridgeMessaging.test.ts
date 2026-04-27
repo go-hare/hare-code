@@ -1,9 +1,12 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 
 import {
+  BoundedUUIDSet,
+  handleIngressMessage,
   shouldReportRunningForMessage,
   shouldReportRunningForMessages,
 } from '../bridgeMessaging.js'
+import type { KernelRuntimeEnvelopeBase } from '../../runtime/contracts/events.js'
 import { createUserMessage } from '../../utils/messages.js'
 
 describe('bridge running-state classification', () => {
@@ -94,3 +97,47 @@ describe('bridge running-state classification', () => {
     ).toBe(true)
   })
 })
+
+describe('bridge ingress runtime envelopes', () => {
+  test('routes kernel_runtime_event to runtime callback without forwarding as inbound user message', () => {
+    const onInboundMessage = mock((_message: unknown) => {})
+    const onRuntimeEvent = mock((_envelope: KernelRuntimeEnvelopeBase) => {})
+    const message = createRuntimeEventMessage()
+
+    handleIngressMessage(
+      JSON.stringify(message),
+      new BoundedUUIDSet(10),
+      new BoundedUUIDSet(10),
+      onInboundMessage,
+      undefined,
+      undefined,
+      onRuntimeEvent,
+    )
+
+    expect(onRuntimeEvent).toHaveBeenCalledWith(message.envelope)
+    expect(onInboundMessage).not.toHaveBeenCalled()
+  })
+})
+
+function createRuntimeEventMessage() {
+  return {
+    type: 'kernel_runtime_event',
+    uuid: 'message-1',
+    session_id: 'session-1',
+    envelope: {
+      schemaVersion: 'kernel.runtime.v1',
+      messageId: 'message-1',
+      sequence: 1,
+      timestamp: '2026-04-26T00:00:00.000Z',
+      source: 'kernel_runtime',
+      kind: 'event',
+      runtimeId: 'runtime-1',
+      conversationId: 'conversation-1',
+      eventId: 'conversation-1:1',
+      payload: {
+        type: 'headless.sdk_message',
+        replayable: true,
+      },
+    },
+  } as const
+}

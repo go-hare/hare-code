@@ -87,12 +87,11 @@ import {
 	loadRemoteManagedSettings,
 	refreshRemoteManagedSettings,
 } from "./services/remoteManagedSettings/index.js";
-import type { ToolInputJSONSchema } from "./Tool.js";
+import type { Tool, ToolInputJSONSchema } from "./Tool.js";
 import {
 	createSyntheticOutputTool,
 	isSyntheticOutputToolEnabled,
 } from "@go-hare/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js";
-import { getTools } from "./tools.js";
 import {
 	canUserConfigureAdvisor,
 	getInitialAdvisorSetting,
@@ -2864,22 +2863,17 @@ async function run(): Promise<CommanderCommand> {
 			// The later REPL-path maybeActivateProactive() calls are idempotent.
 			maybeActivateProactive(options);
 
-			let tools = getTools(toolPermissionContext);
-
-			// Apply coordinator mode tool filtering for headless path
-			// (mirrors useMergedTools.ts filtering for REPL/interactive path)
-			if (
-				feature("COORDINATOR_MODE") &&
-				isEnvTruthy(process.env.CLAUDE_CODE_COORDINATOR_MODE)
-			) {
-				const { applyCoordinatorToolFilter } =
-					await import("./utils/toolPool.js");
-				tools = applyCoordinatorToolFilter(tools);
+			let applyHeadlessCoordinatorToolFilter = false;
+			if (feature("COORDINATOR_MODE")) {
+				applyHeadlessCoordinatorToolFilter = isEnvTruthy(
+					process.env.CLAUDE_CODE_COORDINATOR_MODE,
+				);
 			}
 
 			profileCheckpoint("action_tools_loaded");
 
 			let jsonSchema: ToolInputJSONSchema | undefined;
+			let extraHeadlessTools: Tool[] = [];
 			if (
 				isSyntheticOutputToolEnabled({ isNonInteractiveSession }) &&
 				options.jsonSchema
@@ -2893,10 +2887,10 @@ async function run(): Promise<CommanderCommand> {
 				const syntheticOutputResult =
 					createSyntheticOutputTool(jsonSchema);
 				if ("tool" in syntheticOutputResult) {
-					// Add SyntheticOutputTool to the tools array AFTER getTools() filtering.
+					// Add SyntheticOutputTool AFTER runtime tool filtering.
 					// This tool is excluded from normal filtering (see tools.ts) because it's
 					// an implementation detail for structured output, not a user-controlled tool.
-					tools = [...tools, syntheticOutputResult.tool];
+					extraHeadlessTools = [syntheticOutputResult.tool];
 
 					logEvent("tengu_structured_output_enabled", {
 						schema_property_count: Object.keys(
@@ -3845,11 +3839,13 @@ async function run(): Promise<CommanderCommand> {
 				await runHeadlessLaunch({
 					inputPrompt,
 					environment: {
-						commands,
+						cwd: currentCwd,
 						disableSlashCommands,
-						tools,
 						sdkMcpConfigs,
-						agents: agentDefinitions.activeAgents,
+						agentOverrides: cliAgents,
+						applyCoordinatorToolFilter:
+							applyHeadlessCoordinatorToolFilter,
+						extraTools: extraHeadlessTools,
 						mcpClients,
 						mcpCommands,
 						mcpTools,

@@ -6,12 +6,14 @@ mock.module('src/utils/debug.ts', debugMock)
 import { SSHSessionManagerImpl } from '../SSHSessionManager'
 import type { SSHSessionManagerOptions } from '../SSHSessionManager'
 import type { Subprocess } from 'bun'
+import type { KernelRuntimeEnvelopeBase } from '../../runtime/contracts/events'
 
 function createMockSubprocess(options?: {
   exitCode?: number | null
   stdoutLines?: string[]
 }): {
   proc: Subprocess
+  stdinChunks: Uint8Array[]
   writeToStdout: (data: string) => void
   simulateExit: (code?: number) => void
 } {
@@ -64,6 +66,7 @@ function createMockSubprocess(options?: {
 
   return {
     proc,
+    stdinChunks,
     writeToStdout(data: string) {
       const encoder = new TextEncoder()
       stdoutController.enqueue(encoder.encode(data + '\n'))
@@ -87,6 +90,7 @@ interface MockState {
   connectedCount: number
   disconnectedCount: number
   errors: Error[]
+  runtimeEvents: KernelRuntimeEnvelopeBase[]
 }
 
 function createMockOptions(
@@ -99,6 +103,7 @@ function createMockOptions(
     connectedCount: 0,
     disconnectedCount: 0,
     errors: [],
+    runtimeEvents: [],
   }
 
   return {
@@ -121,8 +126,34 @@ function createMockOptions(
     onError: err => {
       state.errors.push(err)
     },
+    onRuntimeEvent: envelope => {
+      state.runtimeEvents.push(envelope)
+    },
     ...overrides,
   }
+}
+
+function createRuntimeEventMessage() {
+  return {
+    type: 'kernel_runtime_event',
+    uuid: 'message-1',
+    session_id: 'session-1',
+    envelope: {
+      schemaVersion: 'kernel.runtime.v1',
+      messageId: 'message-1',
+      sequence: 1,
+      timestamp: '2026-04-26T00:00:00.000Z',
+      source: 'kernel_runtime',
+      kind: 'event',
+      runtimeId: 'runtime-1',
+      conversationId: 'conversation-1',
+      eventId: 'conversation-1:1',
+      payload: {
+        type: 'headless.sdk_message',
+        replayable: true,
+      },
+    },
+  } as const
 }
 
 describe('SSHSessionManagerImpl', () => {
@@ -251,6 +282,24 @@ describe('SSHSessionManagerImpl', () => {
     expect(opts.state.permissionRequests[0]!.requestId).toBe('req-123')
   })
 
+  test('processLine routes kernel runtime events without forwarding as SDK messages', async () => {
+    const { proc, writeToStdout, simulateExit } = createMockSubprocess()
+    const opts = createMockOptions()
+    const manager = new SSHSessionManagerImpl(proc, opts)
+
+    manager.connect()
+    writeToStdout(JSON.stringify(createRuntimeEventMessage()))
+
+    await new Promise(r => setTimeout(r, 50))
+    simulateExit(0)
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(opts.state.runtimeEvents).toEqual([
+      createRuntimeEventMessage().envelope,
+    ])
+    expect(opts.state.messages).toEqual([])
+  })
+
   test('sendMessage writes NDJSON to stdin', async () => {
     const { proc } = createMockSubprocess()
     const opts = createMockOptions()
@@ -275,7 +324,7 @@ describe('SSHSessionManagerImpl', () => {
   })
 
   test('respondToPermissionRequest sends allow response', () => {
-    const { proc } = createMockSubprocess()
+    const { proc, stdinChunks } = createMockSubprocess()
     const opts = createMockOptions()
     const manager = new SSHSessionManagerImpl(proc, opts)
 
@@ -283,6 +332,19 @@ describe('SSHSessionManagerImpl', () => {
     manager.respondToPermissionRequest('req-123', {
       behavior: 'allow',
       updatedInput: { command: 'ls -la' },
+      updatedPermissions: [{ rule: 'Bash(ls -la)' }],
+      decisionClassification: 'user_permanent',
+    })
+
+    const written = new TextDecoder().decode(stdinChunks.at(-1))
+    expect(JSON.parse(written)).toMatchObject({
+      response: {
+        response: {
+          behavior: 'allow',
+          updatedPermissions: [{ rule: 'Bash(ls -la)' }],
+          decisionClassification: 'user_permanent',
+        },
+      },
     })
   })
 

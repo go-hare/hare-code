@@ -78,6 +78,19 @@ function useCanUseTool(
           createPermissionQueueOps(setToolUseConfirmQueue),
         )
 
+        const resolveWithRuntimePermission = (
+          decision: PermissionDecision,
+          resolvedBy: string,
+          permissionResult?: PermissionDecision,
+        ) => {
+          ctx.recordRuntimePermissionDecision(
+            decision,
+            resolvedBy,
+            permissionResult,
+          )
+          resolve(decision)
+        }
+
         if (ctx.resolveIfAborted(resolve)) return
 
         const decisionPromise =
@@ -112,6 +125,7 @@ function useCanUseTool(
             // Has permissions to use tool, granted in config
             if (result.behavior === 'allow') {
               if (ctx.resolveIfAborted(resolve)) return
+              ctx.startRuntimePermissionRequest(result)
               // Track auto mode classifier approvals for UI display
               if (
                 feature('TRANSCRIPT_CLASSIFIER') &&
@@ -126,10 +140,12 @@ function useCanUseTool(
 
               ctx.logDecision({ decision: 'accept', source: 'config' })
 
-              resolve(
+              resolveWithRuntimePermission(
                 ctx.buildAllow(result.updatedInput ?? input, {
                   decisionReason: result.decisionReason,
                 }),
+                'policy',
+                result,
               )
               return
             }
@@ -147,6 +163,7 @@ function useCanUseTool(
             // Does not have permissions to use tool, check the behavior
             switch (result.behavior) {
               case 'deny': {
+                ctx.startRuntimePermissionRequest(result)
                 logPermissionDecision(
                   {
                     tool,
@@ -182,11 +199,13 @@ function useCanUseTool(
                     ),
                   })
                 }
-                resolve(result)
+                resolveWithRuntimePermission(result, 'policy', result)
                 return
               }
 
               case 'ask': {
+                const runtimePermissionPromise =
+                  ctx.startRuntimePermissionRequest(result)
                 // For coordinator workers, await automated checks before showing dialog.
                 // Background workers should only interrupt the user when automated checks can't decide.
                 if (
@@ -208,7 +227,11 @@ function useCanUseTool(
                     },
                   )
                   if (coordinatorDecision) {
-                    resolve(coordinatorDecision)
+                    resolveWithRuntimePermission(
+                      coordinatorDecision,
+                      'coordinator',
+                      result,
+                    )
                     return
                   }
                   // null means neither automated check resolved -- fall through to dialog below.
@@ -233,7 +256,11 @@ function useCanUseTool(
                   suggestions: result.suggestions,
                 })
                 if (swarmDecision) {
-                  resolve(swarmDecision)
+                  resolveWithRuntimePermission(
+                    swarmDecision,
+                    'swarm_worker',
+                    result,
+                  )
                   return
                 }
 
@@ -284,7 +311,7 @@ function useCanUseTool(
                         decision: 'accept',
                         source: { type: 'classifier' },
                       })
-                      resolve(
+                      resolveWithRuntimePermission(
                         ctx.buildAllow(
                           result.updatedInput ??
                             (input as Record<string, unknown>),
@@ -296,6 +323,8 @@ function useCanUseTool(
                             },
                           },
                         ),
+                        'classifier',
+                        result,
                       )
                       return
                     }
@@ -319,8 +348,14 @@ function useCanUseTool(
                       feature('KAIROS') || feature('KAIROS_CHANNELS')
                         ? appState.channelPermissionCallbacks
                         : undefined,
+                    runtimePermissionPromise,
                   },
-                  resolve,
+                  decision =>
+                    resolveWithRuntimePermission(
+                      decision,
+                      'interactive',
+                      result,
+                    ),
                 )
 
                 return
@@ -336,10 +371,12 @@ function useCanUseTool(
                 `Permission check threw ${error.constructor.name} for tool=${tool.name}: ${error.message}`,
               )
               ctx.logCancelled()
-              resolve(ctx.cancelAndAbort(undefined, true))
+              const decision = ctx.cancelAndAbort(undefined, true)
+              resolveWithRuntimePermission(decision, 'runtime_abort')
             } else {
               logError(error)
-              resolve(ctx.cancelAndAbort(undefined, true))
+              const decision = ctx.cancelAndAbort(undefined, true)
+              resolveWithRuntimePermission(decision, 'runtime_error')
             }
           })
           .finally(() => {

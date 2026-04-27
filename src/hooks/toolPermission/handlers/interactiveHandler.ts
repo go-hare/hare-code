@@ -37,6 +37,7 @@ import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpda
 import { hasPermissionsToUseTool } from '../../../utils/permissions/permissions.js'
 import type { PermissionContext } from '../PermissionContext.js'
 import { createResolveOnce } from '../PermissionContext.js'
+import type { BridgePermissionResponse } from '../../../bridge/bridgePermissionCallbacks.js'
 
 type InteractivePermissionParams = {
   ctx: PermissionContext
@@ -45,11 +46,43 @@ type InteractivePermissionParams = {
   awaitAutomatedChecksBeforeDialog: boolean | undefined
   bridgeCallbacks?: BridgePermissionCallbacks
   channelCallbacks?: ChannelPermissionCallbacks
+  runtimePermissionPromise?: Promise<PermissionDecision>
 }
 
 type ChannelContextHint = {
   sourceServer?: string
   chatId?: string
+}
+
+function bridgePermissionDecisionReason(
+  response: BridgePermissionResponse,
+  fallback: {
+    toolUseID: string
+    updatedInput?: Record<string, unknown>
+    permanent?: boolean
+  },
+) {
+  const behavior = response.behavior
+  return {
+    type: 'permissionPromptTool' as const,
+    permissionPromptToolName: 'bridge',
+    toolResult: {
+      behavior,
+      toolUseID: response.toolUseID ?? fallback.toolUseID,
+      ...(behavior === 'allow'
+        ? {
+            updatedInput: response.updatedInput ?? fallback.updatedInput ?? {},
+            decisionClassification:
+              response.decisionClassification ??
+              (fallback.permanent ? 'user_permanent' : 'user_temporary'),
+          }
+        : {
+            message: response.message ?? 'Permission denied by bridge',
+            decisionClassification:
+              response.decisionClassification ?? 'user_reject',
+          }),
+    },
+  }
 }
 
 function getTextBlocksText(content: unknown): string {
@@ -71,7 +104,9 @@ function getTextBlocksText(content: unknown): string {
     .join('\n')
 }
 
-function parseChannelContextHintFromText(text: string): ChannelContextHint | null {
+function parseChannelContextHintFromText(
+  text: string,
+): ChannelContextHint | null {
   const tagMatch = text.match(new RegExp(`<${CHANNEL_TAG}\\b([^>]*)>`))
   if (!tagMatch?.[1]) {
     return null
@@ -88,7 +123,9 @@ function parseChannelContextHintFromText(text: string): ChannelContextHint | nul
   return { sourceServer, chatId }
 }
 
-export function getLatestChannelContextHint(messages: readonly unknown[]): ChannelContextHint | null {
+export function getLatestChannelContextHint(
+  messages: readonly unknown[],
+): ChannelContextHint | null {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index] as {
       type?: unknown
@@ -142,6 +179,7 @@ function handleInteractivePermission(
     awaitAutomatedChecksBeforeDialog,
     bridgeCallbacks,
     channelCallbacks,
+    runtimePermissionPromise,
   } = params
 
   const { resolve: resolveOnce, isResolved, claim } = createResolveOnce(resolve)
@@ -325,6 +363,31 @@ function handleInteractivePermission(
   }
 
   ctx.pushToQueue(toolUseConfirm)
+
+  if (runtimePermissionPromise) {
+    void runtimePermissionPromise
+      .then(decision => {
+        if (!claim()) return
+        forgetPipePermission(
+          'Permission request was resolved by runtime broker before local response.',
+        )
+        clearClassifierChecking(ctx.toolUseID)
+        clearClassifierIndicator()
+        ctx.removeFromQueue()
+        if (bridgeCallbacks && bridgeRequestId) {
+          bridgeCallbacks.cancelRequest(bridgeRequestId)
+        }
+        channelUnsubscribe?.()
+        resolveOnce(decision)
+      })
+      .catch(error => {
+        logForDebugging(
+          `Runtime permission broker response failed: ${errorMessage(error)}`,
+          { level: 'warn' },
+        )
+      })
+  }
+
   pipePermissionRequestId = tryRelayPipePermissionRequest(
     toolUseConfirm,
     response => {
@@ -418,20 +481,26 @@ function handleInteractivePermission(
         channelUnsubscribe?.()
 
         if (response.behavior === 'allow') {
-          if (response.updatedPermissions?.length) {
-            void ctx.persistPermissions(response.updatedPermissions)
-          }
-          ctx.logDecision(
-            {
-              decision: 'accept',
-              source: {
-                type: 'user',
+          void (async () => {
+            const decision = await ctx.handleUserAllow(
+              response.updatedInput ?? displayInput,
+              response.updatedPermissions ?? [],
+              undefined,
+              permissionPromptStartTimeMs,
+              undefined,
+              bridgePermissionDecisionReason(response, {
+                toolUseID: ctx.toolUseID,
+                updatedInput: response.updatedInput ?? displayInput,
                 permanent: !!response.updatedPermissions?.length,
-              },
-            },
-            { permissionPromptStartTimeMs },
-          )
-          resolveOnce(ctx.buildAllow(response.updatedInput ?? displayInput))
+              }),
+            )
+            ctx.recordRuntimePermissionDecision(
+              decision,
+              'repl_bridge_remote',
+              result,
+            )
+            resolveOnce(decision)
+          })()
         } else {
           ctx.logDecision(
             {
@@ -443,7 +512,18 @@ function handleInteractivePermission(
             },
             { permissionPromptStartTimeMs },
           )
-          resolveOnce(ctx.cancelAndAbort(response.message))
+          const decision = ctx.buildDeny(
+            response.message ?? 'Permission denied by bridge',
+            bridgePermissionDecisionReason(response, {
+              toolUseID: ctx.toolUseID,
+            }),
+          )
+          ctx.recordRuntimePermissionDecision(
+            decision,
+            'repl_bridge_remote',
+            result,
+          )
+          resolveOnce(decision)
         }
       },
     )

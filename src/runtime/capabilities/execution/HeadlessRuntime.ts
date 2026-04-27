@@ -7,6 +7,7 @@ import type { ThinkingConfig } from '../../../utils/thinking.js'
 import type { HookResultMessage } from '../../../types/message.js'
 import type { AgentDefinition } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { createBootstrapStateProvider } from '../../core/state/bootstrapProvider.js'
+import type { KernelRuntimeEventSink } from '../../contracts/events.js'
 
 export type HeadlessRuntimeInput = string | AsyncIterable<string>
 
@@ -39,6 +40,7 @@ export type HeadlessRuntimeOptions = {
   setupTrigger?: 'init' | 'maintenance' | undefined
   sessionStartHooksPromise?: Promise<HookResultMessage[]>
   setSDKStatus?: (status: SDKStatus) => void
+  runtimeEventSink?: KernelRuntimeEventSink
 }
 
 /**

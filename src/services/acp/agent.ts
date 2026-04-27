@@ -71,6 +71,8 @@ import {
   sessionIdExists,
 } from './runtimeDeps.js'
 import type { AppState, QueryEngineConfig, Tools } from './runtimeDeps.js'
+import { createRuntimePermissionService } from '../../runtime/capabilities/permissions/RuntimePermissionService.js'
+import { RuntimeEventBus } from '../../runtime/core/events/RuntimeEventBus.js'
 
 // ── Session state ─────────────────────────────────────────────────
 
@@ -479,6 +481,15 @@ export class AcpAgent implements Agent {
       cwd,
       (modeId: string) => { this.applySessionMode(sessionId, modeId) },
     )
+    const runtimeEventBus = new RuntimeEventBus({
+      runtimeId: `acp-${sessionId}`,
+    })
+    const runtimePermissionService = createRuntimePermissionService({
+      runtimeId: `acp-permissions-${sessionId}`,
+      eventBus: runtimeEventBus,
+      getConversationId: () => sessionId,
+    })
+    const runtimePermission = runtimePermissionService.createToolUseContext()
 
     // Parse MCP servers from ACP params
     // MCP server config is handled separately in the tools system
@@ -518,6 +529,7 @@ export class AcpAgent implements Agent {
       includePartialMessages: true,
       replayUserMessages: true,
       initialMessages: opts.initialMessages,
+      runtimePermission,
     }
 
     const queryEngine = new QueryEngine(engineConfig)

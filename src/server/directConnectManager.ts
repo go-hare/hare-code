@@ -6,6 +6,8 @@ import type {
   StdoutMessage,
 } from '../entrypoints/sdk/controlTypes.js'
 import type { RemotePermissionResponse } from '../remote/RemoteSessionManager.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
+import { consumeKernelRuntimeEventMessage } from '../utils/kernelRuntimeEventMessage.js'
 import { logForDebugging } from '../utils/debug.js'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import type { RemoteMessageContent } from '../utils/teleport/api.js'
@@ -24,6 +26,11 @@ export type DirectConnectCallbacks = {
     request: SDKControlPermissionRequest,
     requestId: string,
   ) => void
+  onPermissionCancelled?: (
+    requestId: string,
+    toolUseId: string | undefined,
+  ) => void
+  onRuntimeEvent?: KernelRuntimeEventSink
   onConnected?: () => void
   onDisconnected?: () => void
   onError?: (error: Error) => void
@@ -42,6 +49,10 @@ export class DirectConnectSessionManager {
   private ws: WebSocket | null = null
   private config: DirectConnectConfig
   private callbacks: DirectConnectCallbacks
+  private pendingPermissionRequests = new Map<
+    string,
+    SDKControlPermissionRequest
+  >()
 
   constructor(config: DirectConnectConfig, callbacks: DirectConnectCallbacks) {
     this.config = config
@@ -80,9 +91,22 @@ export class DirectConnectSessionManager {
         }
         const parsed = raw
 
+        if (
+          consumeKernelRuntimeEventMessage(
+            parsed,
+            this.callbacks.onRuntimeEvent,
+          )
+        ) {
+          continue
+        }
+
         // Handle control requests (permission requests)
         if (parsed.type === 'control_request') {
           if (parsed.request.subtype === 'can_use_tool') {
+            this.pendingPermissionRequests.set(
+              parsed.request_id,
+              parsed.request,
+            )
             this.callbacks.onPermissionRequest(
               parsed.request,
               parsed.request_id,
@@ -101,11 +125,22 @@ export class DirectConnectSessionManager {
           continue
         }
 
+        if (parsed.type === 'control_cancel_request') {
+          const pendingRequest = this.pendingPermissionRequests.get(
+            parsed.request_id,
+          )
+          this.pendingPermissionRequests.delete(parsed.request_id)
+          this.callbacks.onPermissionCancelled?.(
+            parsed.request_id,
+            pendingRequest?.tool_use_id,
+          )
+          continue
+        }
+
         // Forward SDK messages (assistant, result, system, etc.)
         if (
           parsed.type !== 'control_response' &&
           parsed.type !== 'keep_alive' &&
-          parsed.type !== 'control_cancel_request' &&
           parsed.type !== 'streamlined_text' &&
           parsed.type !== 'streamlined_tool_use_summary' &&
           !(parsed.type === 'system' && parsed.subtype === 'post_turn_summary')
@@ -150,6 +185,15 @@ export class DirectConnectSessionManager {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       return
     }
+    const pendingRequest = this.pendingPermissionRequests.get(requestId)
+    if (!pendingRequest) {
+      logForDebugging(
+        `[DirectConnect] No pending permission request with ID: ${requestId}`,
+      )
+      return
+    }
+
+    this.pendingPermissionRequests.delete(requestId)
 
     // Must match SDKControlResponse format expected by StructuredIO
     const response = jsonStringify({
@@ -160,8 +204,31 @@ export class DirectConnectSessionManager {
         response: {
           behavior: result.behavior,
           ...(result.behavior === 'allow'
-            ? { updatedInput: result.updatedInput }
-            : { message: result.message }),
+            ? {
+                updatedInput: result.updatedInput,
+                ...(result.updatedPermissions !== undefined && {
+                  updatedPermissions: result.updatedPermissions,
+                }),
+                ...(result.toolUseID !== undefined && {
+                  toolUseID: result.toolUseID,
+                }),
+                ...(result.toolUseID === undefined && {
+                  toolUseID: pendingRequest.tool_use_id,
+                }),
+                decisionClassification:
+                  result.decisionClassification ?? 'user_temporary',
+              }
+            : {
+                message: result.message,
+                ...(result.toolUseID !== undefined && {
+                  toolUseID: result.toolUseID,
+                }),
+                ...(result.toolUseID === undefined && {
+                  toolUseID: pendingRequest.tool_use_id,
+                }),
+                decisionClassification:
+                  result.decisionClassification ?? 'user_reject',
+              }),
         },
       },
     })
@@ -207,6 +274,7 @@ export class DirectConnectSessionManager {
       this.ws.close()
       this.ws = null
     }
+    this.pendingPermissionRequests.clear()
   }
 
   isConnected(): boolean {

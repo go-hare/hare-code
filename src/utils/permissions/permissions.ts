@@ -99,6 +99,7 @@ import {
   recordSuccess,
   shouldFallbackToPrompting,
 } from './denialTracking.js'
+import { ensureToolPermissionRuntimeController } from './runtimePermissionBroker.js'
 import {
   classifyYoloAction,
   formatActionForClassifier,
@@ -470,7 +471,7 @@ async function runPermissionRequestHooksForHeadlessAgent(
   return null
 }
 
-export const hasPermissionsToUseTool: CanUseToolFn = async (
+const evaluatePermissionsToUseTool: CanUseToolFn = async (
   tool,
   input,
   context,
@@ -975,6 +976,60 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
   }
 
   return result
+}
+
+export const hasPermissionsToUseTool: CanUseToolFn = async (
+  tool,
+  input,
+  context,
+  assistantMessage,
+  toolUseID,
+  forceDecision,
+): Promise<PermissionDecision> => {
+  const decision =
+    forceDecision ??
+    (await evaluatePermissionsToUseTool(
+      tool,
+      input,
+      context,
+      assistantMessage,
+      toolUseID,
+    ))
+  return registerRuntimePermissionDecision({
+    tool,
+    input,
+    context,
+    toolUseID,
+    decision,
+  })
+}
+
+function registerRuntimePermissionDecision(args: {
+  tool: Tool
+  input: { [key: string]: unknown }
+  context: ToolUseContext
+  toolUseID: string
+  decision: PermissionDecision
+}): PermissionDecision {
+  const controller = ensureToolPermissionRuntimeController({
+    tool: args.tool,
+    input: args.input,
+    toolUseContext: args.context,
+    toolUseID: args.toolUseID,
+    permissionResult: args.decision,
+  })
+  if (!controller) {
+    return args.decision
+  }
+
+  controller.start(args.decision)
+  if (
+    args.decision.behavior === 'allow' ||
+    args.decision.behavior === 'deny'
+  ) {
+    controller.decide(args.decision, 'permission_pipeline', args.decision)
+  }
+  return args.decision
 }
 
 /**

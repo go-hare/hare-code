@@ -6,6 +6,8 @@ type BridgePermissionResponse = {
   updatedInput?: Record<string, unknown>
   updatedPermissions?: PermissionUpdate[]
   message?: string
+  toolUseID?: string
+  decisionClassification?: 'user_temporary' | 'user_permanent' | 'user_reject'
 }
 
 type BridgePermissionCallbacks = {

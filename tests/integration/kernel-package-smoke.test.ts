@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -9,29 +16,46 @@ const packageJson = JSON.parse(
   readFileSync(join(repoRoot, 'package.json'), 'utf8'),
 ) as {
   exports?: Record<string, { import?: string; default?: string } | string>
+  bin?: Record<string, string>
 }
 
 const EXPECTED_KERNEL_EXPORTS = [
+  'KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION',
   'DirectConnectError',
   'applyDirectConnectSessionState',
   'assembleServerHost',
   'connectDefaultKernelHeadlessMcp',
   'connectDirectHostSession',
   'connectResponseSchema',
+  'consumeKernelRuntimeEventMessage',
   'createDefaultKernelHeadlessEnvironment',
+  'createDefaultKernelRuntimeWireRouter',
   'createDirectConnectSession',
   'createKernelHeadlessSession',
   'createKernelHeadlessStore',
+  'createKernelPermissionBroker',
+  'createKernelRuntimeEventFacade',
+  'createKernelRuntimeInProcessWireTransport',
+  'createKernelRuntimeStdioWireTransport',
+  'createKernelRuntimeWireClient',
   'createKernelSession',
   'getDirectConnectErrorMessage',
+  'getKernelEventFromEnvelope',
+  'getKernelRuntimeEnvelopeFromMessage',
+  'isKernelRuntimeEnvelope',
+  'KernelPermissionBrokerDisposedError',
+  'KernelPermissionDecisionError',
+  'KernelRuntimeEventReplayError',
   'prepareKernelHeadlessStartup',
   'runBridgeHeadless',
   'runConnectHeadless',
   'runDaemonWorker',
   'runKernelHeadless',
   'runKernelHeadlessClient',
+  'runKernelRuntimeWireProtocol',
   'startKernelServer',
   'startServer',
+  'toKernelRuntimeEventMessage',
 ] as const
 
 function parsePackJson(output: string): Array<{ filename: string }> {
@@ -47,19 +71,27 @@ describe('kernel package smoke', () => {
     const kernelExport = packageJson.exports?.['./kernel']
     expect(kernelExport).toBeDefined()
     expect(typeof kernelExport).toBe('object')
-    expect((kernelExport as { import?: string }).import).toBe('./dist/kernel.js')
-    expect((kernelExport as { default?: string }).default).toBe('./dist/kernel.js')
+    expect((kernelExport as { import?: string }).import).toBe(
+      './dist/kernel.js',
+    )
+    expect((kernelExport as { default?: string }).default).toBe(
+      './dist/kernel.js',
+    )
+  })
+
+  test('declares the kernel runtime executable bin', () => {
+    expect(packageJson.bin?.['hare-kernel-runtime']).toBe(
+      'dist/kernel-runtime.js',
+    )
   })
 
   test(
-    'imports the built package-level kernel entry',
+    'imports the built package-level kernel entry and runs the packaged runtime bin',
     async () => {
-      if (!existsSync(join(repoRoot, 'dist', 'kernel.js'))) {
-        execFileSync('bun', ['run', 'build'], {
-          cwd: repoRoot,
-          encoding: 'utf8',
-        })
-      }
+      execFileSync('bun', ['run', 'build'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      })
 
       const tempRoot = mkdtempSync(join(tmpdir(), 'hare-kernel-package-'))
       const consumerDir = join(tempRoot, 'consumer')
@@ -77,7 +109,13 @@ describe('kernel package smoke', () => {
       try {
         const packOutput = execFileSync(
           'npm',
-          ['pack', '--json', '--ignore-scripts', '--pack-destination', tempRoot],
+          [
+            'pack',
+            '--json',
+            '--ignore-scripts',
+            '--pack-destination',
+            tempRoot,
+          ],
           {
             cwd: repoRoot,
             encoding: 'utf8',
@@ -113,6 +151,34 @@ describe('kernel package smoke', () => {
         ) as string[]
 
         expect(exportedKeys).toEqual([...EXPECTED_KERNEL_EXPORTS].sort())
+
+        const binName =
+          process.platform === 'win32'
+            ? 'hare-kernel-runtime.cmd'
+            : 'hare-kernel-runtime'
+        const binPath = join(consumerDir, 'node_modules', '.bin', binName)
+        expect(existsSync(binPath)).toBe(true)
+
+        const runtimeOutput = execFileSync(binPath, {
+          cwd: consumerDir,
+          input: `${JSON.stringify({
+            schemaVersion: 'kernel.runtime.command.v1',
+            type: 'ping',
+            requestId: 'packaged-bin-ping',
+          })}\n`,
+          encoding: 'utf8',
+        })
+        const [pong] = runtimeOutput
+          .trim()
+          .split('\n')
+          .map(line => JSON.parse(line) as Record<string, unknown>)
+
+        expect(pong).toMatchObject({
+          schemaVersion: 'kernel.runtime.v1',
+          kind: 'pong',
+          requestId: 'packaged-bin-ping',
+          source: 'kernel_runtime',
+        })
       } finally {
         rmSync(tempRoot, { recursive: true, force: true })
       }

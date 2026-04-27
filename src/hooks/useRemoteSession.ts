@@ -17,10 +17,14 @@ import {
 } from '../remote/sdkMessageAdapter.js'
 import { useSetAppState } from '../state/AppState.js'
 import type { AppState } from '../state/AppStateStore.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
 import type { Tool } from '../Tool.js'
 import { findToolByName } from '../Tool.js'
 import type { Message as MessageType } from '../types/message.js'
-import type { PermissionAskDecision, PermissionUpdate } from '../types/permissions.js'
+import type {
+  PermissionAskDecision,
+  PermissionUpdate,
+} from '../types/permissions.js'
 import { logForDebugging } from '../utils/debug.js'
 import { truncateToWidth } from '../utils/format.js'
 import {
@@ -52,6 +56,7 @@ type UseRemoteSessionProps = {
   >
   setStreamMode?: React.Dispatch<React.SetStateAction<SpinnerMode>>
   setInProgressToolUseIDs?: (f: (prev: Set<string>) => Set<string>) => void
+  onRuntimeEvent?: KernelRuntimeEventSink
 }
 
 type UseRemoteSessionResult = {
@@ -83,6 +88,7 @@ export function useRemoteSession({
   setStreamingToolUses,
   setStreamMode,
   setInProgressToolUseIDs,
+  onRuntimeEvent,
 }: UseRemoteSessionProps): UseRemoteSessionResult {
   const isRemoteMode = !!config
 
@@ -156,9 +162,11 @@ export function useRemoteSession({
     const manager = new RemoteSessionManager(config, {
       onMessage: sdkMessage => {
         const parts = [`type=${sdkMessage.type}`]
-        if ('subtype' in sdkMessage) parts.push(`subtype=${sdkMessage.subtype as string}`)
+        if ('subtype' in sdkMessage)
+          parts.push(`subtype=${sdkMessage.subtype as string}`)
         if (sdkMessage.type === 'user') {
-          const c = (sdkMessage.message as { content?: unknown } | undefined)?.content
+          const c = (sdkMessage.message as { content?: unknown } | undefined)
+            ?.content
           parts.push(
             `content=${Array.isArray(c) ? c.map(b => b.type).join(',') : typeof c}`,
           )
@@ -249,7 +257,9 @@ export function useRemoteSession({
         // and inProcessRunner.ts; without this the set grows unbounded for the
         // session lifetime (BQ: CCR cohort shows 5.2x higher RSS slope).
         if (setInProgressToolUseIDs && sdkMessage.type === 'user') {
-          const content = (sdkMessage.message as { content?: unknown } | undefined)?.content
+          const content = (
+            sdkMessage.message as { content?: unknown } | undefined
+          )?.content
           if (Array.isArray(content)) {
             const resultIds: string[] = []
             for (const block of content) {
@@ -291,7 +301,9 @@ export function useRemoteSession({
             setInProgressToolUseIDs &&
             converted.message.type === 'assistant'
           ) {
-            const contentArr = Array.isArray(converted.message.message?.content) ? converted.message.message.content : []
+            const contentArr = Array.isArray(converted.message.message?.content)
+              ? converted.message.message.content
+              : []
             const toolUseIds = contentArr
               .filter(block => block.type === 'tool_use')
               .map(block => (block as { id: string }).id)
@@ -369,16 +381,24 @@ export function useRemoteSession({
             const response: RemotePermissionResponse = {
               behavior: 'deny',
               message: 'User aborted',
+              toolUseID: request.tool_use_id,
+              decisionClassification: 'user_reject',
             }
             manager.respondToPermissionRequest(requestId, response)
             setToolUseConfirmQueue(queue =>
               queue.filter(item => item.toolUseID !== request.tool_use_id),
             )
           },
-          onAllow(updatedInput, _permissionUpdates, _feedback) {
+          onAllow(updatedInput, permissionUpdates, _feedback) {
             const response: RemotePermissionResponse = {
               behavior: 'allow',
               updatedInput,
+              updatedPermissions: permissionUpdates,
+              toolUseID: request.tool_use_id,
+              decisionClassification:
+                permissionUpdates.length > 0
+                  ? 'user_permanent'
+                  : 'user_temporary',
             }
             manager.respondToPermissionRequest(requestId, response)
             setToolUseConfirmQueue(queue =>
@@ -391,6 +411,8 @@ export function useRemoteSession({
             const response: RemotePermissionResponse = {
               behavior: 'deny',
               message: feedback ?? 'User denied permission',
+              toolUseID: request.tool_use_id,
+              decisionClassification: 'user_reject',
             }
             manager.respondToPermissionRequest(requestId, response)
             setToolUseConfirmQueue(queue =>
@@ -442,6 +464,7 @@ export function useRemoteSession({
       onError: error => {
         logForDebugging(`[useRemoteSession] Error: ${error.message}`)
       },
+      onRuntimeEvent,
     })
 
     managerRef.current = manager
@@ -466,6 +489,7 @@ export function useRemoteSession({
     setStreamingToolUses,
     setStreamMode,
     setInProgressToolUseIDs,
+    onRuntimeEvent,
     setConnStatus,
     writeTaskCount,
   ])

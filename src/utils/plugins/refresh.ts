@@ -24,12 +24,10 @@ import type { AppState } from '../../state/AppState.js'
 import type { AgentDefinitionsResult } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { getAgentDefinitionsWithOverrides } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { PluginError } from '../../types/plugin.js'
+import { createRuntimeHookService } from '../../runtime/capabilities/hooks/RuntimeHookService.js'
 import { logForDebugging } from '../debug.js'
-import { errorMessage } from '../errors.js'
-import { logError } from '../log.js'
 import { clearAllCaches } from './cacheUtils.js'
 import { getPluginCommands } from './loadPluginCommands.js'
-import { loadPluginHooks } from './loadPluginHooks.js'
 import { loadPluginLspServers } from './lspPluginIntegration.js'
 import { loadPluginMcpServers } from './mcpPluginIntegration.js'
 import { clearPluginCacheExclusions } from './orphanedPluginFilter.js'
@@ -144,36 +142,15 @@ export async function refreshActivePlugins(
   // loadAllPlugins() result from before marketplaces were reconciled.
   reinitializeLspServerManager()
 
-  // clearAllCaches() prunes removed-plugin hooks; this does the FULL swap
-  // (adds hooks from newly-enabled plugins too). Catching here so
-  // hook_load_failed can feed error_count; a failure doesn't lose the
-  // plugin/command/agent data above (hooks go to STATE.registeredHooks, not
-  // AppState).
-  let hook_load_failed = false
-  try {
-    await loadPluginHooks()
-  } catch (e) {
-    hook_load_failed = true
-    logError(e)
-    logForDebugging(
-      `refreshActivePlugins: loadPluginHooks failed: ${errorMessage(e)}`,
-    )
-  }
-
-  const hook_count = enabled.reduce((sum, p) => {
-    if (!p.hooksConfig) return sum
-    return (
-      sum +
-      (Object.values(p.hooksConfig) as Array<Array<{ hooks: unknown[] }> | undefined>).reduce(
-        (s, matchers) =>
-          s + (matchers?.reduce((h: number, m: { hooks: { length: number } }) => h + m.hooks.length, 0) ?? 0),
-        0,
-      )
-    )
-  }, 0)
+  // clearAllCaches() prunes removed-plugin hooks; RuntimeHookService does the
+  // full swap and records hook load errors into the same plugin error list.
+  const hookResult = await createRuntimeHookService().refreshPluginHooks({
+    enabledPlugins: enabled,
+    errors,
+  })
 
   logForDebugging(
-    `refreshActivePlugins: ${enabled.length} enabled, ${pluginCommands.length} commands, ${agentDefinitions.allAgents.length} agents, ${hook_count} hooks, ${mcp_count} MCP, ${lsp_count} LSP`,
+    `refreshActivePlugins: ${enabled.length} enabled, ${pluginCommands.length} commands, ${agentDefinitions.allAgents.length} agents, ${hookResult.hook_count} hooks, ${mcp_count} MCP, ${lsp_count} LSP`,
   )
 
   return {
@@ -181,10 +158,10 @@ export async function refreshActivePlugins(
     disabled_count: disabled.length,
     command_count: pluginCommands.length,
     agent_count: agentDefinitions.allAgents.length,
-    hook_count,
+    hook_count: hookResult.hook_count,
     mcp_count,
     lsp_count,
-    error_count: errors.length + (hook_load_failed ? 1 : 0),
+    error_count: errors.length,
     agentDefinitions,
     pluginCommands,
   }

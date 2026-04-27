@@ -273,6 +273,9 @@ import {
   prepareReplRuntimeQuery,
   runReplRuntimeQuery,
 } from '../runtime/capabilities/execution/internal/replQueryRuntime.js';
+import { createRuntimePermissionService } from '../runtime/capabilities/permissions/RuntimePermissionService.js';
+import type { KernelRuntimeEnvelopeBase } from '../runtime/contracts/events.js';
+import { RuntimeEventBus } from '../runtime/core/events/RuntimeEventBus.js';
 import {
   finalizeReplCompletedTurnHostShell,
   shortCircuitReplNonQueryTurn,
@@ -289,7 +292,7 @@ import { runReplBackgroundQueryController } from './repl/controllers/runReplBack
 import { runReplInitialMessageController } from './repl/controllers/runReplInitialMessageController.js';
 import { runReplQueryTurnController } from './repl/controllers/runReplQueryTurnController.js';
 import { runReplForegroundQueryController } from './repl/controllers/runReplForegroundQueryController.js';
-import { getTools } from '../tools.js';
+import { materializeRuntimeToolSet } from '../runtime/capabilities/execution/headlessCapabilityMaterializer.js';
 import type { AgentDefinition } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { resumeAgentBackground } from '@go-hare/builtin-tools/tools/AgentTool/resumeAgent.js';
 import { useMainLoopModel } from '../hooks/useMainLoopModel.js';
@@ -352,6 +355,16 @@ const PROACTIVE_NO_OP_SUBSCRIBE = (_cb: () => void) => () => {};
 const PROACTIVE_FALSE = () => false;
 const PROACTIVE_NULL = (): number | null => null;
 const SUGGEST_BG_PR_NOOP = (_p: string, _n: string): boolean => false;
+function getRuntimeEventTypeForLog(envelope: KernelRuntimeEnvelopeBase): string {
+  const payload = envelope.payload;
+  if (typeof payload === 'object' && payload !== null && 'type' in payload) {
+    const type = (payload as { type?: unknown }).type;
+    if (typeof type === 'string') {
+      return type;
+    }
+  }
+  return '';
+}
 const useProactive =
   feature('PROACTIVE') || feature('KAIROS') ? require('../proactive/useProactive.js').useProactive : null;
 const useScheduledTasks = feature('AGENT_TRIGGERS') ? require('../hooks/useScheduledTasks.js').useScheduledTasks : null;
@@ -863,14 +876,15 @@ export function REPL({
 
   // BriefTool.isEnabled() reads getUserMsgOptIn() from bootstrap state, which
   // /brief flips mid-session alongside isBriefOnly. The memo below needs a
-  // React-visible dep to re-run getTools() when that happens; isBriefOnly is
+  // React-visible dep to re-run tool materialization when that happens;
+  // isBriefOnly is
   // the AppState mirror that triggers the re-render. Without this, toggling
   // /brief mid-session leaves the stale tool list (no SendUserMessage) and
   // the model emits plain text the brief filter hides.
   const isBriefOnly = useAppState(s => s.isBriefOnly);
 
   const localTools = useMemo(
-    () => getTools(toolPermissionContext),
+    () => materializeRuntimeToolSet({ toolPermissionContext }),
     [toolPermissionContext, proactiveActive, isBriefOnly],
   );
 
@@ -1585,6 +1599,19 @@ export function REPL({
 
   const [inProgressToolUseIDs, setInProgressToolUseIDs] = useState<Set<string>>(new Set());
   const hasInterruptibleToolInProgressRef = useRef(false);
+  const transportRuntimeEventsRef = useRef<KernelRuntimeEnvelopeBase[]>([]);
+  const handleTransportRuntimeEvent = useCallback(
+    (envelope: KernelRuntimeEnvelopeBase) => {
+      transportRuntimeEventsRef.current.push(envelope);
+      if (transportRuntimeEventsRef.current.length > 512) {
+        transportRuntimeEventsRef.current.shift();
+      }
+      logForDebugging(
+        `[REPL:runtime-event] kind=${envelope.kind} type=${getRuntimeEventTypeForLog(envelope)} conversationId=${envelope.conversationId ?? ''} eventId=${envelope.eventId ?? ''}`,
+      );
+    },
+    [],
+  );
 
   // Remote session hook - manages WebSocket connection and message handling for --remote mode
   const remoteSession = useRemoteSession({
@@ -1597,6 +1624,7 @@ export function REPL({
     setStreamingToolUses,
     setStreamMode,
     setInProgressToolUseIDs,
+    onRuntimeEvent: handleTransportRuntimeEvent,
   });
 
   // Direct connect hook - manages WebSocket to a claude server for `claude connect` mode
@@ -1606,6 +1634,7 @@ export function REPL({
     setIsLoading: setIsExternalLoading,
     setToolUseConfirmQueue,
     tools: transportTools,
+    onRuntimeEvent: handleTransportRuntimeEvent,
   });
 
   // SSH session hook - manages ssh child process for `claude ssh` mode.
@@ -1617,6 +1646,7 @@ export function REPL({
     setIsLoading: setIsExternalLoading,
     setToolUseConfirmQueue,
     tools: transportTools,
+    onRuntimeEvent: handleTransportRuntimeEvent,
   });
 
   // Use whichever remote mode is active
@@ -1688,7 +1718,26 @@ export function REPL({
   const [messageSelectorPreselect, setMessageSelectorPreselect] = useState<UserMessage | undefined>(undefined);
   const [showCostDialog, setShowCostDialog] = useState(false);
   const [conversationId, setConversationId] = useState(randomUUID());
-
+  const [replRuntimeEventBus] = useState(
+    () =>
+      new RuntimeEventBus({
+        runtimeId: `repl-${randomUUID()}`,
+      }),
+  );
+  const [replPermissionService] = useState(
+    () =>
+      createRuntimePermissionService({
+        runtimeId: `repl-permissions-${randomUUID()}`,
+        eventBus: replRuntimeEventBus,
+      }),
+  );
+  const replPermissionRuntime = useMemo(
+    () =>
+      replPermissionService.createToolUseContext({
+        getConversationId: () => conversationId,
+      }),
+    [conversationId, replPermissionService],
+  );
   // Idle-return dialog: shown when user submits after a long idle gap
   const [idleReturnPending, setIdleReturnPending] = useState<{
     input: string;
@@ -2793,6 +2842,7 @@ export function REPL({
         setToolJSX,
         addNotification,
         appendSystemMessage: msg => setMessages(prev => [...prev, msg]),
+        runtimePermission: replPermissionRuntime,
         sendOSNotification: opts => {
           void sendNotification(opts, terminal);
         },
@@ -2875,6 +2925,7 @@ export function REPL({
       customSystemPrompt,
       appendSystemPrompt,
       setConversationId,
+      replPermissionRuntime,
     ],
   );
 

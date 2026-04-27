@@ -36,6 +36,13 @@ import type {
   PermissionDecisionReason,
 } from 'src/utils/permissions/PermissionResult.js'
 import { hasPermissionsToUseTool } from 'src/utils/permissions/permissions.js'
+import { createToolPermissionRuntimeContext } from 'src/utils/permissions/runtimePermissionBroker.js'
+import type {
+  KernelPermissionDecision,
+  KernelPermissionRequest,
+  KernelPermissionRisk,
+} from 'src/runtime/contracts/permissions.js'
+import type { RuntimePermissionBroker } from 'src/runtime/capabilities/permissions/RuntimePermissionBroker.js'
 import { writeToStdout } from 'src/utils/process.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { z } from 'zod/v4'
@@ -124,6 +131,28 @@ type PendingRequest<T> = {
   request: SDKControlRequest
 }
 
+export type StructuredIOPermissionBroker = Pick<
+  RuntimePermissionBroker,
+  'requestPermission' | 'decide'
+>
+
+export type StructuredIOPermissionOptions = {
+  permissionBroker?: StructuredIOPermissionBroker
+  getConversationId?: () => string
+  getTurnId?: () => string | undefined
+}
+
+function mergeStructuredIOPermissionOptions(
+  current: StructuredIOPermissionOptions,
+  next: StructuredIOPermissionOptions,
+): StructuredIOPermissionOptions {
+  return {
+    permissionBroker: next.permissionBroker ?? current.permissionBroker,
+    getConversationId: next.getConversationId ?? current.getConversationId,
+    getTurnId: next.getTurnId ?? current.getTurnId,
+  }
+}
+
 /**
  * Provides a structured way to read and write SDK messages from stdio,
  * capturing the SDK protocol.
@@ -157,6 +186,7 @@ export class StructuredIO {
   private prependedLines: string[] = []
   private onControlRequestSent?: (request: SDKControlRequest) => void
   private onControlRequestResolved?: (requestId: string) => void
+  private permissionOptions: StructuredIOPermissionOptions = {}
 
   // sendRequest() and print.ts both enqueue here; the drain loop is the
   // only writer. Prevents control_request from overtaking queued stream_events.
@@ -267,7 +297,9 @@ export class StructuredIO {
   getPendingPermissionRequests() {
     return Array.from(this.pendingRequests.values())
       .map(entry => entry.request)
-      .filter(pr => (pr.request as { subtype?: string }).subtype === 'can_use_tool')
+      .filter(
+        pr => (pr.request as { subtype?: string }).subtype === 'can_use_tool',
+      )
   }
 
   setUnexpectedResponseCallback(
@@ -285,7 +317,14 @@ export class StructuredIO {
    * callback is aborted via the signal — otherwise the callback hangs.
    */
   injectControlResponse(response: SDKControlResponse): void {
-    const responseInner = response.response as { request_id?: string; subtype?: string; error?: string; response?: unknown } | undefined
+    const responseInner = response.response as
+      | {
+          request_id?: string
+          subtype?: string
+          error?: string
+          response?: unknown
+        }
+      | undefined
     const requestId = responseInner?.request_id
     if (!requestId) return
     const request = this.pendingRequests.get(requestId as string)
@@ -377,7 +416,12 @@ export class StructuredIO {
         if (uuid) {
           notifyCommandLifecycle(uuid, 'completed')
         }
-        const resp = message.response as { request_id: string; subtype: string; response?: Record<string, unknown>; error?: string }
+        const resp = message.response as {
+          request_id: string
+          subtype: string
+          response?: Record<string, unknown>
+          error?: string
+        }
         const request = this.pendingRequests.get(resp.request_id)
         if (!request) {
           // Check if this tool_use was already resolved through the normal
@@ -386,9 +430,7 @@ export class StructuredIO {
           // re-processing them would push duplicate assistant messages into
           // the conversation, causing API 400 errors.
           const responsePayload =
-            resp.subtype === 'success'
-              ? resp.response
-              : undefined
+            resp.subtype === 'success' ? resp.response : undefined
           const toolUseID = responsePayload?.toolUseID
           if (
             typeof toolUseID === 'string' &&
@@ -400,7 +442,9 @@ export class StructuredIO {
             return undefined
           }
           if (this.unexpectedResponseCallback) {
-            await this.unexpectedResponseCallback(message as SDKControlResponse & { uuid?: string })
+            await this.unexpectedResponseCallback(
+              message as SDKControlResponse & { uuid?: string },
+            )
           }
           return undefined // Ignore responses for requests we don't know about
         }
@@ -409,7 +453,8 @@ export class StructuredIO {
         // Notify the bridge when the SDK consumer resolves a can_use_tool
         // request, so it can cancel the stale permission prompt on claude.ai.
         if (
-          (request.request.request as { subtype?: string }).subtype === 'can_use_tool' &&
+          (request.request.request as { subtype?: string }).subtype ===
+            'can_use_tool' &&
           this.onControlRequestResolved
         ) {
           this.onControlRequestResolved(resp.request_id)
@@ -455,7 +500,9 @@ export class StructuredIO {
       if (message.type === 'assistant' || message.type === 'system') {
         return message
       }
-      if ((message as { message?: { role?: string } }).message?.role !== 'user') {
+      if (
+        (message as { message?: { role?: string } }).message?.role !== 'user'
+      ) {
         exitWithMessage(
           `Error: Expected message role 'user', got '${(message as { message?: { role?: string } }).message?.role}'`,
         )
@@ -490,10 +537,20 @@ export class StructuredIO {
     if (signal?.aborted) {
       throw new Error('Request aborted')
     }
-    this.outbound.enqueue(message)
-    if ((request as { subtype?: string }).subtype === 'can_use_tool' && this.onControlRequestSent) {
-      this.onControlRequestSent(message)
-    }
+    const promise = new Promise<Response>((resolve, reject) => {
+      this.pendingRequests.set(requestId, {
+        request: {
+          type: 'control_request',
+          request_id: requestId,
+          request,
+        },
+        resolve: result => {
+          resolve(result as Response)
+        },
+        reject,
+        schema,
+      })
+    })
     const aborted = () => {
       this.outbound.enqueue({
         type: 'control_cancel_request',
@@ -514,21 +571,19 @@ export class StructuredIO {
         once: true,
       })
     }
+    if (signal?.aborted) {
+      aborted()
+    } else {
+      this.outbound.enqueue(message)
+      if (
+        (request as { subtype?: string }).subtype === 'can_use_tool' &&
+        this.onControlRequestSent
+      ) {
+        this.onControlRequestSent(message)
+      }
+    }
     try {
-      return await new Promise<Response>((resolve, reject) => {
-        this.pendingRequests.set(requestId, {
-          request: {
-            type: 'control_request',
-            request_id: requestId,
-            request,
-          },
-          resolve: result => {
-            resolve(result as Response)
-          },
-          reject,
-          schema,
-        })
-      })
+      return await promise
     } finally {
       if (signal) {
         signal.removeEventListener('abort', aborted)
@@ -539,7 +594,10 @@ export class StructuredIO {
 
   createCanUseTool(
     onPermissionPrompt?: (details: RequiresActionDetails) => void,
+    permissionOptions: StructuredIOPermissionOptions = {},
   ): CanUseToolFn {
+    const effectivePermissionOptions =
+      this.rememberPermissionOptions(permissionOptions)
     return async (
       tool: Tool,
       input: { [key: string]: unknown },
@@ -548,12 +606,24 @@ export class StructuredIO {
       toolUseID: string,
       forceDecision?: PermissionDecision,
     ): Promise<PermissionDecision> => {
+      const permissionToolUseContext =
+        effectivePermissionOptions.permissionBroker &&
+        !toolUseContext.runtimePermission
+          ? {
+              ...toolUseContext,
+              runtimePermission: createToolPermissionRuntimeContext({
+                permissionBroker: effectivePermissionOptions.permissionBroker,
+                getConversationId: effectivePermissionOptions.getConversationId,
+                getTurnId: effectivePermissionOptions.getTurnId,
+              }),
+            }
+          : toolUseContext
       const mainPermissionResult =
         forceDecision ??
         (await hasPermissionsToUseTool(
           tool,
           input,
-          toolUseContext,
+          permissionToolUseContext,
           assistantMessage,
           toolUseID,
         ))
@@ -562,7 +632,32 @@ export class StructuredIO {
         mainPermissionResult.behavior === 'allow' ||
         mainPermissionResult.behavior === 'deny'
       ) {
+        recordResolvedPermissionDecision({
+          broker: effectivePermissionOptions.permissionBroker,
+          tool,
+          input,
+          toolUseContext: permissionToolUseContext,
+          toolUseID,
+          permissionResult: mainPermissionResult,
+          permissionOptions: effectivePermissionOptions,
+        })
         return mainPermissionResult
+      }
+
+      const permissionBroker = effectivePermissionOptions.permissionBroker
+      if (permissionBroker) {
+        return await this.resolvePermissionWithBroker({
+          tool,
+          input,
+          toolUseContext: permissionToolUseContext,
+          toolUseID,
+          mainPermissionResult,
+          onPermissionPrompt,
+          permissionOptions: {
+            ...effectivePermissionOptions,
+            permissionBroker,
+          },
+        })
       }
 
       // Run PermissionRequest hooks in parallel with the SDK permission
@@ -665,6 +760,185 @@ export class StructuredIO {
     }
   }
 
+  private rememberPermissionOptions(
+    permissionOptions: StructuredIOPermissionOptions,
+  ): StructuredIOPermissionOptions {
+    this.permissionOptions = mergeStructuredIOPermissionOptions(
+      this.permissionOptions,
+      permissionOptions,
+    )
+    return this.permissionOptions
+  }
+
+  private async resolvePermissionWithBroker(args: {
+    tool: Tool
+    input: Record<string, unknown>
+    toolUseContext: ToolUseContext
+    toolUseID: string
+    mainPermissionResult: PermissionDecision & { behavior: 'ask' }
+    onPermissionPrompt?: (details: RequiresActionDetails) => void
+    permissionOptions: StructuredIOPermissionOptions & {
+      permissionBroker: StructuredIOPermissionBroker
+    }
+  }): Promise<PermissionDecision> {
+    const {
+      tool,
+      input,
+      toolUseContext,
+      toolUseID,
+      mainPermissionResult,
+      onPermissionPrompt,
+      permissionOptions,
+    } = args
+    const { permissionBroker } = permissionOptions
+    const requestId = randomUUID()
+    const permissionRequest = createStructuredPermissionRequest({
+      tool,
+      input,
+      toolUseContext,
+      toolUseID,
+      requestId,
+      permissionResult: mainPermissionResult,
+      permissionOptions,
+    })
+    const brokerPromise = permissionBroker.requestPermission(permissionRequest)
+
+    const hookAbortController = new AbortController()
+    const parentSignal = toolUseContext.abortController.signal
+    const onParentAbort = () => hookAbortController.abort()
+    parentSignal.addEventListener('abort', onParentAbort, { once: true })
+
+    try {
+      const hookPromise = executePermissionRequestHooksForSDK(
+        tool.name,
+        toolUseID,
+        input,
+        toolUseContext,
+        mainPermissionResult.suggestions,
+      ).then(decision => {
+        if (decision) {
+          decidePermissionSafely(
+            permissionBroker,
+            kernelDecisionFromPermissionDecision(
+              decision,
+              permissionRequest.permissionRequestId,
+              'structured_io_hook',
+            ),
+          )
+        }
+        return { source: 'hook' as const, decision }
+      })
+
+      onPermissionPrompt?.(
+        buildRequiresActionDetails(tool, input, toolUseID, requestId),
+      )
+      const sdkPromise = this.sendRequest<PermissionToolOutput>(
+        {
+          subtype: 'can_use_tool',
+          tool_name: tool.name,
+          input,
+          permission_suggestions: mainPermissionResult.suggestions,
+          blocked_path: mainPermissionResult.blockedPath,
+          decision_reason: serializeDecisionReason(
+            mainPermissionResult.decisionReason,
+          ),
+          tool_use_id: toolUseID,
+          agent_id: toolUseContext.agentId,
+        },
+        permissionToolOutputSchema(),
+        hookAbortController.signal,
+        requestId,
+      ).then(result => {
+        const decision = kernelDecisionFromPermissionToolOutput(
+          result,
+          permissionRequest.permissionRequestId,
+          'structured_io_sdk',
+        )
+        decidePermissionSafely(permissionBroker, decision)
+        return { source: 'sdk' as const, decision }
+      })
+
+      const brokerDecisionPromise = brokerPromise.then(decision => ({
+        source: 'broker' as const,
+        decision,
+      }))
+
+      const winner = await Promise.race([
+        hookPromise,
+        sdkPromise,
+        brokerDecisionPromise,
+      ])
+
+      if (winner.source === 'hook') {
+        if (winner.decision) {
+          sdkPromise.catch(() => {})
+          hookAbortController.abort()
+          return winner.decision
+        }
+        const finalDecision = await brokerPromise
+        cancelPendingTransportIfExternal(
+          finalDecision,
+          hookAbortController,
+          'structured_io_sdk',
+        )
+        return permissionDecisionFromKernelDecision(
+          finalDecision,
+          tool,
+          input,
+          toolUseContext,
+          toolUseID,
+        )
+      }
+
+      if (winner.source === 'broker') {
+        sdkPromise.catch(() => {})
+        cancelPendingTransportIfExternal(
+          winner.decision,
+          hookAbortController,
+          'structured_io_sdk',
+        )
+        return permissionDecisionFromKernelDecision(
+          winner.decision,
+          tool,
+          input,
+          toolUseContext,
+          toolUseID,
+        )
+      }
+
+      return permissionDecisionFromKernelDecision(
+        winner.decision,
+        tool,
+        input,
+        toolUseContext,
+        toolUseID,
+      )
+    } catch (error) {
+      const failureDecision = kernelDecisionFromPermissionToolOutput(
+        {
+          behavior: 'deny',
+          message: `Tool permission request failed: ${error}`,
+          toolUseID,
+        },
+        permissionRequest.permissionRequestId,
+        'structured_io_error',
+      )
+      decidePermissionSafely(permissionBroker, failureDecision)
+      return permissionDecisionFromKernelDecision(
+        failureDecision,
+        tool,
+        input,
+        toolUseContext,
+        toolUseID,
+      )
+    } finally {
+      if (this.getPendingPermissionRequests().length === 0) {
+        notifySessionStateChanged('running')
+      }
+      parentSignal.removeEventListener('abort', onParentAbort)
+    }
+  }
+
   createHookCallback(callbackId: string, timeout?: number): HookCallback {
     return {
       type: 'callback',
@@ -735,12 +1009,27 @@ export class StructuredIO {
    * tool name so that SDK hosts (VS Code, CCR, etc.) can prompt the user
    * for network access without requiring a new protocol subtype.
    */
-  createSandboxAskCallback(): (hostPattern: {
-    host: string
-    port?: number
-  }) => Promise<boolean> {
+  createSandboxAskCallback(
+    permissionOptions: StructuredIOPermissionOptions = {},
+  ): (hostPattern: { host: string; port?: number }) => Promise<boolean> {
+    this.rememberPermissionOptions(permissionOptions)
     return async (hostPattern): Promise<boolean> => {
+      const effectivePermissionOptions = this.permissionOptions
       try {
+        const permissionBroker = effectivePermissionOptions.permissionBroker
+        if (permissionBroker) {
+          const permissionOptionsWithBroker: StructuredIOPermissionOptions & {
+            permissionBroker: StructuredIOPermissionBroker
+          } = {
+            ...effectivePermissionOptions,
+            permissionBroker,
+          }
+          return await this.resolveSandboxPermissionWithBroker({
+            hostPattern,
+            permissionOptions: permissionOptionsWithBroker,
+            permissionBroker,
+          })
+        }
         const result = await this.sendRequest<PermissionToolOutput>(
           {
             subtype: 'can_use_tool',
@@ -756,6 +1045,80 @@ export class StructuredIO {
         // If the request fails (stream closed, abort, etc.), deny the connection
         return false
       }
+    }
+  }
+
+  private async resolveSandboxPermissionWithBroker(args: {
+    hostPattern: {
+      host: string
+      port?: number
+    }
+    permissionOptions: StructuredIOPermissionOptions & {
+      permissionBroker: StructuredIOPermissionBroker
+    }
+    permissionBroker: StructuredIOPermissionBroker
+  }): Promise<boolean> {
+    const { hostPattern, permissionOptions, permissionBroker } = args
+    const requestId = randomUUID()
+    const toolUseID = randomUUID()
+    const permissionRequest = createSandboxPermissionRequest({
+      hostPattern,
+      requestId,
+      toolUseID,
+      permissionOptions,
+    })
+    const brokerPromise = permissionBroker.requestPermission(permissionRequest)
+    const transportAbortController = new AbortController()
+
+    try {
+      const sdkPromise = this.sendRequest<PermissionToolOutput>(
+        {
+          subtype: 'can_use_tool',
+          tool_name: SANDBOX_NETWORK_ACCESS_TOOL_NAME,
+          input: { host: hostPattern.host },
+          tool_use_id: toolUseID,
+          description: `Allow network connection to ${hostPattern.host}?`,
+        },
+        permissionToolOutputSchema(),
+        transportAbortController.signal,
+        requestId,
+      ).then(result => {
+        const decision = kernelDecisionFromPermissionToolOutput(
+          result,
+          permissionRequest.permissionRequestId,
+          'structured_io_sandbox_sdk',
+        )
+        decidePermissionSafely(permissionBroker, decision)
+        return { source: 'sdk' as const, decision }
+      })
+
+      const brokerDecisionPromise = brokerPromise.then(decision => ({
+        source: 'broker' as const,
+        decision,
+      }))
+
+      const winner = await Promise.race([sdkPromise, brokerDecisionPromise])
+      if (winner.source === 'broker') {
+        sdkPromise.catch(() => {})
+        cancelPendingTransportIfExternal(
+          winner.decision,
+          transportAbortController,
+          'structured_io_sandbox_sdk',
+        )
+      }
+      return isKernelPermissionAllowed(winner.decision)
+    } catch (error) {
+      const failureDecision: KernelPermissionDecision = {
+        permissionRequestId: permissionRequest.permissionRequestId,
+        decision: 'deny',
+        decidedBy: 'runtime',
+        reason: `Sandbox permission request failed: ${error}`,
+        metadata: {
+          resolvedBy: 'structured_io_sandbox_error',
+        },
+      }
+      decidePermissionSafely(permissionBroker, failureDecision)
+      return false
     }
   }
 
@@ -777,6 +1140,368 @@ export class StructuredIO {
       }),
     )
     return response.mcp_response
+  }
+}
+
+export function createStructuredPermissionRequest(args: {
+  tool: Tool
+  input: Record<string, unknown>
+  toolUseContext: ToolUseContext
+  toolUseID: string
+  requestId: string
+  permissionResult?: PermissionDecision
+  permissionOptions: StructuredIOPermissionOptions
+}): KernelPermissionRequest {
+  const metadata: Record<string, unknown> = {
+    sdkRequestId: args.requestId,
+    isMcp: args.tool.isMcp ?? false,
+    isLsp: args.tool.isLsp ?? false,
+  }
+  if (args.permissionResult?.behavior === 'ask') {
+    if (args.permissionResult.suggestions !== undefined) {
+      metadata.permission_suggestions = args.permissionResult.suggestions
+    }
+    if (args.permissionResult.blockedPath !== undefined) {
+      metadata.blocked_path = args.permissionResult.blockedPath
+    }
+    const serializedReason = serializeDecisionReason(
+      args.permissionResult.decisionReason,
+    )
+    if (serializedReason !== undefined) {
+      metadata.decision_reason = serializedReason
+    }
+  }
+  if (args.toolUseContext.agentId !== undefined) {
+    metadata.agent_id = args.toolUseContext.agentId
+  }
+
+  const request: KernelPermissionRequest = {
+    permissionRequestId: args.toolUseID,
+    conversationId:
+      args.permissionOptions.getConversationId?.() ??
+      args.toolUseContext.agentId ??
+      'headless',
+    toolName: args.tool.name,
+    action: 'tool.call',
+    argumentsPreview: args.input,
+    risk: inferStructuredPermissionRisk(args.tool, args.input),
+    policySnapshot: structuredPolicySnapshot(args.toolUseContext),
+    metadata,
+  }
+  const turnId = args.permissionOptions.getTurnId?.()
+  if (turnId !== undefined) {
+    request.turnId = turnId
+  }
+  return request
+}
+
+export function recordResolvedPermissionDecision(args: {
+  broker?: StructuredIOPermissionBroker
+  tool: Tool
+  input: Record<string, unknown>
+  toolUseContext: ToolUseContext
+  toolUseID: string
+  permissionResult: PermissionDecision
+  permissionOptions: StructuredIOPermissionOptions
+}): void {
+  if (!args.broker) {
+    return
+  }
+  const request = createStructuredPermissionRequest({
+    tool: args.tool,
+    input: args.input,
+    toolUseContext: args.toolUseContext,
+    toolUseID: args.toolUseID,
+    requestId: args.toolUseID,
+    permissionResult: args.permissionResult,
+    permissionOptions: args.permissionOptions,
+  })
+  try {
+    void args.broker.requestPermission(request)
+    args.broker.decide(
+      kernelDecisionFromPermissionDecision(
+        args.permissionResult,
+        request.permissionRequestId,
+        'structured_io_policy',
+      ),
+    )
+  } catch {
+    // Permission audit must not alter the legacy canUseTool result.
+  }
+}
+
+export function kernelDecisionFromPermissionToolOutput(
+  result: PermissionToolOutput,
+  permissionRequestId: string,
+  resolvedBy: string,
+): KernelPermissionDecision {
+  const metadata = {
+    resolvedBy,
+    permissionToolOutput: result,
+  }
+  if (result.behavior === 'allow') {
+    return {
+      permissionRequestId,
+      decision:
+        result.decisionClassification === 'user_permanent'
+          ? 'allow_session'
+          : 'allow_once',
+      decidedBy: 'host',
+      metadata,
+    }
+  }
+  return {
+    permissionRequestId,
+    decision: result.interrupt ? 'abort' : 'deny',
+    decidedBy: 'host',
+    reason: result.message,
+    metadata,
+  }
+}
+
+function kernelDecisionFromPermissionDecision(
+  decision: PermissionDecision,
+  permissionRequestId: string,
+  resolvedBy: string,
+): KernelPermissionDecision {
+  const decidedBy =
+    decision.decisionReason?.type === 'permissionPromptTool'
+      ? 'host'
+      : decision.decisionReason?.type === 'mode' ||
+          decision.decisionReason?.type === 'rule'
+        ? 'policy'
+        : 'runtime'
+  if (decision.behavior === 'allow') {
+    return {
+      permissionRequestId,
+      decision: 'allow',
+      decidedBy,
+      reason: formatPermissionDecisionReason(decision.decisionReason),
+      metadata: {
+        resolvedBy,
+        updatedInput: decision.updatedInput,
+      },
+    }
+  }
+  if (decision.behavior === 'deny') {
+    return {
+      permissionRequestId,
+      decision: 'deny',
+      decidedBy,
+      reason:
+        decision.message ??
+        formatPermissionDecisionReason(decision.decisionReason),
+      metadata: { resolvedBy },
+    }
+  }
+  return {
+    permissionRequestId,
+    decision: 'abort',
+    decidedBy: 'runtime',
+    reason: decision.message,
+    metadata: { resolvedBy },
+  }
+}
+
+export function permissionDecisionFromKernelDecision(
+  decision: KernelPermissionDecision,
+  tool: Tool,
+  input: Record<string, unknown>,
+  toolUseContext: ToolUseContext,
+  toolUseID: string,
+): PermissionDecision {
+  return permissionPromptToolResultToPermissionDecision(
+    permissionToolOutputFromKernelDecision(decision, input, toolUseID),
+    tool,
+    input,
+    toolUseContext,
+  )
+}
+
+function permissionToolOutputFromKernelDecision(
+  decision: KernelPermissionDecision,
+  input: Record<string, unknown>,
+  toolUseID: string,
+): PermissionToolOutput {
+  const metadataOutput = permissionToolOutputFromMetadata(decision.metadata)
+  if (metadataOutput) {
+    return metadataOutput
+  }
+
+  if (
+    decision.decision === 'allow' ||
+    decision.decision === 'allow_once' ||
+    decision.decision === 'allow_session'
+  ) {
+    return {
+      behavior: 'allow',
+      updatedInput: input,
+      toolUseID,
+      decisionClassification:
+        decision.decision === 'allow_session'
+          ? 'user_permanent'
+          : 'user_temporary',
+    }
+  }
+
+  return {
+    behavior: 'deny',
+    message: decision.reason ?? 'Permission denied',
+    interrupt: decision.decision === 'abort',
+    toolUseID,
+    decisionClassification: 'user_reject',
+  }
+}
+
+function permissionToolOutputFromMetadata(
+  metadata: KernelPermissionDecision['metadata'],
+): PermissionToolOutput | undefined {
+  const output =
+    metadata &&
+    typeof metadata === 'object' &&
+    'permissionToolOutput' in metadata
+      ? metadata.permissionToolOutput
+      : undefined
+  const parsed = permissionToolOutputSchema().safeParse(output)
+  return parsed.success ? parsed.data : undefined
+}
+
+export function decidePermissionSafely(
+  broker: StructuredIOPermissionBroker,
+  decision: KernelPermissionDecision,
+): void {
+  try {
+    broker.decide(decision)
+  } catch {
+    // Another racer may already have resolved this permission request.
+  }
+}
+
+function cancelPendingTransportIfExternal(
+  decision: KernelPermissionDecision,
+  abortController: AbortController,
+  transportResolvedBy: string,
+): void {
+  const resolvedBy =
+    decision.metadata &&
+    typeof decision.metadata === 'object' &&
+    'resolvedBy' in decision.metadata
+      ? decision.metadata.resolvedBy
+      : undefined
+  if (resolvedBy !== transportResolvedBy) {
+    abortController.abort()
+  }
+}
+
+function createSandboxPermissionRequest(args: {
+  hostPattern: {
+    host: string
+    port?: number
+  }
+  requestId: string
+  toolUseID: string
+  permissionOptions: StructuredIOPermissionOptions
+}): KernelPermissionRequest {
+  const request: KernelPermissionRequest = {
+    permissionRequestId: args.toolUseID,
+    conversationId: args.permissionOptions.getConversationId?.() ?? 'headless',
+    toolName: SANDBOX_NETWORK_ACCESS_TOOL_NAME,
+    action: 'network.connect',
+    argumentsPreview: {
+      host: args.hostPattern.host,
+      port: args.hostPattern.port,
+    },
+    risk: 'high',
+    policySnapshot: {
+      syntheticTool: SANDBOX_NETWORK_ACCESS_TOOL_NAME,
+      source: 'sandbox',
+    },
+    metadata: {
+      sdkRequestId: args.requestId,
+      syntheticSubtype: 'sandbox_network_access',
+      host: args.hostPattern.host,
+      port: args.hostPattern.port,
+    },
+  }
+  const turnId = args.permissionOptions.getTurnId?.()
+  if (turnId !== undefined) {
+    request.turnId = turnId
+  }
+  return request
+}
+
+function isKernelPermissionAllowed(
+  decision: KernelPermissionDecision,
+): boolean {
+  return (
+    decision.decision === 'allow' ||
+    decision.decision === 'allow_once' ||
+    decision.decision === 'allow_session'
+  )
+}
+
+function inferStructuredPermissionRisk(
+  tool: Tool,
+  input: Record<string, unknown>,
+): KernelPermissionRisk {
+  if (safeToolPredicate(() => tool.isDestructive?.(input) ?? false)) {
+    return 'destructive'
+  }
+  if (safeToolPredicate(() => tool.isOpenWorld?.(input) ?? false)) {
+    return 'high'
+  }
+  if (!safeToolPredicate(() => tool.isReadOnly(input))) {
+    return 'medium'
+  }
+  return 'low'
+}
+
+function safeToolPredicate(predicate: () => boolean): boolean {
+  try {
+    return predicate()
+  } catch {
+    return false
+  }
+}
+
+function structuredPolicySnapshot(
+  toolUseContext: ToolUseContext,
+): Record<string, unknown> {
+  const context = toolUseContext.getAppState().toolPermissionContext
+  return {
+    mode: context.mode,
+    isBypassPermissionsModeAvailable: context.isBypassPermissionsModeAvailable,
+    shouldAvoidPermissionPrompts: context.shouldAvoidPermissionPrompts ?? false,
+    awaitAutomatedChecksBeforeDialog:
+      context.awaitAutomatedChecksBeforeDialog ?? false,
+  }
+}
+
+function formatPermissionDecisionReason(
+  reason: PermissionDecisionReason | undefined,
+): string | undefined {
+  if (!reason) {
+    return undefined
+  }
+  switch (reason.type) {
+    case 'mode':
+      return `Permission mode ${reason.mode}`
+    case 'rule':
+      return `Permission rule ${reason.rule.ruleBehavior}`
+    case 'permissionPromptTool':
+      return `Permission prompt tool ${reason.permissionPromptToolName}`
+    case 'hook':
+      return reason.reason ?? `Permission hook ${reason.hookName}`
+    case 'classifier':
+      return reason.reason
+    case 'asyncAgent':
+    case 'sandboxOverride':
+    case 'workingDir':
+    case 'safetyCheck':
+    case 'other':
+      return reason.reason
+    case 'subcommandResults':
+      return 'Subcommand permission results'
   }
 }
 
@@ -823,7 +1548,8 @@ async function executePermissionRequestHooksForSDK(
         const finalInput = decision.updatedInput || input
 
         // Apply permission updates if provided by hook ("always allow")
-        const permissionUpdates = (decision.updatedPermissions ?? []) as unknown as InternalPermissionUpdate[]
+        const permissionUpdates = (decision.updatedPermissions ??
+          []) as unknown as InternalPermissionUpdate[]
         if (permissionUpdates.length > 0) {
           persistPermissionUpdates(permissionUpdates)
           const currentAppState = toolUseContext.getAppState()

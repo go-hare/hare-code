@@ -18,12 +18,14 @@ import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type {
   PermissionAllowDecision,
   PermissionAskDecision,
+  PermissionDecisionReason,
   PermissionDenyDecision,
 } from '../../types/permissions.js'
 import type { Tool as ToolType, ToolUseContext } from '../../Tool.js'
 import type { AssistantMessage } from '../../types/message.js'
 import { hasPermissionsToUseTool } from '../../utils/permissions/permissions.js'
 import { toolInfoFromToolUse } from './bridge.js'
+import { recordAcpRuntimePermissionDecision } from './permissionRuntimeBroker.js'
 
 const IS_ROOT =
   typeof process.geteuid === 'function'
@@ -32,6 +34,33 @@ const IS_ROOT =
       ? process.getuid() === 0
       : false
 const ALLOW_BYPASS = !IS_ROOT || !!process.env.IS_SANDBOX
+
+type AcpPermissionClassification =
+  | 'user_temporary'
+  | 'user_permanent'
+  | 'user_reject'
+
+function createAcpPermissionReason(args: {
+  behavior: 'allow' | 'deny'
+  toolUseID: string
+  message?: string
+  updatedInput?: Record<string, unknown>
+  decisionClassification: AcpPermissionClassification
+}): PermissionDecisionReason {
+  return {
+    type: 'permissionPromptTool',
+    permissionPromptToolName: 'acp',
+    toolResult: {
+      behavior: args.behavior,
+      toolUseID: args.toolUseID,
+      ...(args.updatedInput !== undefined
+        ? { updatedInput: args.updatedInput }
+        : {}),
+      ...(args.message !== undefined ? { message: args.message } : {}),
+      decisionClassification: args.decisionClassification,
+    },
+  }
+}
 
 /**
  * Creates a CanUseToolFn that delegates permission decisions to the
@@ -51,14 +80,25 @@ export function createAcpCanUseTool(
     context: ToolUseContext,
     assistantMessage: AssistantMessage,
     toolUseID: string,
-    forceDecision?: PermissionAllowDecision | PermissionAskDecision | PermissionDenyDecision,
-  ): Promise<PermissionAllowDecision | PermissionAskDecision | PermissionDenyDecision> => {
+    forceDecision?:
+      | PermissionAllowDecision
+      | PermissionAskDecision
+      | PermissionDenyDecision,
+  ): Promise<
+    PermissionAllowDecision | PermissionAskDecision | PermissionDenyDecision
+  > => {
     const supportsTerminalOutput = checkTerminalOutput(clientCapabilities)
 
     // ── ExitPlanMode special handling ────────────────────────────
     if (tool.name === 'ExitPlanMode') {
       return handleExitPlanMode(
-        conn, sessionId, toolUseID, input, supportsTerminalOutput, cwd, onModeChange,
+        conn,
+        sessionId,
+        toolUseID,
+        input,
+        supportsTerminalOutput,
+        cwd,
+        onModeChange,
       )
     }
 
@@ -70,9 +110,14 @@ export function createAcpCanUseTool(
     // ── Run through the normal permission pipeline ────────────────
     // This handles: deny rules, allow rules, tool-specific checks,
     // bypassPermissions mode, dontAsk mode, acceptEdits mode, auto mode classifier
+    let pipelineAskResult: PermissionAskDecision | undefined
     try {
       const pipelineResult = await hasPermissionsToUseTool(
-        tool, input, context, assistantMessage, toolUseID,
+        tool,
+        input,
+        context,
+        assistantMessage,
+        toolUseID,
       )
 
       // If the pipeline resolved to allow or deny, return that
@@ -83,9 +128,13 @@ export function createAcpCanUseTool(
         return pipelineResult as PermissionDenyDecision
       }
       // behavior === 'ask' → fall through to client delegation
+      pipelineAskResult = pipelineResult as PermissionAskDecision
     } catch (err) {
       // If the pipeline fails, fall through to client delegation
-      console.error('[ACP Permissions] Pipeline error, falling back to client:', err)
+      console.error(
+        '[ACP Permissions] Pipeline error, falling back to client:',
+        err,
+      )
     }
 
     // ── Delegate to ACP client for interactive permission decision ──
@@ -117,11 +166,26 @@ export function createAcpCanUseTool(
       })
 
       if (response.outcome.outcome === 'cancelled') {
-        return {
+        const decision: PermissionDenyDecision = {
           behavior: 'deny',
           message: 'Permission request cancelled by client',
-          decisionReason: { type: 'mode', mode: 'default' },
+          toolUseID,
+          decisionReason: createAcpPermissionReason({
+            behavior: 'deny',
+            toolUseID,
+            message: 'Permission request cancelled by client',
+            decisionClassification: 'user_reject',
+          }),
         }
+        recordAcpRuntimePermissionDecision({
+          tool,
+          input,
+          context,
+          toolUseID,
+          permissionResult: pipelineAskResult,
+          decision,
+        })
+        return decision
       }
 
       if (
@@ -131,25 +195,71 @@ export function createAcpCanUseTool(
       ) {
         const optionId = response.outcome.optionId
         if (optionId === 'allow' || optionId === 'allow_always') {
-          return {
+          const decisionClassification =
+            optionId === 'allow_always' ? 'user_permanent' : 'user_temporary'
+          const decision: PermissionAllowDecision = {
             behavior: 'allow',
             updatedInput: input,
+            toolUseID,
+            decisionReason: createAcpPermissionReason({
+              behavior: 'allow',
+              toolUseID,
+              updatedInput: input,
+              decisionClassification,
+            }),
           }
+          recordAcpRuntimePermissionDecision({
+            tool,
+            input,
+            context,
+            toolUseID,
+            permissionResult: pipelineAskResult,
+            decision,
+          })
+          return decision
         }
       }
 
       // Default: deny
-      return {
+      const decision: PermissionDenyDecision = {
         behavior: 'deny',
         message: 'Permission denied by client',
-        decisionReason: { type: 'mode', mode: 'default' },
+        toolUseID,
+        decisionReason: createAcpPermissionReason({
+          behavior: 'deny',
+          toolUseID,
+          message: 'Permission denied by client',
+          decisionClassification: 'user_reject',
+        }),
       }
+      recordAcpRuntimePermissionDecision({
+        tool,
+        input,
+        context,
+        toolUseID,
+        permissionResult: pipelineAskResult,
+        decision,
+      })
+      return decision
     } catch {
-      return {
+      const decision: PermissionDenyDecision = {
         behavior: 'deny',
         message: 'Permission request failed',
-        decisionReason: { type: 'mode', mode: 'default' },
+        toolUseID,
+        decisionReason: {
+          type: 'other',
+          reason: 'Permission request failed',
+        },
       }
+      recordAcpRuntimePermissionDecision({
+        tool,
+        input,
+        context,
+        toolUseID,
+        permissionResult: pipelineAskResult,
+        decision,
+      })
+      return decision
     }
   }
 }
@@ -164,9 +274,21 @@ async function handleExitPlanMode(
   onModeChange?: (modeId: string) => void,
 ): Promise<PermissionAllowDecision | PermissionDenyDecision> {
   const options: Array<PermissionOption> = [
-    { kind: 'allow_always', name: 'Yes, and use "auto" mode', optionId: 'auto' },
-    { kind: 'allow_always', name: 'Yes, and auto-accept edits', optionId: 'acceptEdits' },
-    { kind: 'allow_once', name: 'Yes, and manually approve edits', optionId: 'default' },
+    {
+      kind: 'allow_always',
+      name: 'Yes, and use "auto" mode',
+      optionId: 'auto',
+    },
+    {
+      kind: 'allow_always',
+      name: 'Yes, and auto-accept edits',
+      optionId: 'acceptEdits',
+    },
+    {
+      kind: 'allow_once',
+      name: 'Yes, and manually approve edits',
+      optionId: 'default',
+    },
     { kind: 'reject_once', name: 'No, keep planning', optionId: 'plan' },
   ]
   if (ALLOW_BYPASS) {
@@ -201,7 +323,13 @@ async function handleExitPlanMode(
     return {
       behavior: 'deny',
       message: 'Tool use aborted',
-      decisionReason: { type: 'mode', mode: 'default' },
+      toolUseID,
+      decisionReason: createAcpPermissionReason({
+        behavior: 'deny',
+        toolUseID,
+        message: 'Tool use aborted',
+        decisionClassification: 'user_reject',
+      }),
     }
   }
 
@@ -231,6 +359,14 @@ async function handleExitPlanMode(
       return {
         behavior: 'allow',
         updatedInput: input,
+        toolUseID,
+        decisionReason: createAcpPermissionReason({
+          behavior: 'allow',
+          toolUseID,
+          updatedInput: input,
+          decisionClassification:
+            selectedOption === 'default' ? 'user_temporary' : 'user_permanent',
+        }),
       }
     }
   }
@@ -238,7 +374,13 @@ async function handleExitPlanMode(
   return {
     behavior: 'deny',
     message: 'User rejected request to exit plan mode.',
-    decisionReason: { type: 'mode', mode: 'plan' },
+    toolUseID,
+    decisionReason: createAcpPermissionReason({
+      behavior: 'deny',
+      toolUseID,
+      message: 'User rejected request to exit plan mode.',
+      decisionClassification: 'user_reject',
+    }),
   }
 }
 

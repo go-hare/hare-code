@@ -62,6 +62,7 @@ import type { DenialTrackingState } from './utils/permissions/denialTracking.js'
 import type { SystemPrompt } from './utils/systemPromptType.js'
 import type { ContentReplacementState } from './utils/toolResultStorage.js'
 import type { ActiveTaskExecutionContext } from './utils/tasks.js'
+import type { ToolPermissionRuntimeContext } from './types/runtimePermission.js'
 
 // Re-export progress types for backwards compatibility
 export type {
@@ -250,6 +251,7 @@ export type ToolUseContext = {
   agentId?: AgentId // Only set for subagents; use getSessionId() for session ID. Hooks use this to distinguish subagent calls.
   agentType?: string // Subagent type name. For the main thread's --agent type, hooks fall back to getMainThreadAgentType().
   activeTaskExecutionContext?: ActiveTaskExecutionContext
+  runtimePermission?: ToolPermissionRuntimeContext
   /** When true, canUseTool must always be called even when hooks auto-approve.
    *  Used by speculation for overlay file path rewriting. */
   requireCanUseTool?: boolean

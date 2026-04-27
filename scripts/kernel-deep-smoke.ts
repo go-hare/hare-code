@@ -1,0 +1,196 @@
+#!/usr/bin/env bun
+
+import { access } from 'fs/promises'
+import { join, resolve } from 'path'
+import { spawn } from 'bun'
+
+type Target = {
+  name: string
+  cwd: string
+}
+
+type Options = {
+  includeOriginal: boolean
+  originalPath: string
+  prompt: string
+  timeoutMs: number
+}
+
+type RunResult = {
+  stdout: string
+  stderr: string
+  exitCode: number
+}
+
+const repoRoot = resolve(import.meta.dir, '..')
+const defaultOriginalPath = '/Users/apple/Downloads/claude-code-main'
+const defaultPrompt = 'In one word, name the planet after Earth.'
+
+function parseOptions(argv: string[]): Options {
+  const getValue = (name: string): string | undefined => {
+    const index = argv.indexOf(name)
+    return index === -1 ? undefined : argv[index + 1]
+  }
+
+  return {
+    includeOriginal: argv.includes('--original'),
+    originalPath:
+      getValue('--original-path') ??
+      process.env.KERNEL_DEEP_TEST_ORIGINAL ??
+      defaultOriginalPath,
+    prompt:
+      getValue('--prompt') ??
+      process.env.KERNEL_DEEP_TEST_PROMPT ??
+      defaultPrompt,
+    timeoutMs: Number.parseInt(getValue('--timeout-ms') ?? '120000', 10),
+  }
+}
+
+function printUsage(): void {
+  console.log(`Usage: bun run scripts/kernel-deep-smoke.ts [--original] [--original-path <path>] [--prompt <text>]
+
+Runs a live OpenAI-compatible headless smoke test without storing secrets.
+
+Required env:
+  KERNEL_DEEP_TEST_API_KEY or OPENAI_API_KEY
+  KERNEL_DEEP_TEST_BASE_URL or OPENAI_BASE_URL
+  KERNEL_DEEP_TEST_MODEL or OPENAI_MODEL
+
+Optional:
+  --original              Also run the reference checkout.
+  --original-path <path>  Defaults to ${defaultOriginalPath}.
+  --timeout-ms <ms>       Defaults to 120000.`)
+}
+
+async function assertFile(path: string): Promise<void> {
+  await access(path)
+}
+
+function getDeepEnv(): Record<string, string> {
+  const apiKey = process.env.KERNEL_DEEP_TEST_API_KEY ?? process.env.OPENAI_API_KEY
+  const baseUrl =
+    process.env.KERNEL_DEEP_TEST_BASE_URL ?? process.env.OPENAI_BASE_URL
+  const model = process.env.KERNEL_DEEP_TEST_MODEL ?? process.env.OPENAI_MODEL
+
+  if (!apiKey || !baseUrl || !model) {
+    throw new Error(
+      'Missing deep smoke env: set API key, base URL, and model via KERNEL_DEEP_TEST_* or OPENAI_* variables.',
+    )
+  }
+
+  return {
+    CLAUDE_CODE_USE_OPENAI: '1',
+    OPENAI_API_KEY: apiKey,
+    OPENAI_BASE_URL: baseUrl,
+    OPENAI_MODEL: model,
+    OPENAI_DEFAULT_HAIKU_MODEL: model,
+    OPENAI_DEFAULT_SONNET_MODEL: model,
+    OPENAI_DEFAULT_OPUS_MODEL: model,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    NO_COLOR: '1',
+  }
+}
+
+function commandForTarget(target: Target, model: string): string[] {
+  return [
+    'bun',
+    'run',
+    'scripts/dev.ts',
+    '-p',
+    '--disable-slash-commands',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--max-turns',
+    '1',
+    '--model',
+    model,
+  ]
+}
+
+async function runTarget(
+  target: Target,
+  env: Record<string, string>,
+  prompt: string,
+  timeoutMs: number,
+): Promise<RunResult> {
+  await assertFile(join(target.cwd, 'scripts/dev.ts'))
+  const command = commandForTarget(target, env.OPENAI_MODEL)
+  const proc = spawn(command, {
+    cwd: target.cwd,
+    env: {
+      ...process.env,
+      ...env,
+    },
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+
+  proc.stdin.write(prompt)
+  proc.stdin.end()
+
+  const timeout = setTimeout(() => {
+    proc.kill('SIGTERM')
+  }, timeoutMs)
+  timeout.unref?.()
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  clearTimeout(timeout)
+
+  return { stdout, stderr, exitCode }
+}
+
+function assertSmokeResult(target: Target, result: RunResult): void {
+  if (result.exitCode !== 0) {
+    if (result.stdout.trim()) {
+      console.log(result.stdout.trimEnd())
+    }
+    if (result.stderr.trim()) {
+      console.error(result.stderr.trimEnd())
+    }
+    throw new Error(`${target.name} failed with exit code ${result.exitCode}`)
+  }
+
+  const hasResultLine = result.stdout
+    .split('\n')
+    .some(line => line.includes('"type":"result"') && line.includes('"success"'))
+  if (!hasResultLine) {
+    throw new Error(`${target.name} did not emit a successful result event`)
+  }
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2)
+  if (args.includes('--help') || args.includes('-h')) {
+    printUsage()
+    return
+  }
+
+  const options = parseOptions(args)
+  const env = getDeepEnv()
+  const targets: Target[] = [{ name: 'current', cwd: repoRoot }]
+
+  if (options.includeOriginal) {
+    targets.push({
+      name: 'original',
+      cwd: resolve(options.originalPath),
+    })
+  }
+
+  for (const target of targets) {
+    console.log(`\n> Deep smoke: ${target.name}`)
+    const result = await runTarget(target, env, options.prompt, options.timeoutMs)
+    assertSmokeResult(target, result)
+    console.log(`Deep smoke passed: ${target.name}`)
+  }
+}
+
+main().catch(error => {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exitCode = 1
+})

@@ -20,12 +20,19 @@ import {
   convertSDKMessage,
   isSessionEndMessage,
 } from '../remote/sdkMessageAdapter.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
 import type { SSHSession } from '../ssh/createSSHSession.js'
-import type { SSHSessionManager, SSHPermissionRequest } from '../ssh/SSHSessionManager.js'
+import type {
+  SSHSessionManager,
+  SSHPermissionRequest,
+} from '../ssh/SSHSessionManager.js'
 import type { Tool } from '../Tool.js'
 import { findToolByName } from '../Tool.js'
 import type { Message as MessageType } from '../types/message.js'
-import type { PermissionAskDecision } from '../types/permissions.js'
+import type {
+  PermissionAskDecision,
+  PermissionUpdate,
+} from '../types/permissions.js'
 import { logForDebugging } from '../utils/debug.js'
 import { gracefulShutdown } from '../utils/gracefulShutdown.js'
 import type { RemoteMessageContent } from '../utils/teleport/api.js'
@@ -43,6 +50,7 @@ type UseSSHSessionProps = {
   setIsLoading: (loading: boolean) => void
   setToolUseConfirmQueue: React.Dispatch<React.SetStateAction<ToolUseConfirm[]>>
   tools: Tool[]
+  onRuntimeEvent?: KernelRuntimeEventSink
 }
 
 export function useSSHSession({
@@ -51,6 +59,7 @@ export function useSSHSession({
   setIsLoading,
   setToolUseConfirmQueue,
   tools,
+  onRuntimeEvent,
 }: UseSSHSessionProps): UseSSHSessionResult {
   const isRemoteMode = !!session
 
@@ -98,7 +107,9 @@ export function useSSHSession({
           createToolStub(request.tool_name)
 
         const syntheticMessage = createSyntheticAssistantMessage(
-          request as unknown as Parameters<typeof createSyntheticAssistantMessage>[0],
+          request as unknown as Parameters<
+            typeof createSyntheticAssistantMessage
+          >[0],
           requestId,
         )
 
@@ -125,15 +136,23 @@ export function useSSHSession({
             manager.respondToPermissionRequest(requestId, {
               behavior: 'deny',
               message: 'User aborted',
+              toolUseID: request.tool_use_id,
+              decisionClassification: 'user_reject',
             })
             setToolUseConfirmQueue(q =>
               q.filter(i => i.toolUseID !== request.tool_use_id),
             )
           },
-          onAllow(updatedInput) {
+          onAllow(updatedInput, permissionUpdates: PermissionUpdate[]) {
             manager.respondToPermissionRequest(requestId, {
               behavior: 'allow',
               updatedInput,
+              updatedPermissions: permissionUpdates,
+              toolUseID: request.tool_use_id,
+              decisionClassification:
+                permissionUpdates.length > 0
+                  ? 'user_permanent'
+                  : 'user_temporary',
             })
             setToolUseConfirmQueue(q =>
               q.filter(i => i.toolUseID !== request.tool_use_id),
@@ -144,6 +163,8 @@ export function useSSHSession({
             manager.respondToPermissionRequest(requestId, {
               behavior: 'deny',
               message: feedback ?? 'User denied permission',
+              toolUseID: request.tool_use_id,
+              decisionClassification: 'user_reject',
             })
             setToolUseConfirmQueue(q =>
               q.filter(i => i.toolUseID !== request.tool_use_id),
@@ -200,6 +221,7 @@ export function useSSHSession({
       onError: error => {
         logForDebugging(`[useSSHSession] error: ${error.message}`)
       },
+      onRuntimeEvent,
     })
 
     managerRef.current = manager
@@ -211,7 +233,13 @@ export function useSSHSession({
       session.proxy.stop()
       managerRef.current = null
     }
-  }, [session, setMessages, setIsLoading, setToolUseConfirmQueue])
+  }, [
+    session,
+    setMessages,
+    setIsLoading,
+    setToolUseConfirmQueue,
+    onRuntimeEvent,
+  ])
 
   const sendMessage = useCallback(
     async (content: RemoteMessageContent): Promise<boolean> => {

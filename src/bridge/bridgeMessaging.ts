@@ -15,8 +15,10 @@ import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
 import type {
   SDKControlRequest,
   SDKControlResponse,
+  StdoutMessage,
 } from '../entrypoints/sdk/controlTypes.js'
 import type { SDKResultSuccess } from '../entrypoints/sdk/coreTypes.js'
+import type { KernelRuntimeEventSink } from '../runtime/contracts/events.js'
 import { logEvent } from '../services/analytics/index.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import type { Message } from '../types/message.js'
@@ -25,6 +27,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { rcLog } from './rcDebugLog.js'
 import { stripDisplayTagsAllowEmpty } from '../utils/displayTags.js'
 import { errorMessage } from '../utils/errors.js'
+import { consumeKernelRuntimeEventMessage } from '../utils/kernelRuntimeEventMessage.js'
 import type { PermissionMode } from '../utils/permissions/PermissionMode.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import type { ReplBridgeTransport } from './replBridgeTransport.js'
@@ -228,6 +231,7 @@ export function handleIngressMessage(
   onInboundMessage: ((msg: SDKMessage) => void | Promise<void>) | undefined,
   onPermissionResponse?: ((response: SDKControlResponse) => void) | undefined,
   onControlRequest?: ((request: SDKControlRequest) => void) | undefined,
+  onRuntimeEvent?: KernelRuntimeEventSink,
 ): void {
   try {
     const parsed: unknown = normalizeControlMessageKeys(jsonParse(data))
@@ -250,6 +254,15 @@ export function handleIngressMessage(
     }
 
     if (!isSDKMessage(parsed)) return
+
+    if (
+      consumeKernelRuntimeEventMessage(
+        parsed as StdoutMessage,
+        onRuntimeEvent,
+      )
+    ) {
+      return
+    }
 
     // Check for UUID to detect echoes of our own messages
     const uuid =

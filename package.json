@@ -27,6 +27,7 @@
   "bin": {
     "hare": "dist/cli-node.js",
     "hare-bun": "dist/cli-bun.js",
+    "hare-kernel-runtime": "dist/kernel-runtime.js",
     "claude-code-last": "dist/cli-node.js"
   },
   "exports": {

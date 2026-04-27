@@ -20,7 +20,27 @@ mock.module("../config", () => ({
 import { Hono } from "hono";
 import { storeReset } from "../store";
 import { removeEventBus, getAllEventBuses, getEventBus } from "../transport/event-bus";
-import { createSSEWriter, createSSEStream } from "../transport/sse-writer";
+import { createSSEWriter, createSSEStream, createWorkerEventStream } from "../transport/sse-writer";
+
+function createRuntimeEnvelope(sequence = 1) {
+  return {
+    schemaVersion: "kernel.runtime.v1",
+    messageId: `runtime-message-${sequence}`,
+    eventId: `runtime-event-${sequence}`,
+    sequence,
+    timestamp: "2026-04-26T00:00:00.000Z",
+    source: "kernel_runtime",
+    kind: "event",
+    conversationId: "conversation-1",
+    payload: { type: "headless.sdk_message" },
+  };
+}
+
+function parseSSEDataFrame(text: string): Record<string, unknown> {
+  const line = text.split("\n").find((line) => line.startsWith("data: "));
+  if (!line) throw new Error(`Missing data line in SSE frame: ${text}`);
+  return JSON.parse(line.slice("data: ".length)) as Record<string, unknown>;
+}
 
 /** Read up to N bytes from a Response stream, then cancel */
 async function readPartialStream(res: Response, maxBytes = 4096): Promise<string> {
@@ -172,6 +192,50 @@ describe("SSE Writer", () => {
       const eventText = new TextDecoder().decode(secondChunk!);
       expect(eventText).toContain("event: message");
       expect(eventText).toContain("real-time");
+
+      reader.cancel();
+    });
+  });
+
+  describe("createWorkerEventStream", () => {
+    beforeEach(() => {
+      storeReset();
+      for (const [key] of getAllEventBuses()) {
+        removeEventBus(key);
+      }
+    });
+
+    test("preserves kernel runtime envelopes in client_event payloads", async () => {
+      const app = new Hono();
+      const envelope = createRuntimeEnvelope();
+
+      app.get("/worker/:sessionId", (c) => {
+        const sessionId = c.req.param("sessionId");
+        return createWorkerEventStream(c, sessionId, 0);
+      });
+
+      const res = await app.request("/worker/s-runtime");
+      const reader = res.body!.getReader();
+      const { value: keepaliveChunk } = await reader.read();
+      expect(new TextDecoder().decode(keepaliveChunk!)).toContain(": keepalive");
+
+      const bus = getEventBus("s-runtime");
+      bus.publish({
+        id: "runtime-eventbus-id",
+        sessionId: "s-runtime",
+        type: "kernel_runtime_event",
+        payload: { raw: envelope },
+        direction: "outbound",
+      });
+
+      const { value: eventChunk } = await reader.read();
+      const frame = parseSSEDataFrame(new TextDecoder().decode(eventChunk!));
+      const payload = frame.payload as Record<string, unknown>;
+
+      expect(frame.event_type).toBe("kernel_runtime_event");
+      expect(payload.type).toBe("kernel_runtime_event");
+      expect(payload.envelope).toEqual(envelope);
+      expect(payload.message).toBeUndefined();
 
       reader.cancel();
     });

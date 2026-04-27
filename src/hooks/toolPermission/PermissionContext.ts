@@ -41,6 +41,9 @@ import {
   logPermissionDecision,
   type PermissionDecisionArgs,
 } from './permissionLogging.js'
+import {
+  ensureToolPermissionRuntimeController,
+} from '../../utils/permissions/runtimePermissionBroker.js'
 
 type PermissionApprovalSource =
   | { type: 'hook'; permanent?: boolean }
@@ -103,6 +106,14 @@ function createPermissionContext(
   queueOps?: PermissionQueueOps,
 ) {
   const messageId = assistantMessage.message.id!
+  const getRuntimePermission = (permissionResult?: PermissionDecision) =>
+    ensureToolPermissionRuntimeController({
+      tool,
+      input,
+      toolUseContext,
+      toolUseID,
+      permissionResult,
+    })
   const ctx = {
     tool,
     input,
@@ -148,8 +159,24 @@ function createPermissionContext(
     resolveIfAborted(resolve: (decision: PermissionDecision) => void) {
       if (!toolUseContext.abortController.signal.aborted) return false
       this.logCancelled()
-      resolve(this.cancelAndAbort(undefined, true))
+      const decision = this.cancelAndAbort(undefined, true)
+      this.recordRuntimePermissionDecision(decision, 'runtime_abort')
+      resolve(decision)
       return true
+    },
+    startRuntimePermissionRequest(permissionResult?: PermissionDecision) {
+      return getRuntimePermission(permissionResult)?.start(permissionResult)
+    },
+    recordRuntimePermissionDecision(
+      decision: PermissionDecision,
+      resolvedBy: string,
+      permissionResult?: PermissionDecision,
+    ) {
+      getRuntimePermission(permissionResult)?.decide(
+        decision,
+        resolvedBy,
+        permissionResult,
+      )
     },
     cancelAndAbort(
       feedback?: string,
