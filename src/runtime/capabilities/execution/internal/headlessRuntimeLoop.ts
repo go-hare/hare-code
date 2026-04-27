@@ -1912,6 +1912,9 @@ function runHeadlessStreaming(
           })
           const turnAbortController = managedSession.startTurn()
           const abortRuntimeTurn = () => {
+            if (terminalResultEmitted) {
+              return
+            }
             headlessConversation.abortActiveTurn(
               turnAbortController.signal.reason ?? 'interrupt',
             )
@@ -2070,10 +2073,17 @@ function runHeadlessStreaming(
               }
             }
           } catch (error) {
-            finalizeRuntimeTurn(
-              turnAbortController.signal.aborted ? 'completed' : 'failed',
-              turnAbortController.signal.aborted ? 'aborted' : error,
-            )
+            if (turnAbortController.signal.aborted && terminalResultEmitted) {
+              finalizeRuntimeTurn(
+                lastResultIsError ? 'failed' : 'completed',
+                lastResultIsError ? 'ask_result_error' : 'end_turn',
+              )
+            } else {
+              finalizeRuntimeTurn(
+                turnAbortController.signal.aborted ? 'completed' : 'failed',
+                turnAbortController.signal.aborted ? 'aborted' : error,
+              )
+            }
             for (const runId of autonomyRunIds) {
               await finalizeAutonomyRunFailed({
                 runId,
@@ -2727,7 +2737,9 @@ function runHeadlessStreaming(
           logForDebugging(
             `[print.ts] end_session received, reason=${req.reason ?? 'unspecified'}`,
           )
-          abortCurrentHeadlessTurn('end_session')
+          if (!terminalResultEmitted) {
+            abortCurrentHeadlessTurn('end_session')
+          }
           suggestionState.abortController?.abort()
           suggestionState.abortController = null
           suggestionState.lastEmitted = null

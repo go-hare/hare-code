@@ -552,4 +552,15 @@ describe("normalizeAttachmentForAPI", () => {
     const text = messages[0]!.message.content as string;
     expect(text).not.toContain("Background task for task #10 has completed.");
   });
+
+  test("renders pending background plan verification reminder", () => {
+    const messages = normalizeAttachmentForAPI({
+      type: "verify_plan_reminder",
+      verificationStarted: true,
+    } as any);
+
+    const text = messages[0]!.message.content as string;
+    expect(text).toContain("Plan verification is still running");
+    expect(text).toContain("Do not treat the plan as verified yet");
+  });
 });

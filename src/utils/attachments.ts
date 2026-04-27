@@ -657,6 +657,7 @@ export type Attachment =
     }
   | {
       type: 'verify_plan_reminder'
+      verificationStarted?: boolean
     }
   | {
       type: 'max_turns_reached'
@@ -3985,9 +3986,9 @@ export function getVerifyPlanReminderTurnCount(messages: Message[]): number {
 }
 
 /**
- * Get verify plan reminder attachment if the model hasn't called VerifyPlanExecution yet.
+ * Get verify plan reminder attachment while explicit plan verification is pending.
  */
-async function getVerifyPlanReminderAttachment(
+export async function getVerifyPlanReminderAttachment(
   messages: Message[] | undefined,
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
@@ -3998,12 +3999,10 @@ async function getVerifyPlanReminderAttachment(
   const appState = toolUseContext.getAppState()
   const pending = appState.pendingPlanVerification
 
-  // Only remind if plan exists and verification not started or completed
-  if (
-    !pending ||
-    pending.verificationStarted ||
-    pending.verificationCompleted
-  ) {
+  // Only remind if a plan exists and verification has not completed.
+  // A background verifier sets verificationStarted=true while it is still
+  // running, so that state must keep reminding instead of going silent.
+  if (!pending || pending.verificationCompleted) {
     return []
   }
 
@@ -4018,7 +4017,12 @@ async function getVerifyPlanReminderAttachment(
     }
   }
 
-  return [{ type: 'verify_plan_reminder' }]
+  return [
+    {
+      type: 'verify_plan_reminder',
+      ...(pending.verificationStarted ? { verificationStarted: true } : {}),
+    },
+  ]
 }
 
 export function getCompactionReminderAttachment(

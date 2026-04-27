@@ -4308,7 +4308,9 @@ You have exited auto mode. The user may now want to interact more directly. You 
         process.env.CLAUDE_CODE_VERIFY_PLAN === 'true'
           ? 'VerifyPlanExecution'
           : ''
-      const content = `You have completed implementing the plan. Please call the "${toolName}" tool directly (NOT the ${AGENT_TOOL_NAME} tool or an agent) to verify that all plan items were completed correctly.`
+      const content = attachment.verificationStarted
+        ? 'Plan verification is still running in the background. Do not treat the plan as verified yet; wait for the verifier result before giving a final completion summary.'
+        : `You have completed implementing the plan. Please call the "${toolName}" tool directly (NOT the ${AGENT_TOOL_NAME} tool or an agent) to verify that all plan items were completed correctly.`
       return wrapMessagesInSystemReminder([
         createUserMessage({ content, isMeta: true }),
       ])

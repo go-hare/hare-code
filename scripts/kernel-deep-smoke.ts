@@ -186,6 +186,9 @@ function assertSmokeResult(target: Target, result: RunResult): void {
 
   if (target.requireRuntimeEnvelope) {
     const lines = result.stdout.split('\n')
+    const successResultLineIndex = lines.findIndex(
+      line => line.includes('"type":"result"') && line.includes('"success"'),
+    )
     const hasRuntimeEnvelope = lines.some(
       line =>
         line.includes('"type":"kernel_runtime_event"') &&
@@ -198,6 +201,33 @@ function assertSmokeResult(target: Target, result: RunResult): void {
     }
     if (lines.some(line => line.includes('"turnId":""'))) {
       throw new Error(`${target.name} emitted an empty runtime turnId`)
+    }
+    if (
+      successResultLineIndex !== -1 &&
+      lines
+        .slice(successResultLineIndex + 1)
+        .some(
+          line => line.includes('"turn.abort_requested"'),
+        )
+    ) {
+      throw new Error(
+        `${target.name} emitted a runtime abort after a successful result`,
+      )
+    }
+    if (
+      successResultLineIndex !== -1 &&
+      lines
+        .slice(successResultLineIndex + 1)
+        .some(
+          line =>
+            line.includes('"turn.completed"') &&
+            (line.includes('"stopReason":"shutdown"') ||
+              line.includes('"stopReason":"aborted"')),
+        )
+    ) {
+      throw new Error(
+        `${target.name} overwrote successful turn completion with an abort reason`,
+      )
     }
   }
 }
