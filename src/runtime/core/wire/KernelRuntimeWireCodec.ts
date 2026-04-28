@@ -17,21 +17,30 @@ import type {
   KernelRuntimeCommandType,
   KernelRuntimeConnectMcpCommand,
   KernelRuntimeConnectHostCommand,
+  KernelRuntimeDispatchCompanionActionCommand,
+  KernelRuntimeEnqueueKairosEventCommand,
   KernelRuntimeCreateTaskCommand,
   KernelRuntimeCreateConversationCommand,
   KernelRuntimeDecidePermissionCommand,
   KernelRuntimeDisconnectHostCommand,
   KernelRuntimeExecuteCommandCommand,
+  KernelRuntimeGetCompanionStateCommand,
+  KernelRuntimeGetContextGitStatusCommand,
   KernelRuntimeHostDisconnectPolicy,
   KernelRuntimeDisposeConversationCommand,
   KernelRuntimeGetAgentOutputCommand,
   KernelRuntimeGetAgentRunCommand,
+  KernelRuntimeGetKairosStatusCommand,
+  KernelRuntimeGetSessionTranscriptCommand,
+  KernelRuntimeGetSystemPromptInjectionCommand,
   KernelRuntimeGetTaskCommand,
   KernelRuntimeInstallPluginCommand,
   KernelRuntimeInitCommand,
   KernelRuntimeListAgentsCommand,
   KernelRuntimeListAgentRunsCommand,
   KernelRuntimeListCommandsCommand,
+  KernelRuntimeListMemoryCommand,
+  KernelRuntimeListSessionsCommand,
   KernelRuntimeListHooksCommand,
   KernelRuntimeListMcpResourcesCommand,
   KernelRuntimeListMcpServersCommand,
@@ -50,13 +59,22 @@ import type {
   KernelRuntimeReloadPluginsCommand,
   KernelRuntimeReloadSkillsCommand,
   KernelRuntimeResolveSkillContextCommand,
+  KernelRuntimeReactCompanionCommand,
+  KernelRuntimeReadContextCommand,
+  KernelRuntimeReadMemoryCommand,
+  KernelRuntimeResumeKairosCommand,
+  KernelRuntimeResumeSessionCommand,
   KernelRuntimeRunHookCommand,
   KernelRuntimeSetPluginEnabledCommand,
   KernelRuntimeRunTurnCommand,
   KernelRuntimeSetMcpEnabledCommand,
+  KernelRuntimeSetSystemPromptInjectionCommand,
   KernelRuntimeSpawnAgentCommand,
   KernelRuntimeSubscribeEventsCommand,
+  KernelRuntimeSuspendKairosCommand,
+  KernelRuntimeTickKairosCommand,
   KernelRuntimeUninstallPluginCommand,
+  KernelRuntimeUpdateMemoryCommand,
   KernelRuntimeUpdatePluginCommand,
   KernelRuntimeUpdateTaskCommand,
 } from '../../contracts/wire.js'
@@ -108,6 +126,24 @@ const COMMAND_TYPES = new Set<KernelRuntimeCommandType>([
   'create_task',
   'update_task',
   'assign_task',
+  'get_companion_state',
+  'dispatch_companion_action',
+  'react_companion',
+  'get_kairos_status',
+  'enqueue_kairos_event',
+  'tick_kairos',
+  'suspend_kairos',
+  'resume_kairos',
+  'list_memory',
+  'read_memory',
+  'update_memory',
+  'read_context',
+  'get_context_git_status',
+  'get_system_prompt_injection',
+  'set_system_prompt_injection',
+  'list_sessions',
+  'resume_session',
+  'get_session_transcript',
   'publish_host_event',
   'subscribe_events',
   'ping',
@@ -349,6 +385,84 @@ export function parseKernelRuntimeCommand(
       return parseUpdateTaskCommand(record, requestId, metadata)
     case 'assign_task':
       return parseAssignTaskCommand(record, requestId, metadata)
+    case 'get_companion_state':
+      return withMetadata<KernelRuntimeGetCompanionStateCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'dispatch_companion_action':
+      return parseDispatchCompanionActionCommand(record, requestId, metadata)
+    case 'react_companion':
+      return parseReactCompanionCommand(record, requestId, metadata)
+    case 'get_kairos_status':
+      return withMetadata<KernelRuntimeGetKairosStatusCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'enqueue_kairos_event':
+      return parseEnqueueKairosEventCommand(record, requestId, metadata)
+    case 'tick_kairos':
+      return parseTickKairosCommand(record, requestId, metadata)
+    case 'suspend_kairos':
+      return parseSuspendKairosCommand(record, requestId, metadata)
+    case 'resume_kairos':
+      return parseResumeKairosCommand(record, requestId, metadata)
+    case 'list_memory':
+      return withMetadata<KernelRuntimeListMemoryCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'read_memory':
+      return parseReadMemoryCommand(record, requestId, metadata)
+    case 'update_memory':
+      return parseUpdateMemoryCommand(record, requestId, metadata)
+    case 'read_context':
+      return withMetadata<KernelRuntimeReadContextCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'get_context_git_status':
+      return withMetadata<KernelRuntimeGetContextGitStatusCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'get_system_prompt_injection':
+      return withMetadata<KernelRuntimeGetSystemPromptInjectionCommand>(
+        {
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type,
+          requestId,
+        },
+        metadata,
+      )
+    case 'set_system_prompt_injection':
+      return parseSetSystemPromptInjectionCommand(record, requestId, metadata)
+    case 'list_sessions':
+      return parseListSessionsCommand(record, requestId, metadata)
+    case 'resume_session':
+      return parseResumeSessionCommand(record, requestId, metadata)
+    case 'get_session_transcript':
+      return parseGetSessionTranscriptCommand(record, requestId, metadata)
     case 'publish_host_event':
       return parsePublishHostEventCommand(record, requestId, metadata)
     case 'subscribe_events':
@@ -1000,6 +1114,212 @@ function parseAssignTaskCommand(
   return withMetadata(command, metadata)
 }
 
+function parseDispatchCompanionActionCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeDispatchCompanionActionCommand {
+  const action = requireRecordField(record, 'action')
+  const type = requireCompanionActionType(action)
+  const parsedAction = parseCompanionAction(action, type)
+  const command: KernelRuntimeDispatchCompanionActionCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'dispatch_companion_action',
+    requestId,
+    action: parsedAction,
+  }
+  return withMetadata(command, metadata)
+}
+
+function parseReactCompanionCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeReactCompanionCommand {
+  const command: KernelRuntimeReactCompanionCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'react_companion',
+    requestId,
+    messages: optionalArray(record, 'messages') ?? [],
+  }
+  return withMetadata(command, metadata)
+}
+
+function parseEnqueueKairosEventCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeEnqueueKairosEventCommand {
+  const event = requireRecordField(record, 'event')
+  const command: KernelRuntimeEnqueueKairosEventCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'enqueue_kairos_event',
+    requestId,
+    event: {
+      type: requireString(event, 'type'),
+    },
+  }
+  assignOptional(command.event, 'payload', event.payload)
+  assignOptional(command.event, 'metadata', optionalRecord(event, 'metadata'))
+  return withMetadata(command, metadata)
+}
+
+function parseTickKairosCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeTickKairosCommand {
+  const command: KernelRuntimeTickKairosCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'tick_kairos',
+    requestId,
+  }
+  assignOptional(command, 'reason', optionalString(record, 'reason'))
+  assignOptional(command, 'drain', optionalBoolean(record, 'drain'))
+  return withMetadata(command, metadata)
+}
+
+function parseSuspendKairosCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeSuspendKairosCommand {
+  const command: KernelRuntimeSuspendKairosCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'suspend_kairos',
+    requestId,
+  }
+  assignOptional(command, 'reason', optionalString(record, 'reason'))
+  return withMetadata(command, metadata)
+}
+
+function parseResumeKairosCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeResumeKairosCommand {
+  const command: KernelRuntimeResumeKairosCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'resume_kairos',
+    requestId,
+  }
+  assignOptional(command, 'reason', optionalString(record, 'reason'))
+  return withMetadata(command, metadata)
+}
+
+function parseReadMemoryCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeReadMemoryCommand {
+  return withMetadata<KernelRuntimeReadMemoryCommand>(
+    {
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'read_memory',
+      requestId,
+      id: requireString(record, 'id'),
+    },
+    metadata,
+  )
+}
+
+function parseUpdateMemoryCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeUpdateMemoryCommand {
+  return withMetadata<KernelRuntimeUpdateMemoryCommand>(
+    {
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'update_memory',
+      requestId,
+      id: requireString(record, 'id'),
+      content: requireString(record, 'content'),
+    },
+    metadata,
+  )
+}
+
+function parseSetSystemPromptInjectionCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeSetSystemPromptInjectionCommand {
+  const command: KernelRuntimeSetSystemPromptInjectionCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'set_system_prompt_injection',
+    requestId,
+    value: null,
+  }
+  const value = record.value
+  if (value !== null && typeof value !== 'string') {
+    throw new KernelRuntimeWireCommandParseError(
+      'value must be a string or null',
+    )
+  }
+  command.value = value
+  return withMetadata(command, metadata)
+}
+
+function parseListSessionsCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeListSessionsCommand {
+  const command: KernelRuntimeListSessionsCommand = {
+    schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+    type: 'list_sessions',
+    requestId,
+  }
+  assignOptional(command, 'cwd', optionalString(record, 'cwd'))
+  assignOptional(command, 'limit', optionalNonNegativeInteger(record, 'limit'))
+  assignOptional(
+    command,
+    'offset',
+    optionalNonNegativeInteger(record, 'offset'),
+  )
+  assignOptional(
+    command,
+    'includeWorktrees',
+    optionalBoolean(record, 'includeWorktrees'),
+  )
+  return withMetadata(command, metadata)
+}
+
+function parseResumeSessionCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeResumeSessionCommand {
+  return withMetadata<KernelRuntimeResumeSessionCommand>(
+    {
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'resume_session',
+      requestId,
+      sessionId: requireString(record, 'sessionId'),
+      conversationId: optionalString(record, 'conversationId'),
+      workspacePath: optionalString(record, 'workspacePath'),
+    },
+    metadata,
+  )
+}
+
+function parseGetSessionTranscriptCommand(
+  record: JsonRecord,
+  requestId: string,
+  metadata: JsonRecord | undefined,
+): KernelRuntimeGetSessionTranscriptCommand {
+  return withMetadata<KernelRuntimeGetSessionTranscriptCommand>(
+    {
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'get_session_transcript',
+      requestId,
+      sessionId: requireString(record, 'sessionId'),
+    },
+    metadata,
+  )
+}
+
 function parsePublishHostEventCommand(
   record: JsonRecord,
   requestId: string,
@@ -1131,6 +1451,52 @@ function requireBoolean(record: JsonRecord, key: string): boolean {
     throw new KernelRuntimeWireCommandParseError(`${key} must be a boolean`)
   }
   return value
+}
+
+function requireCompanionActionType(
+  record: JsonRecord,
+): KernelRuntimeDispatchCompanionActionCommand['action']['type'] {
+  const value = requireString(record, 'type')
+  switch (value) {
+    case 'hatch':
+    case 'rehatch':
+    case 'mute':
+    case 'unmute':
+    case 'pet':
+    case 'clear':
+      return value
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `Invalid companion action ${value}`,
+      )
+  }
+}
+
+function parseCompanionAction(
+  record: JsonRecord,
+  type: KernelRuntimeDispatchCompanionActionCommand['action']['type'],
+): KernelRuntimeDispatchCompanionActionCommand['action'] {
+  switch (type) {
+    case 'hatch':
+    case 'rehatch':
+    case 'clear':
+      return {
+        type,
+        ...(optionalString(record, 'seed')
+          ? { seed: optionalString(record, 'seed') }
+          : {}),
+      }
+    case 'pet':
+      return {
+        type,
+        ...(optionalString(record, 'note')
+          ? { note: optionalString(record, 'note') }
+          : {}),
+      }
+    case 'mute':
+    case 'unmute':
+      return { type }
+  }
 }
 
 function optionalMcpAuthAction(

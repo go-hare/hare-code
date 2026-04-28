@@ -1,7 +1,9 @@
-import { getSessionId } from '../bootstrap/state.js'
 import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import type { SessionId } from '../types/ids.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
 
 // -- config
 
@@ -28,7 +30,7 @@ export type QueryConfig = {
 
 export function buildQueryConfig(): QueryConfig {
   return {
-    sessionId: getSessionId(),
+    sessionId: runtimeSessionIdentityState.getSessionIdentity().sessionId,
     gates: {
       streamingToolExecution: checkStatsigFeatureGate_CACHED_MAY_BE_STALE(
         'tengu_streaming_tool_execution2',

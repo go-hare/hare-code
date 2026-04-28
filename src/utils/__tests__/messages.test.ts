@@ -515,6 +515,18 @@ describe("normalizeMessagesForAPI", () => {
 });
 
 describe("normalizeAttachmentForAPI", () => {
+  test("renders active foreground task completion reminder", () => {
+    const messages = normalizeAttachmentForAPI({
+      type: "active_task_completion_reminder",
+      taskId: "4",
+      subject: "Review bug fixes",
+    } as any);
+
+    const text = messages[0]!.message.content as string;
+    expect(text).toContain("Task #4 (Review bug fixes) is still marked in_progress.");
+    expect(text).toContain('call TaskUpdate with status: "completed"');
+  });
+
   test("adds completion hint for linked in-progress task", () => {
     const messages = normalizeAttachmentForAPI({
       type: "task_status",

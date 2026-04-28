@@ -12,9 +12,9 @@ const content = readFileSync(
 )
 
 describe('runHeadlessRuntime', () => {
-  test('creates a bootstrap-backed runtime state provider', () => {
+  test('creates a bootstrap-backed runtime state provider when one is not injected', () => {
     expect(content).toContain(
-      'const bootstrapStateProvider = createBootstrapStateProvider()',
+      'options.bootstrapStateProvider ?? createBootstrapStateProvider()',
     )
   })
 

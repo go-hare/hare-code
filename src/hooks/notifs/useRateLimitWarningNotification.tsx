@@ -9,7 +9,13 @@ import {
 import { useClaudeAiLimits } from 'src/services/claudeAiLimitsHook.js'
 import { getSubscriptionType } from 'src/utils/auth.js'
 import { hasClaudeAiBillingAccess } from 'src/utils/billing.js'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 export function useRateLimitWarningNotification(model: string): void {
   const { addNotification } = useNotifications()
@@ -36,7 +42,7 @@ export function useRateLimitWarningNotification(model: string): void {
 
   // Show immediate notification when entering overage mode
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (
       claudeAiLimits.isUsingOverage &&
       !hasShownOverageNotification &&
@@ -63,7 +69,7 @@ export function useRateLimitWarningNotification(model: string): void {
 
   // Show warning notification for approaching limits
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (rateLimitWarning && rateLimitWarning !== shownWarningRef.current) {
       shownWarningRef.current = rateLimitWarning
       addNotification({

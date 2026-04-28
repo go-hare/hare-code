@@ -52,6 +52,8 @@ const mockStatsStore = {
   },
 } as never
 
+const actualMessages = await import('../../../../utils/messages.js')
+
 mock.module('../directConnectKernelDeps.js', () => ({
   connectDirectHostSession: mockConnectDirectHostSession,
   getDirectConnectErrorMessage: mockGetDirectConnectErrorMessage,
@@ -62,6 +64,7 @@ mock.module('../../../../replLauncher.js', () => ({
 }))
 
 mock.module('../../../../utils/messages.js', () => ({
+  ...actualMessages,
   createSystemMessage: mockCreateSystemMessage,
   createUserMessage: mockCreateUserMessage,
 }))

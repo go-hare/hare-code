@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
-import type { HeadlessLaunchOptions } from '../headlessLauncher.js'
+import type {
+  HeadlessLaunchDeps,
+  HeadlessLaunchOptions,
+} from '../headlessLauncher.js'
 
 const callOrder: string[] = []
 const materializedEnvironment = {
@@ -31,6 +34,7 @@ const mockCreateDefaultKernelHeadlessEnvironment = mock((_options: unknown) => {
 })
 const mockConnectDefaultKernelHeadlessMcp = mock(async (_options: unknown) => {
   callOrder.push('connect')
+  return { claudeaiTimedOut: false }
 })
 const mockPrepareKernelHeadlessStartup = mock(
   async (_options: unknown, _deps: unknown) => {
@@ -43,23 +47,29 @@ const mockRunKernelHeadless = mock(
   },
 )
 
-mock.module('../headlessKernelDeps.js', () => ({
-  connectDefaultKernelHeadlessMcp: mockConnectDefaultKernelHeadlessMcp,
-  createDefaultKernelHeadlessEnvironment:
-    mockCreateDefaultKernelHeadlessEnvironment,
-  prepareKernelHeadlessStartup: mockPrepareKernelHeadlessStartup,
-  runKernelHeadless: mockRunKernelHeadless,
-}))
-
-mock.module(
-  '../../../../runtime/capabilities/execution/headlessCapabilityMaterializer.js',
-  () => ({
-    materializeRuntimeHeadlessEnvironment:
-      mockMaterializeRuntimeHeadlessEnvironment,
-  }),
-)
-
 const { runHeadlessLaunch } = await import('../headlessLauncher.js')
+
+function createDeps(): HeadlessLaunchDeps {
+  return {
+    async materializeRuntimeHeadlessEnvironment(input) {
+      return (await mockMaterializeRuntimeHeadlessEnvironment(
+        input,
+      )) as never
+    },
+    createDefaultKernelHeadlessEnvironment(options) {
+      return mockCreateDefaultKernelHeadlessEnvironment(options) as never
+    },
+    async connectDefaultKernelHeadlessMcp(options) {
+      return (await mockConnectDefaultKernelHeadlessMcp(options)) as never
+    },
+    async prepareKernelHeadlessStartup(options, deps) {
+      await mockPrepareKernelHeadlessStartup(options, deps)
+    },
+    async runKernelHeadless(inputPrompt, environment, options) {
+      await mockRunKernelHeadless(inputPrompt, environment, options)
+    },
+  }
+}
 
 function createHeadlessLaunchOptions(): HeadlessLaunchOptions {
   const claudeaiConfigPromise = Promise.resolve({
@@ -141,8 +151,9 @@ describe('runHeadlessLaunch', () => {
 
   test('orchestrates headless kernel startup in the expected order', async () => {
     const options = createHeadlessLaunchOptions()
+    const deps = createDeps()
 
-    await runHeadlessLaunch(options)
+    await runHeadlessLaunch(options, deps)
 
     expect(callOrder).toEqual([
       'materialize',
@@ -168,17 +179,34 @@ describe('runHeadlessLaunch', () => {
     })
     expect(mockPrepareKernelHeadlessStartup).toHaveBeenCalledWith(
       options.startup,
-      options.startupDeps,
+      expect.objectContaining({
+        ...options.startupDeps,
+        stateWriter: expect.any(Object),
+      }),
     )
     expect(mockRunKernelHeadless).toHaveBeenCalledWith(
       options.inputPrompt,
       headlessEnvironment,
-      options.runOptions,
+      expect.objectContaining({
+        ...options.runOptions,
+        bootstrapStateProvider: expect.any(Object),
+      }),
     )
+
+    const startupDeps =
+      mockPrepareKernelHeadlessStartup.mock.calls[0]?.[1] as Record<
+        string,
+        unknown
+      >
+    const runOptions =
+      mockRunKernelHeadless.mock.calls[0]?.[2] as Record<string, unknown>
+    expect(startupDeps.stateWriter).toBeDefined()
+    expect(runOptions.bootstrapStateProvider).toBeDefined()
   })
 
-  test('returns after kickoff without waiting for the kernel run loop to finish', async () => {
+  test('waits for the kernel run loop to finish before resolving', async () => {
     const options = createHeadlessLaunchOptions()
+    const deps = createDeps()
     let releaseRun: (() => void) | undefined
 
     mockRunKernelHeadless.mockImplementationOnce(
@@ -189,15 +217,19 @@ describe('runHeadlessLaunch', () => {
         }),
     )
 
+    const launchPromise = runHeadlessLaunch(options, deps).then(
+      () => 'launch-finished',
+    )
     const result = await Promise.race([
-      runHeadlessLaunch(options).then(() => 'launch-finished'),
+      launchPromise,
       new Promise<string>(resolve => {
         setTimeout(() => resolve('timed-out'), 50)
       }),
     ])
 
-    expect(result).toBe('launch-finished')
+    expect(result).toBe('timed-out')
 
     releaseRun?.()
+    await expect(launchPromise).resolves.toBe('launch-finished')
   })
 })

@@ -90,8 +90,9 @@ import {
 } from '../../../utils/thinking.js'
 import {
   createExecutionStateProviders,
-  type RuntimeBootstrapStateProvider,
+  type RuntimeExecutionSessionStateProvider,
 } from '../../core/state/index.js'
+import { createBootstrapStateProvider } from '../../core/state/bootstrapProvider.js'
 import type { RuntimeSessionLifecycle } from '../../contracts/session.js'
 import type { KernelRuntimeEnvelopeBase } from '../../contracts/events.js'
 import { RuntimeEventBus } from '../../core/events/RuntimeEventBus.js'
@@ -166,7 +167,7 @@ export type QueryEngineConfig = {
   canUseTool: CanUseToolFn
   getAppState: () => AppState
   setAppState: (f: (prev: AppState) => AppState) => void
-  bootstrapStateProvider?: RuntimeBootstrapStateProvider
+  bootstrapStateProvider: RuntimeExecutionSessionStateProvider
   initialMessages?: Message[]
   readFileCache: FileStateCache
   customSystemPrompt?: string
@@ -264,6 +265,41 @@ export class SessionRuntime implements RuntimeExecutionSession {
     })
   }
 
+  private bindBootstrapState<T, TReturn = unknown, TNext = unknown>(
+    iterator: AsyncGenerator<T, TReturn, TNext>,
+  ): AsyncGenerator<T, TReturn, TNext> {
+    const runWithState = this.stateProviders.bootstrap.runWithState
+    return {
+      [Symbol.asyncIterator]() {
+        return this
+      },
+      next(...args) {
+        return runWithState(() => iterator.next(args[0] as TNext))
+      },
+      throw: error =>
+        iterator.throw
+          ? runWithState(() => iterator.throw!(error))
+          : Promise.reject(error),
+      return: value =>
+        iterator.return
+          ? runWithState(() => iterator.return!(value as TReturn))
+          : Promise.resolve({
+              done: true,
+              value: value as TReturn,
+            }),
+      [Symbol.asyncDispose]: () => {
+        const asyncDispose = (
+          iterator as AsyncGenerator<T, TReturn, TNext> & {
+            [Symbol.asyncDispose]?: () => PromiseLike<void>
+          }
+        )[Symbol.asyncDispose]
+        return asyncDispose
+          ? runWithState(() => asyncDispose.call(iterator))
+          : Promise.resolve()
+      },
+    }
+  }
+
   async *submitRuntimeTurn(
     prompt: string | ContentBlockParam[],
     options?: { uuid?: string; isMeta?: boolean },
@@ -284,7 +320,9 @@ export class SessionRuntime implements RuntimeExecutionSession {
 
     let sawTerminalResult = false
     try {
-      for await (const message of this.runQueryTurn(prompt, options)) {
+      for await (const message of this.bindBootstrapState(
+        this.runQueryTurn(prompt, options),
+      )) {
         yield this.runtimeEventBus.emit(
           createHeadlessSDKMessageRuntimeEvent({
             conversationId: sessionId,
@@ -1416,7 +1454,7 @@ export type AskRuntimeOptions = {
   jsonSchema?: Record<string, unknown>
   getAppState: () => AppState
   setAppState: (f: (prev: AppState) => AppState) => void
-  bootstrapStateProvider?: RuntimeBootstrapStateProvider
+  bootstrapStateProvider?: RuntimeExecutionSessionStateProvider
   getReadFileCache: () => FileStateCache
   setReadFileCache: (cache: FileStateCache) => void
   abortController?: AbortController
@@ -1463,6 +1501,8 @@ export async function* askRuntime({
   orphanedPermission,
   createSessionRuntime,
 }: AskRuntimeOptions): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown> {
+  const sessionBootstrapStateProvider =
+    bootstrapStateProvider ?? createBootstrapStateProvider()
   const engine = (createSessionRuntime ?? createExecutionSessionRuntime)({
     cwd,
     tools,
@@ -1472,7 +1512,7 @@ export async function* askRuntime({
     canUseTool,
     getAppState,
     setAppState,
-    bootstrapStateProvider,
+    bootstrapStateProvider: sessionBootstrapStateProvider,
     initialMessages: mutableMessages,
     readFileCache: cloneFileStateCache(getReadFileCache()),
     customSystemPrompt,

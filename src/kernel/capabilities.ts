@@ -47,6 +47,7 @@ const CAPABILITY_FAMILY_BY_NAME: Record<string, KernelCapabilityFamily> = {
   bridge: 'host',
   commands: 'extension',
   companion: 'autonomy',
+  context: 'execution',
   conversation: 'execution',
   daemon: 'host',
   events: 'core',

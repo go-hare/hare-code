@@ -178,13 +178,38 @@ describe('RuntimeEventBus', () => {
       })
     } catch (error) {
       expect(error).toBeInstanceOf(RuntimeEventReplayError)
-      expect((error as RuntimeEventReplayError).code).toBe('expired')
+      expect((error as RuntimeEventReplayError).code).toBe('not_found')
     }
 
     try {
       bus.replay({
         conversationId: 'conversation-1',
         sinceEventId: 'missing-event',
+      })
+    } catch (error) {
+      expect(error).toBeInstanceOf(RuntimeEventReplayError)
+      expect((error as RuntimeEventReplayError).code).toBe('not_found')
+    }
+  })
+
+  test('drops expired cursor metadata when the replay buffer evicts old events', () => {
+    const bus = createBus(1)
+
+    const first = bus.emit({
+      conversationId: 'conversation-1',
+      type: 'event.one',
+      replayable: true,
+    })
+    bus.emit({
+      conversationId: 'conversation-2',
+      type: 'event.two',
+      replayable: true,
+    })
+
+    try {
+      bus.replay({
+        conversationId: 'conversation-1',
+        sinceEventId: first.eventId,
       })
     } catch (error) {
       expect(error).toBeInstanceOf(RuntimeEventReplayError)

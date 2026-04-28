@@ -1,10 +1,16 @@
 import * as React from 'react'
 import { useEffect } from 'react'
 import { useNotifications } from 'src/context/notifications.js'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { Text } from '@anthropic/ink'
 import { hasClaudeAiMcpEverConnected } from '../../services/mcp/claudeai.js'
 import type { MCPServerConnection } from '../../services/mcp/types.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 type Props = {
   mcpClients?: MCPServerConnection[]
@@ -17,7 +23,7 @@ export function useMcpConnectivityStatus({
 }: Props): void {
   const { addNotification } = useNotifications()
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     const failedLocalClients = mcpClients.filter(
       client =>
         client.type === 'failed' &&

@@ -151,6 +151,14 @@ import type {
   KernelTaskSnapshot,
   KernelTaskUpdateRequest,
 } from './runtimeTasks.js'
+import type { KernelCompanionRuntime } from './companion.js'
+import type { KernelContextSnapshot } from './context.js'
+import type { KernelKairosRuntime } from './kairos.js'
+import type { KernelMemoryManager } from './memory.js'
+import type {
+  KernelSessionDescriptor,
+  KernelTranscript,
+} from './sessions.js'
 import { KernelRuntimeRequestError } from './runtimeErrors.js'
 import { createKernelRuntimeFacade } from './runtimeFacade.js'
 
@@ -369,6 +377,37 @@ export type KernelRuntimePermissions = {
   decide(decision: KernelPermissionDecision): Promise<KernelPermissionDecision>
 }
 
+export type KernelRuntimeContextManager = {
+  read(): Promise<KernelContextSnapshot>
+  getSystem(): Promise<Record<string, string>>
+  getUser(): Promise<Record<string, string>>
+  getGitStatus(): Promise<string | null>
+  getSystemPromptInjection(): Promise<string | null>
+  setSystemPromptInjection(value: string | null): Promise<string | null>
+}
+
+export type KernelRuntimeSessionResumeOptions = {
+  conversationId?: KernelConversationId
+  workspacePath?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelRuntimeSessionManager = {
+  list(
+    filter?: {
+      cwd?: string
+      limit?: number
+      offset?: number
+      includeWorktrees?: boolean
+    },
+  ): Promise<readonly KernelSessionDescriptor[]>
+  resume(
+    sessionId: string,
+    options?: KernelRuntimeSessionResumeOptions,
+  ): Promise<KernelConversation>
+  getTranscript(sessionId: string): Promise<KernelTranscript>
+}
+
 export type KernelTurn = {
   readonly id: KernelTurnId
   readonly conversationId: KernelConversationId
@@ -427,6 +466,11 @@ export type KernelRuntime = {
   readonly plugins: KernelRuntimePlugins
   readonly agents: KernelRuntimeAgents
   readonly tasks: KernelRuntimeTasks
+  readonly companion: KernelCompanionRuntime
+  readonly kairos: KernelKairosRuntime
+  readonly memory: KernelMemoryManager
+  readonly context: KernelRuntimeContextManager
+  readonly sessions: KernelRuntimeSessionManager
   readonly permissions: KernelRuntimePermissions
   readonly state: KernelRuntimeState
   start(): Promise<void>

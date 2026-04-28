@@ -20,13 +20,11 @@ import {
   useSetAppState,
 } from 'src/state/AppState.js'
 import {
-  getSdkBetas,
-  getSessionId,
-  isSessionPersistenceDisabled,
-  setHasExitedPlanMode,
-  setNeedsAutoModeExitAttachment,
-  setNeedsPlanModeExitAttachment,
-} from '../../../bootstrap/state.js'
+  createRuntimePlanModeStateWriter,
+  createRuntimePromptStateProvider,
+  createRuntimeSessionIdentityStateProvider,
+} from '../../../runtime/core/state/bootstrapProvider.js'
+import type { SessionId } from '../../../types/ids.js'
 import { generateSessionName } from '../../../commands/rename/generateSessionName.js'
 import { launchUltraplan } from '../../../commands/ultraplan.js'
 import { type KeyboardEvent, Box, Text } from '@anthropic/ink'
@@ -102,6 +100,11 @@ import type { ImageDimensions } from '../../../utils/imageResizer.js'
 import { maybeResizeAndDownsampleImageBlock } from '../../../utils/imageResizer.js'
 import { cacheImagePath, storeImage } from '../../../utils/imageStore.js'
 
+const runtimePlanModeState = createRuntimePlanModeStateWriter()
+const runtimePromptState = createRuntimePromptStateProvider()
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
+
 type ResponseValue =
   | 'yes-bypass-permissions'
   | 'yes-accept-edits'
@@ -111,6 +114,14 @@ type ResponseValue =
   | 'yes-auto-clear-context'
   | 'ultraplan'
   | 'no'
+
+function getCurrentRuntimeSessionId(): SessionId {
+  return runtimeSessionIdentityState.getSessionIdentity().sessionId
+}
+
+function toSessionUuid(sessionId: SessionId): UUID {
+  return sessionId as unknown as UUID
+}
 
 /**
  * Build permission updates for plan approval, including prompt-based rules if provided.
@@ -159,7 +170,7 @@ export function autoNameSessionFromPlan(
   isClearContext: boolean,
 ): void {
   if (
-    isSessionPersistenceDisabled() ||
+    runtimeSessionIdentityState.isSessionPersistenceDisabled() ||
     getSettings_DEPRECATED()?.cleanupPeriodDays === 0
   ) {
     return
@@ -167,7 +178,8 @@ export function autoNameSessionFromPlan(
   // On clear-context, the current session is about to be abandoned — its
   // title (which may have been set by a PRIOR auto-name) is irrelevant.
   // Checking it would make the feature self-defeating after first use.
-  if (!isClearContext && getCurrentSessionTitle(getSessionId())) return
+  if (!isClearContext && getCurrentSessionTitle(getCurrentRuntimeSessionId()))
+    return
   void generateSessionName(
     // generateSessionName tail-slices to the last 1000 chars (correct for
     // conversations, where recency matters). Plans front-load the goal and
@@ -179,11 +191,11 @@ export function autoNameSessionFromPlan(
       // On clear-context acceptance, regenerateSessionId() has run by now —
       // this intentionally names the NEW execution session. Do not "fix" by
       // capturing sessionId once; that would name the abandoned planning session.
-      if (!name || getCurrentSessionTitle(getSessionId())) return
-      const sessionId = getSessionId() as UUID
+      if (!name || getCurrentSessionTitle(getCurrentRuntimeSessionId())) return
+      const sessionId = getCurrentRuntimeSessionId()
       const fullPath = getTranscriptPath()
-      await saveCustomTitle(sessionId, name, fullPath, 'auto')
-      await saveAgentName(sessionId, name, fullPath, 'auto')
+      await saveCustomTitle(toSessionUuid(sessionId), name, fullPath, 'auto')
+      await saveAgentName(toSessionUuid(sessionId), name, fullPath, 'auto')
       setAppState(prev => {
         if (prev.standaloneAgentContext?.name === name) return prev
         return {
@@ -439,7 +451,7 @@ export function ExitPlanModePermissionRequest({
         autoModeStateModule?.isAutoModeActive() ?? false
       if (value !== 'no' && !goingToAuto && autoWasUsedDuringPlan) {
         autoModeStateModule?.setAutoModeActive(false)
-        setNeedsAutoModeExitAttachment(true)
+        runtimePlanModeState.setNeedsAutoModeExitAttachment(true)
         setAppState(prev => ({
           ...prev,
           toolPermissionContext: {
@@ -529,7 +541,7 @@ export function ExitPlanModePermissionRequest({
         },
       }))
 
-      setHasExitedPlanMode(true)
+      runtimePlanModeState.setHasExitedPlanMode(true)
       onDone()
       onReject()
       // Reject the tool use to unblock the query loop
@@ -555,8 +567,8 @@ export function ExitPlanModePermissionRequest({
         planStructureVariant,
         hasFeedback: !!acceptFeedback,
       })
-      setHasExitedPlanMode(true)
-      setNeedsPlanModeExitAttachment(true)
+      runtimePlanModeState.setHasExitedPlanMode(true)
+      runtimePlanModeState.setNeedsPlanModeExitAttachment(true)
       autoModeStateModule?.setAutoModeActive(true)
       setAppState(prev => ({
         ...prev,
@@ -597,8 +609,8 @@ export function ExitPlanModePermissionRequest({
         planStructureVariant,
         hasFeedback: !!acceptFeedback,
       })
-      setHasExitedPlanMode(true)
-      setNeedsPlanModeExitAttachment(true)
+      runtimePlanModeState.setHasExitedPlanMode(true)
+      runtimePlanModeState.setNeedsPlanModeExitAttachment(true)
       onDone()
       toolUseConfirm.onAllow(
         updatedInput,
@@ -623,8 +635,8 @@ export function ExitPlanModePermissionRequest({
         planStructureVariant,
         hasFeedback: !!acceptFeedback,
       })
-      setHasExitedPlanMode(true)
-      setNeedsPlanModeExitAttachment(true)
+      runtimePlanModeState.setHasExitedPlanMode(true)
+      runtimePlanModeState.setNeedsPlanModeExitAttachment(true)
       onDone()
       toolUseConfirm.onAllow(
         updatedInput,
@@ -775,7 +787,7 @@ export function ExitPlanModePermissionRequest({
             autoModeStateModule?.isAutoModeActive() ?? false
           if (autoWasUsedDuringPlan) {
             autoModeStateModule?.setAutoModeActive(false)
-            setNeedsAutoModeExitAttachment(true)
+            runtimePlanModeState.setNeedsAutoModeExitAttachment(true)
             setAppState(prev => ({
               ...prev,
               toolPermissionContext: {
@@ -785,8 +797,8 @@ export function ExitPlanModePermissionRequest({
             }))
           }
         }
-        setHasExitedPlanMode(true)
-        setNeedsPlanModeExitAttachment(true)
+        runtimePlanModeState.setHasExitedPlanMode(true)
+        runtimePlanModeState.setNeedsPlanModeExitAttachment(true)
         onDone()
         toolUseConfirm.onAllow({}, [
           { type: 'setMode', mode: 'default', destination: 'session' },
@@ -1028,7 +1040,7 @@ function getContextUsedPercent(
   })
   const contextWindowSize = getContextWindowForModel(
     runtimeModel,
-    getSdkBetas(),
+    runtimePromptState.getPromptState().sdkBetas,
   )
   const { used } = calculateContextPercentages(
     {

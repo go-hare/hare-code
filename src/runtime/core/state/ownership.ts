@@ -114,6 +114,9 @@ const executionFields = [
   'initialMainLoopModel',
   'modelStrings',
   'strictToolResultPairing',
+  'outputTokensAtTurnStart',
+  'currentTurnTokenBudget',
+  'budgetContinuationCount',
   'lastAPIRequest',
   'lastAPIRequestMessages',
   'lastClassifierRequests',
@@ -226,9 +229,6 @@ export const bootstrapStateOwnership = {
 export type BootstrapModuleField =
   | 'sessionSwitched'
   | 'interactionTimeDirty'
-  | 'outputTokensAtTurnStart'
-  | 'currentTurnTokenBudget'
-  | 'budgetContinuationCount'
   | 'scrollDraining'
   | 'scrollDrainTimer'
 
@@ -246,27 +246,6 @@ export const bootstrapModuleStateOwnership = {
     owner: 'hosts/terminal/render-loop',
     rationale:
       'Ink render batching is terminal-host behavior and should not live in runtime execution state.',
-  },
-  outputTokensAtTurnStart: {
-    field: 'outputTokensAtTurnStart',
-    plane: 'execution-state',
-    owner: 'runtime/capabilities/execution/token-budget',
-    rationale:
-      'Per-turn token accounting is execution state and must move with the runtime session.',
-  },
-  currentTurnTokenBudget: {
-    field: 'currentTurnTokenBudget',
-    plane: 'execution-state',
-    owner: 'runtime/capabilities/execution/token-budget',
-    rationale:
-      'Current token budget is part of execution flow control and belongs to the runtime turn state.',
-  },
-  budgetContinuationCount: {
-    field: 'budgetContinuationCount',
-    plane: 'execution-state',
-    owner: 'runtime/capabilities/execution/token-budget',
-    rationale:
-      'Auto-continue retry count is turn-local execution bookkeeping.',
   },
   scrollDraining: {
     field: 'scrollDraining',

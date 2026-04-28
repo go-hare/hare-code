@@ -1,10 +1,16 @@
-import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import type { Command } from '../../commands.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+function isNonInteractiveSession(): boolean {
+  return !runtimeSessionIdentityState.getSessionIdentity().isInteractive
+}
 
 export const context: Command = {
   name: 'context',
   description: 'Visualize current context usage as a colored grid',
-  isEnabled: () => !getIsNonInteractiveSession(),
+  isEnabled: () => !isNonInteractiveSession(),
   type: 'local-jsx',
   load: () => import('./context.js'),
 }
@@ -15,10 +21,10 @@ export const contextNonInteractive: Command = {
   supportsNonInteractive: true,
   description: 'Show current context usage',
   get isHidden() {
-    return !getIsNonInteractiveSession()
+    return !isNonInteractiveSession()
   },
   isEnabled() {
-    return getIsNonInteractiveSession()
+    return isNonInteractiveSession()
   },
   load: () => import('./context-noninteractive.js'),
 }

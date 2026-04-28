@@ -31,6 +31,8 @@ const mockBuildDeepLinkBanner = mock((_options: unknown) => {
   return 'deep-link-banner'
 })
 
+const actualMessages = await import('../../../../utils/messages.js')
+
 mock.module('../launchAnalyticsDeps.js', () => ({
   logEvent: mockLogEvent,
 }))
@@ -40,6 +42,7 @@ mock.module('../../../../replLauncher.js', () => ({
 }))
 
 mock.module('../../../../utils/messages.js', () => ({
+  ...actualMessages,
   createSystemMessage: mockCreateSystemMessage,
   createUserMessage: mockCreateUserMessage,
 }))

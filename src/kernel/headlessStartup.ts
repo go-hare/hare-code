@@ -1,4 +1,7 @@
-import { setSdkBetas, setSessionPersistenceDisabled } from '../bootstrap/state.js'
+import {
+  createRuntimeHeadlessStartupStateWriter,
+  type RuntimeHeadlessStartupStateWriter,
+} from '../runtime/core/state/bootstrapProvider.js'
 import { filterAllowedSdkBetas } from '../utils/betas.js'
 
 export type PrepareKernelHeadlessStartupOptions = {
@@ -9,8 +12,11 @@ export type PrepareKernelHeadlessStartupOptions = {
 }
 
 export type PrepareKernelHeadlessStartupDeps = {
+  stateWriter?: RuntimeHeadlessStartupStateWriter
   startDeferredPrefetches(): void
   logSessionTelemetry(): void
+  startBackgroundHousekeeping?(): void
+  startSdkMemoryMonitor?(): void
 }
 
 /**
@@ -22,21 +28,32 @@ export async function prepareKernelHeadlessStartup(
   options: PrepareKernelHeadlessStartupOptions,
   deps: PrepareKernelHeadlessStartupDeps,
 ): Promise<void> {
+  const stateWriter =
+    deps.stateWriter ?? createRuntimeHeadlessStartupStateWriter()
+
   if (options.sessionPersistenceDisabled) {
-    setSessionPersistenceDisabled(true)
+    stateWriter.setSessionPersistenceDisabled(true)
   }
 
-  setSdkBetas(filterAllowedSdkBetas(options.betas))
+  stateWriter.setSdkBetas(filterAllowedSdkBetas(options.betas))
 
   if (!options.bareMode) {
     deps.startDeferredPrefetches()
-    void import('../utils/backgroundHousekeeping.js').then(module =>
-      module.startBackgroundHousekeeping(),
-    )
-    if (options.userType === 'ant') {
-      void import('../utils/sdkHeapDumpMonitor.js').then(module =>
-        module.startSdkMemoryMonitor(),
+    if (deps.startBackgroundHousekeeping) {
+      deps.startBackgroundHousekeeping()
+    } else {
+      void import('../utils/backgroundHousekeeping.js').then(module =>
+        module.startBackgroundHousekeeping(),
       )
+    }
+    if (options.userType === 'ant') {
+      if (deps.startSdkMemoryMonitor) {
+        deps.startSdkMemoryMonitor()
+      } else {
+        void import('../utils/sdkHeapDumpMonitor.js').then(module =>
+          module.startSdkMemoryMonitor(),
+        )
+      }
     }
   }
 

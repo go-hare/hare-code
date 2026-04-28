@@ -84,7 +84,7 @@ import {
   getSettingsForSource,
   updateSettingsForSource,
 } from '../../utils/settings/settings.js'
-import { getUserMsgOptIn, setUserMsgOptIn } from '../../bootstrap/state.js'
+import { createRuntimeUserMessageOptInStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { DEFAULT_OUTPUT_STYLE_NAME } from 'src/constants/outputStyles.js'
 import { isEnvTruthy, isRunningOnHomespace } from 'src/utils/envUtils.js'
 import type {
@@ -161,6 +161,10 @@ type SubMenu =
   | 'ChannelDowngrade'
   | 'Language'
   | 'EnableAutoUpdates'
+
+const runtimeUserMessageOptInState =
+  createRuntimeUserMessageOptInStateProvider()
+
 export function Config({
   onClose,
   context,
@@ -258,7 +262,9 @@ export function Config({
   // defaultView to 'chat' then Escape leaves the tool active while the
   // display filter reverts — the exact ambient-activation behavior this
   // PR's entitlement/opt-in split is meant to prevent.
-  const [initialUserMsgOptIn] = useState(() => getUserMsgOptIn())
+  const [initialUserMsgOptIn] = useState(() =>
+    runtimeUserMessageOptInState.getUserMsgOptIn(),
+  )
   // Set on first user-visible change; gates revertChanges() on Escape so
   // opening-then-closing doesn't trigger redundant disk writes.
   const isDirty = React.useRef(false)
@@ -891,7 +897,7 @@ export function Config({
               // Two-way now (same as /brief) — accepting a cache invalidation
               // is better than leaving the tool on after switching away.
               // Reverted on Escape via initialUserMsgOptIn snapshot.
-              setUserMsgOptIn(nextBrief)
+              runtimeUserMessageOptInState.setUserMsgOptIn(nextBrief)
               setChanges(prev => ({ ...prev, 'Default view': selected }))
               logEvent('tengu_default_view_setting_changed', {
                 value: (defaultView ??
@@ -1562,8 +1568,10 @@ export function Config({
     // Bootstrap state: restore userMsgOptIn. Only touched by the defaultView
     // onChange above, so no feature() guard needed here (that path only
     // exists when showDefaultViewPicker is true).
-    if (getUserMsgOptIn() !== initialUserMsgOptIn) {
-      setUserMsgOptIn(initialUserMsgOptIn)
+    if (
+      runtimeUserMessageOptInState.getUserMsgOptIn() !== initialUserMsgOptIn
+    ) {
+      runtimeUserMessageOptInState.setUserMsgOptIn(initialUserMsgOptIn)
     }
   }, [
     themeSetting,

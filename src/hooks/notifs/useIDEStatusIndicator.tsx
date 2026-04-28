@@ -9,9 +9,15 @@ import {
   isJetBrainsIde,
   isSupportedTerminal,
 } from 'src/utils/ide.js'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { useIdeConnectionStatus } from '../useIdeConnectionStatus.js'
 import type { IDESelection } from '../useIdeSelection.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 const MAX_IDE_HINT_SHOW_COUNT = 5
 
@@ -60,7 +66,7 @@ export function useIDEStatusIndicator({
   // Show the /ide command hint if running from an external terminal and found running IDE(s)
   // Delay showing hint to avoid brief flash during auto-connect startup
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (isSupportedTerminal() || ideStatus !== null || showJetBrainsInfo) {
       removeNotification('ide-status-hint')
       return
@@ -103,7 +109,7 @@ export function useIDEStatusIndicator({
 
   // Show IDE disconnected/failed notification when status is disconnected
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (
       showIDEInstallError ||
       showJetBrainsInfo ||
@@ -130,7 +136,7 @@ export function useIDEStatusIndicator({
 
   // Show JetBrains plugin not connected hint
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (!showJetBrainsInfo) {
       removeNotification('ide-status-jetbrains-disconnected')
       return
@@ -144,7 +150,7 @@ export function useIDEStatusIndicator({
 
   // Show IDE install error
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (!showIDEInstallError) {
       removeNotification('ide-status-install-error')
       return

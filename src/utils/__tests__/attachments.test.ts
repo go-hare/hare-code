@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
+  getActiveTaskCompletionReminderAttachment,
   getQueuedCommandAttachmentBatch,
   getVerifyPlanReminderAttachment,
 } from '../attachments.js'
+import { createTask } from '../tasks.js'
 
 const originalVerifyPlan = process.env.CLAUDE_CODE_VERIFY_PLAN
 
@@ -95,6 +97,104 @@ describe('getVerifyPlanReminderAttachment', () => {
             verificationCompleted: true,
           },
         }),
+      } as any,
+    )
+
+    expect(attachments).toEqual([])
+  })
+})
+
+describe('getActiveTaskCompletionReminderAttachment', () => {
+  test('reminds when a foreground task has follow-up tool activity after activation', async () => {
+    const taskListId = `active-task-reminder-${Date.now()}`
+    const taskId = await createTask(taskListId, {
+      subject: 'Review bug fixes',
+      description: 'Inspect the diff and decide whether the fixes are done',
+      status: 'in_progress',
+      owner: undefined,
+      blocks: [],
+      blockedBy: [],
+    })
+
+    const attachments = await getActiveTaskCompletionReminderAttachment(
+      [
+        {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'task-update',
+                name: 'TaskUpdate',
+                input: { taskId, status: 'in_progress' },
+              },
+            ],
+          },
+        },
+        {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'bash-review',
+                name: 'Bash',
+                input: { command: 'git diff -- src/runtime/core/state.ts' },
+              },
+            ],
+          },
+        },
+      ] as any,
+      {
+        agentId: undefined,
+        activeTaskExecutionContext: { taskListId, taskId },
+        options: { tools: [{ name: 'TaskUpdate' }] },
+      } as any,
+    )
+
+    expect(attachments).toEqual([
+      {
+        type: 'active_task_completion_reminder',
+        taskId,
+        subject: 'Review bug fixes',
+      },
+    ])
+  })
+
+  test('does not remind before any follow-up work happens', async () => {
+    const taskListId = `active-task-no-reminder-${Date.now()}`
+    const taskId = await createTask(taskListId, {
+      subject: 'Review bug fixes',
+      description: 'Inspect the diff and decide whether the fixes are done',
+      status: 'in_progress',
+      owner: undefined,
+      blocks: [],
+      blockedBy: [],
+    })
+
+    const attachments = await getActiveTaskCompletionReminderAttachment(
+      [
+        {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'tool_use',
+                id: 'task-update',
+                name: 'TaskUpdate',
+                input: { taskId, status: 'in_progress' },
+              },
+            ],
+          },
+        },
+      ] as any,
+      {
+        agentId: undefined,
+        activeTaskExecutionContext: { taskListId, taskId },
+        options: { tools: [{ name: 'TaskUpdate' }] },
       } as any,
     )
 

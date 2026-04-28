@@ -1,11 +1,14 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import { getKairosActive, setUserMsgOptIn } from '../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
+import {
+  createRuntimeKairosStateProvider,
+  createRuntimeUserMessageOptInStateProvider,
+} from '../runtime/core/state/bootstrapProvider.js'
 import type { ToolUseContext } from '../Tool.js'
 import { isBriefEntitled } from '@go-hare/builtin-tools/tools/BriefTool/BriefTool.js'
 import { BRIEF_TOOL_NAME } from '@go-hare/builtin-tools/tools/BriefTool/prompt.js'
@@ -29,6 +32,10 @@ type BriefConfig = z.infer<ReturnType<typeof briefConfigSchema>>
 const DEFAULT_BRIEF_CONFIG: BriefConfig = {
   enable_slash_command: false,
 }
+
+const runtimeKairosState = createRuntimeKairosStateProvider()
+const runtimeUserMessageOptInState =
+  createRuntimeUserMessageOptInStateProvider()
 
 // No TTL — this gate controls slash-command *visibility*, not a kill switch.
 // CACHED_MAY_BE_STALE still has one background-update flip (first call kicks
@@ -84,7 +91,7 @@ const brief = {
         // each toggle (tool list changes), but a stale tool list is worse —
         // when /brief is enabled mid-session the model was previously left
         // without the tool, emitting plain text the filter hides.
-        setUserMsgOptIn(newState)
+        runtimeUserMessageOptInState.setUserMsgOptIn(newState)
 
         context.setAppState(prev => {
           if (prev.isBriefOnly === newState) return prev
@@ -108,7 +115,7 @@ const brief = {
         // Inline <system-reminder> wrap — importing wrapInSystemReminder from
         // utils/messages.ts pulls constants/xml.ts into the bridge SDK bundle
         // via this module's import chain, tripping the excluded-strings check.
-        const metaMessages = getKairosActive()
+        const metaMessages = runtimeKairosState.getKairosActive()
           ? undefined
           : [
               `<system-reminder>\n${

@@ -35,6 +35,13 @@ describe('kernel import discipline', () => {
     ])
   })
 
+  test('kernel surfaces do not import bootstrap singleton state directly', async () => {
+    await expectNotToContain('src/kernel/bridge.ts', [/bootstrap\/state\.js/])
+    await expectNotToContain('src/kernel/headlessStartup.ts', [
+      /bootstrap\/state\.js/,
+    ])
+  })
+
   test('daemon host no longer wires bridge runtime directly', async () => {
     await expectNotToContain('src/daemon/workerRegistry.ts', [
       /bridgeMain\.js/,

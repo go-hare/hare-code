@@ -1,7 +1,7 @@
 import figures from 'figures'
 import * as React from 'react'
 import { Suspense, use } from 'react'
-import { getSessionId } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import type { LocalJSXCommandContext } from '../../commands.js'
 import { useIsInsideModal } from '../../context/modalContext.js'
 import { Box, Text, useTheme } from '@anthropic/ink'
@@ -24,6 +24,11 @@ import {
 } from '../../utils/status.js'
 import type { ThemeName } from '../../utils/theme.js'
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
 
 type Props = {
   context: LocalJSXCommandContext

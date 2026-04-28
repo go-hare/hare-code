@@ -36,7 +36,7 @@ import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
 import { TeamStatus } from '../teams/TeamStatus.js'
 import { isInProcessEnabled } from '../../utils/swarm/backends/registry.js'
 import { useAppState, useAppStateStore } from 'src/state/AppState.js'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import HistorySearchInput from './HistorySearchInput.js'
 import { usePrStatus } from '../../hooks/usePrStatus.js'
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink'
@@ -62,6 +62,11 @@ const proactiveModule =
 const NO_OP_SUBSCRIBE = (_cb: () => void) => () => {}
 const NULL = () => null
 const MAX_VOICE_HINT_SHOWS = 3
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+const getIsRemoteMode = () =>
+  runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
 
 type Props = {
   exitMessage: {

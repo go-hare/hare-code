@@ -1,8 +1,7 @@
 import { isLangfuseEnabled } from './client.js'
 import { getCoreUserData, logForDebugging } from './runtimeDeps.js'
 import {
-  LangfuseOtelSpanAttributes,
-  startObservation,
+  getLangfuseSdkDeps,
   type LangfuseAgent,
   type LangfuseGeneration,
   type LangfuseSpan,
@@ -30,6 +29,7 @@ export function createTrace(params: {
 }): LangfuseSpan | null {
   if (!isLangfuseEnabled()) return null
   try {
+    const { LangfuseOtelSpanAttributes, startObservation } = getLangfuseSdkDeps()
     const traceName = params.name ?? (params.querySource ? `agent-run:${params.querySource}` : 'agent-run')
     const rootSpan = startObservation(traceName, {
       input: params.input,
@@ -86,6 +86,7 @@ export function recordLLMObservation(
 ): void {
   if (!rootSpan || !isLangfuseEnabled()) return
   try {
+    const { LangfuseOtelSpanAttributes, startObservation } = getLangfuseSdkDeps()
     const genName = PROVIDER_GENERATION_NAMES[params.provider] ?? `Chat${params.provider}`
 
     // Use the global startObservation directly instead of rootSpan.startObservation().
@@ -156,6 +157,7 @@ export function recordToolObservation(
 ): void {
   if (!rootSpan || !isLangfuseEnabled()) return
   try {
+    const { LangfuseOtelSpanAttributes, startObservation } = getLangfuseSdkDeps()
     // Use the global startObservation directly instead of rootSpan.startObservation().
     // The instance method only forwards asType and drops startTime,
     // causing tool execution duration to be 0.
@@ -209,6 +211,7 @@ export function createToolBatchSpan(
 ): LangfuseSpan | null {
   if (!rootSpan || !isLangfuseEnabled()) return null
   try {
+    const { LangfuseOtelSpanAttributes, startObservation } = getLangfuseSdkDeps()
     const batchSpan = startObservation(
       `tools`,
       {
@@ -262,6 +265,7 @@ export function createSubagentTrace(params: {
 }): LangfuseSpan | null {
   if (!isLangfuseEnabled()) return null
   try {
+    const { LangfuseOtelSpanAttributes, startObservation } = getLangfuseSdkDeps()
     const rootSpan = startObservation(`agent:${params.agentType}`, {
       input: params.input,
       metadata: {
@@ -304,6 +308,7 @@ export function createChildSpan(
 ): LangfuseSpan | null {
   if (!parentSpan || !isLangfuseEnabled()) return null
   try {
+    const { LangfuseOtelSpanAttributes, startObservation } = getLangfuseSdkDeps()
     const span = startObservation(
       params.name,
       {

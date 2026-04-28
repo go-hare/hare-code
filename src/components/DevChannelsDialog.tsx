@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react'
-import type { ChannelEntry } from '../bootstrap/state.js'
 import { Box, Text, Dialog } from '@anthropic/ink'
+import type { RuntimeAllowedChannelEntry as ChannelEntry } from '../runtime/contracts/state.js'
 import { gracefulShutdownSync } from '../utils/gracefulShutdown.js'
 import { Select } from './CustomSelect/index.js'
 

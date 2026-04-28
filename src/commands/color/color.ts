@@ -1,5 +1,5 @@
 import type { UUID } from 'crypto'
-import { getSessionId } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import type { ToolUseContext } from '../../Tool.js'
 import {
   AGENT_COLORS,
@@ -14,6 +14,11 @@ import {
   saveAgentColor,
 } from '../../utils/sessionStorage.js'
 import { isTeammate } from '../../utils/teammate.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
 
 const RESET_ALIASES = ['default', 'reset', 'none', 'gray', 'grey'] as const
 

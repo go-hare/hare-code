@@ -106,6 +106,19 @@ describe('createKernelRuntime', () => {
 
   test('creates an in-process runtime conversation facade', async () => {
     const objectTurnGate = createDeferred<void>()
+    const companionEventsBus = new Set<(event: unknown) => void>()
+    const kairosEventsBus = new Set<(event: unknown) => void>()
+    const companionState = {
+      seed: 'runtime-test-seed',
+      muted: false,
+      hasStoredCompanion: false,
+      profile: null,
+      companion: null,
+    }
+    const kairosQueue: Array<{ type: string; payload?: unknown }> = []
+    let kairosLastTickAt: string | undefined
+    let kairosSuspendedReason: string | undefined
+    let systemPromptInjection: string | null = null
     const executor: KernelRuntimeWireTurnExecutor = async function* (context) {
       if (context.command.turnId === 'turn-object') {
         await objectTurnGate.promise
@@ -138,6 +151,139 @@ describe('createKernelRuntime', () => {
         trustLevel: 'local',
         declaredCapabilities: ['test'],
       },
+      companionRuntime: {
+        async getState() {
+          return companionState
+        },
+        async dispatch(action) {
+          const event =
+            action.type === 'pet'
+              ? { type: 'petted', note: action.note, state: companionState }
+              : { type: 'state_changed', action: action.type, state: companionState }
+          for (const listener of companionEventsBus) {
+            listener(event)
+          }
+          return companionState
+        },
+        async reactToTurn() {
+          for (const listener of companionEventsBus) {
+            listener({
+              type: 'reaction_skipped',
+              reason: 'invalid_messages',
+              state: companionState,
+            })
+          }
+        },
+        onEvent(handler) {
+          companionEventsBus.add(handler)
+          return () => companionEventsBus.delete(handler)
+        },
+      },
+      kairosRuntime: {
+        async getStatus() {
+          return {
+            enabled: true,
+            runtimeEnabled: true,
+            suspended: kairosSuspendedReason !== undefined,
+            pendingEvents: kairosQueue.length,
+            lastTickAt: kairosLastTickAt,
+            suspendedReason: kairosSuspendedReason,
+          }
+        },
+        async enqueueEvent(event) {
+          kairosQueue.push(event)
+          const status = await this.getStatus()
+          for (const listener of kairosEventsBus) {
+            listener({ type: 'event_enqueued', event, status })
+          }
+        },
+        async tick(request) {
+          kairosLastTickAt = new Date().toISOString()
+          const drainedEvents = request?.drain === false ? [] : kairosQueue.splice(0)
+          const status = await this.getStatus()
+          for (const listener of kairosEventsBus) {
+            listener({ type: 'tick', request, drainedEvents, status })
+          }
+        },
+        async suspend(reason) {
+          kairosSuspendedReason = reason ?? 'manual'
+          const status = await this.getStatus()
+          for (const listener of kairosEventsBus) {
+            listener({ type: 'suspended', reason, status })
+          }
+        },
+        async resume(reason) {
+          kairosSuspendedReason = undefined
+          const status = await this.getStatus()
+          for (const listener of kairosEventsBus) {
+            listener({ type: 'resumed', reason, status })
+          }
+        },
+        onEvent(handler) {
+          kairosEventsBus.add(handler)
+          return () => kairosEventsBus.delete(handler)
+        },
+      },
+      memoryManager: {
+        async listMemory() {
+          return []
+        },
+        async readMemory(id) {
+          return {
+            id,
+            path: id,
+            source: 'project',
+            bytes: 0,
+            content: '',
+          }
+        },
+        async updateMemory(request) {
+          return {
+            id: request.id,
+            path: request.id,
+            source: 'project',
+            bytes: request.content.length,
+            content: request.content,
+          }
+        },
+      },
+      contextManager: {
+        async readContext() {
+          return {
+            system: {},
+            user: {},
+          }
+        },
+        async getGitStatus() {
+          return null
+        },
+        async getSystemPromptInjection() {
+          return systemPromptInjection
+        },
+        async setSystemPromptInjection(value) {
+          systemPromptInjection = value
+          return systemPromptInjection
+        },
+      },
+      sessionManager: {
+        async listSessions() {
+          return []
+        },
+        async resumeSession() {
+          return {
+            sessionId: 'unused',
+            messages: [],
+            turnInterruptionState: 'none' as const,
+          }
+        },
+        async getSessionTranscript() {
+          return {
+            sessionId: 'unused',
+            messages: [],
+            turnInterruptionState: 'none' as const,
+          }
+        },
+      },
     })
     const events: string[] = []
     const unsubscribe = runtime.onEvent(envelope => {
@@ -153,6 +299,66 @@ describe('createKernelRuntime', () => {
       await runtime.start()
       expect(runtime.state).toBe('ready')
       expect(runtime.host.id).toBe('host-test')
+      expect(typeof runtime.companion.dispatch).toBe('function')
+      expect(typeof runtime.kairos.getStatus).toBe('function')
+      expect(typeof runtime.memory.list).toBe('function')
+      expect(typeof runtime.context.read).toBe('function')
+      expect(typeof runtime.sessions.list).toBe('function')
+      await runtime.context.setSystemPromptInjection(null)
+      const companionEvents: string[] = []
+      const kairosEvents: string[] = []
+      const unsubscribeCompanion = runtime.companion.onEvent(event => {
+        companionEvents.push(event.type)
+      })
+      const unsubscribeKairos = runtime.kairos.onEvent(event => {
+        kairosEvents.push(event.type)
+      })
+      await runtime.companion.dispatch({ type: 'pet', note: 'sdk-test' })
+      await runtime.companion.reactToTurn({ messages: [] })
+      await runtime.kairos.enqueueEvent({ type: 'sdk.test' })
+      expect((await runtime.kairos.getStatus()).pendingEvents).toBe(1)
+      await runtime.kairos.tick()
+      expect((await runtime.kairos.getStatus()).pendingEvents).toBe(0)
+      expect(await runtime.memory.list()).toEqual(expect.any(Array))
+      expect(await runtime.context.read()).toEqual(
+        expect.objectContaining({
+          system: expect.any(Object),
+          user: expect.any(Object),
+        }),
+      )
+      expect(await runtime.context.getSystemPromptInjection()).toBeNull()
+      expect(
+        await runtime.context.setSystemPromptInjection('sdk-test'),
+      ).toBe('sdk-test')
+      expect(await runtime.context.getSystemPromptInjection()).toBe('sdk-test')
+      await runtime.context.setSystemPromptInjection(null)
+      expect(
+        await runtime.sessions.list({
+          cwd: '/tmp/kernel-runtime-test',
+          includeWorktrees: false,
+          limit: 1,
+        }),
+      ).toEqual(expect.any(Array))
+      const resumeTranscriptPath = join(
+        repoRoot,
+        'tests/fixtures/session-resume.jsonl',
+      )
+      const resumedConversation =
+        await runtime.sessions.resume(resumeTranscriptPath)
+      expect(resumedConversation.sessionId).toBe(resumeTranscriptPath)
+      expect(resumedConversation.workspacePath).toBe(
+        join(repoRoot, 'tests/fixtures'),
+      )
+      const resumedTerminal = await resumedConversation.runTurnAndWait(
+        'resumed hello',
+        { turnId: 'turn-resumed' },
+      )
+      expect(resumedTerminal.state).toBe('completed')
+      await resumedConversation.dispose()
+      expect(companionEvents).toContain('reaction_skipped')
+      expect(kairosEvents).toContain('tick')
+      unsubscribeCompanion()
+      unsubscribeKairos()
 
       const descriptors = await runtime.reloadCapabilities()
       expect(
@@ -1635,14 +1841,19 @@ describe('createKernelRuntime', () => {
     'creates a runtime using stdio transport config',
     async () => {
       const stderr: string[] = []
+      const workspace = await mkdtemp(
+        join(tmpdir(), 'kernel-runtime-stdio-workspace-'),
+      )
+      const memoryPath = join(workspace, 'CLAUDE.md')
+      await Bun.write(memoryPath, 'before')
       const runtime = await createKernelRuntime({
         id: 'runtime-stdio-test',
-        workspacePath: '/tmp/kernel-runtime-stdio-test',
+        workspacePath: workspace,
         transportConfig: {
           kind: 'stdio',
           command: 'bun',
-          args: ['run', 'src/entrypoints/kernel-runtime.ts'],
-          cwd: repoRoot,
+          args: ['run', join(repoRoot, 'src/entrypoints/kernel-runtime.ts')],
+          cwd: workspace,
           stderr: chunk => stderr.push(chunk),
         },
         host: {
@@ -1660,10 +1871,65 @@ describe('createKernelRuntime', () => {
           id: 'stdio-conversation-test',
         })
         expect(conversation.snapshot().state).toBe('ready')
+        await runtime.context.setSystemPromptInjection(null)
+        expect(await runtime.context.getSystemPromptInjection()).toBeNull()
+        expect(
+          await runtime.context.setSystemPromptInjection('stdio-injection'),
+        ).toBe('stdio-injection')
+        expect(await runtime.context.getSystemPromptInjection()).toBe(
+          'stdio-injection',
+        )
+        await runtime.kairos.enqueueEvent({ type: 'stdio.test' })
+        expect((await runtime.kairos.getStatus()).pendingEvents).toBe(1)
+        await runtime.kairos.tick()
+        expect((await runtime.kairos.getStatus()).pendingEvents).toBe(0)
+        expect((await runtime.memory.read(memoryPath)).content).toBe('before')
+        expect(
+          (
+            await runtime.memory.update({
+              id: memoryPath,
+              content: 'after',
+            })
+          ).content,
+        ).toBe('after')
+        expect(await Bun.file(memoryPath).text()).toBe('after')
+        expect(
+          await runtime.sessions.list({
+            cwd: workspace,
+            includeWorktrees: false,
+            limit: 1,
+          }),
+        ).toEqual(expect.any(Array))
+        const resumeTranscriptPath = join(workspace, 'resume-session.jsonl')
+        await Bun.write(
+          resumeTranscriptPath,
+          '{"type":"summary","summary":"resume fixture","timestamp":"2024-01-01T00:00:00.000Z"}\n',
+        )
+        const stdioCompanionEvents: string[] = []
+        const stdioKairosEvents: string[] = []
+        const unsubscribeCompanion = runtime.companion.onEvent(event => {
+          stdioCompanionEvents.push(event.type)
+        })
+        const unsubscribeKairos = runtime.kairos.onEvent(event => {
+          stdioKairosEvents.push(event.type)
+        })
+        await runtime.companion.dispatch({ type: 'pet', note: 'stdio' })
+        await runtime.kairos.enqueueEvent({ type: 'stdio.test.events' })
+        await runtime.kairos.tick()
+        const resumedConversation =
+          await runtime.sessions.resume(resumeTranscriptPath)
+        expect(resumedConversation.sessionId).toBe(resumeTranscriptPath)
+        expect(resumedConversation.workspacePath).toBe(workspace)
+        await resumedConversation.dispose()
+        await waitFor(() => stdioCompanionEvents.includes('petted'))
+        await waitFor(() => stdioKairosEvents.includes('tick'))
+        unsubscribeCompanion()
+        unsubscribeKairos()
         expect(stderr.join('')).toBe('')
         await conversation.dispose()
       } finally {
         await runtime.dispose()
+        await rm(workspace, { recursive: true, force: true })
       }
     },
     { timeout: 30_000 },

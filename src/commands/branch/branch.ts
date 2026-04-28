@@ -1,6 +1,6 @@
 import { randomUUID, type UUID } from 'crypto'
 import { mkdir, readFile, writeFile } from 'fs/promises'
-import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import type { LocalJSXCommandContext } from '../../commands.js'
 import { logEvent } from '../../services/analytics/index.js'
 import type { LocalJSXCommandOnDone } from '../../types/command.js'
@@ -22,6 +22,14 @@ import {
 } from '../../utils/sessionStorage.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { escapeRegExp } from '../../utils/stringUtils.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 type TranscriptEntry = TranscriptMessage & {
   forkedFrom?: {

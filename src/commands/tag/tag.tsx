@@ -1,12 +1,12 @@
 import chalk from 'chalk'
 import type { UUID } from 'crypto'
 import * as React from 'react'
-import { getSessionId } from '../../bootstrap/state.js'
 import type { CommandResultDisplay } from '../../commands.js'
 import { Select } from '../../components/CustomSelect/select.js'
 import { Dialog } from '@anthropic/ink'
 import { COMMON_HELP_ARGS, COMMON_INFO_ARGS } from '../../constants/xml.js'
 import { Box, Text } from '@anthropic/ink'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { logEvent } from '../../services/analytics/index.js'
 import type { LocalJSXCommandOnDone } from '../../types/command.js'
 import { recursivelySanitizeUnicode } from '../../utils/sanitization.js'
@@ -15,6 +15,9 @@ import {
   getTranscriptPath,
   saveTag,
 } from '../../utils/sessionStorage.js'
+
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
 
 function ConfirmRemoveTag({
   tagName,
@@ -62,7 +65,8 @@ function ToggleTagAndClose({
   const normalizedTag = recursivelySanitizeUnicode(tagName).trim()
 
   React.useEffect(() => {
-    const id = getSessionId() as UUID
+    const id =
+      runtimeSessionIdentityState.getSessionIdentity().sessionId as UUID
 
     if (!id) {
       onDone('No active session to tag', { display: 'system' })

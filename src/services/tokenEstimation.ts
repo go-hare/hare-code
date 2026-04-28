@@ -26,8 +26,13 @@ import { isToolReferenceBlock } from '../utils/toolSearch.js'
 import { getAPIMetadata, getExtraBodyParams } from './api/claude.js'
 import { getAnthropicClient } from './api/client.js'
 import { createTrace, endTrace, isLangfuseEnabled, recordLLMObservation } from './langfuse/index.js'
-import { getSessionId } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { withTokenCountVCR } from './vcr.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
 
 // Minimal values for token counting with thinking enabled
 // API constraint: max_tokens must be greater than thinking.budget_tokens

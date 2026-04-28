@@ -9,6 +9,7 @@ import type {
   RuntimeAgentRunDescriptor,
   RuntimeAgentSpawnRequest,
 } from '../runtime/contracts/agent.js'
+import { formatAgentId } from '../utils/agentId.js'
 
 export type KernelRuntimeAgentProcessExecutorOptions = {
   command?: string
@@ -69,15 +70,49 @@ export function createKernelRuntimeAgentProcessExecutor(
     const resolved = resolveAgentProcessCommand(options)
     const args = withAgentProcessArgs(
       resolved.args,
-      context.agent.agentType,
-      context.request.model ?? context.agent.model,
+      {
+        agentType: context.agent.agentType,
+        model: context.request.model ?? context.agent.model,
+        teammateName: context.request.name,
+        teamName: context.request.teamName,
+        parentSessionId:
+          stringMetadataField(context.request.metadata, 'parentSessionId') ??
+          process.env.CLAUDE_CODE_PARENT_SESSION_ID,
+      },
     )
+    const env = {
+      ...process.env,
+      ...options.env,
+      ...(context.request.teamName
+        ? { HARE_KERNEL_AGENT_TEAM_NAME: context.request.teamName }
+        : {}),
+      ...(context.request.name
+        ? {
+            HARE_KERNEL_AGENT_NAME: sanitizeCoordinatorAgentName(
+              context.request.name,
+            ),
+          }
+        : {}),
+      ...(context.request.mode
+        ? { HARE_KERNEL_AGENT_MODE: context.request.mode }
+        : {}),
+      ...(context.request.taskId
+        ? { HARE_KERNEL_AGENT_TASK_ID: context.request.taskId }
+        : {}),
+      ...(context.request.taskListId
+        ? { HARE_KERNEL_AGENT_TASK_LIST_ID: context.request.taskListId }
+        : {}),
+      ...(context.request.ownedFiles
+        ? {
+            HARE_KERNEL_AGENT_OWNED_FILES_JSON: JSON.stringify(
+              context.request.ownedFiles,
+            ),
+          }
+        : {}),
+    }
     const child = spawn(resolved.command, args, {
       cwd: options.cwd ?? context.request.cwd ?? context.run.cwd ?? context.cwd,
-      env: {
-        ...process.env,
-        ...options.env,
-      },
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     const stderr: string[] = []
@@ -163,6 +198,18 @@ export function createKernelRuntimeAgentProcessExecutor(
           executor: 'process',
           exitCode: exit.code,
           signal: exit.signal,
+          ...(context.request.teamName
+            ? { teamName: context.request.teamName }
+            : {}),
+          ...(context.request.name ? { name: context.request.name } : {}),
+          ...(context.request.mode ? { mode: context.request.mode } : {}),
+          ...(context.request.taskId ? { taskId: context.request.taskId } : {}),
+          ...(context.request.taskListId
+            ? { taskListId: context.request.taskListId }
+            : {}),
+          ...(context.request.ownedFiles
+            ? { ownedFiles: [...context.request.ownedFiles] }
+            : {}),
         },
       }
     } finally {
@@ -255,17 +302,55 @@ function resolveDefaultCliCommand(): AgentProcessCommand {
 
 function withAgentProcessArgs(
   args: readonly string[],
-  agentType: string | undefined,
-  model: string | undefined,
+  options: {
+    agentType: string | undefined
+    model: string | undefined
+    teammateName?: string
+    teamName?: string
+    parentSessionId?: string
+  },
 ): readonly string[] {
   const next = [...args]
-  if (agentType && !hasCliOption(next, '--agent')) {
-    next.push('--agent', agentType)
+  if (options.teamName) {
+    const agentName = sanitizeCoordinatorAgentName(
+      options.teammateName ?? options.agentType ?? 'worker',
+    )
+    if (!hasCliOption(next, '--agent-id')) {
+      next.push('--agent-id', formatAgentId(agentName, options.teamName))
+    }
+    if (!hasCliOption(next, '--agent-name')) {
+      next.push('--agent-name', agentName)
+    }
+    if (!hasCliOption(next, '--team-name')) {
+      next.push('--team-name', options.teamName)
+    }
+    if (options.parentSessionId && !hasCliOption(next, '--parent-session-id')) {
+      next.push('--parent-session-id', options.parentSessionId)
+    }
+    if (options.agentType && !hasCliOption(next, '--agent-type')) {
+      next.push('--agent-type', options.agentType)
+    }
   }
-  if (model && !hasCliOption(next, '--model')) {
-    next.push('--model', model)
+  if (options.agentType && !hasCliOption(next, '--agent')) {
+    next.push('--agent', options.agentType)
+  }
+  if (options.model && !hasCliOption(next, '--model')) {
+    next.push('--model', options.model)
   }
   return next
+}
+
+function sanitizeCoordinatorAgentName(value: string): string {
+  const trimmed = value.trim().replaceAll('@', '-')
+  return trimmed.length > 0 ? trimmed : 'worker'
+}
+
+function stringMetadataField(
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = metadata?.[key]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
 }
 
 function hasCliOption(args: readonly string[], name: string): boolean {

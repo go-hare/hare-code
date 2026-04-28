@@ -1,20 +1,10 @@
 import type { AgentDefinition } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import {
-  getTurnClassifierCount,
-  getTurnClassifierDurationMs,
-  getTurnHookCount,
-  getTurnHookDurationMs,
-  getTurnToolCount,
-  getTurnToolDurationMs,
-  resetTurnClassifierDuration,
-  resetTurnHookDuration,
-  resetTurnToolDuration,
-} from '../../../bootstrap/state.js'
-import {
   prepareReplRuntimeQuery,
   runReplRuntimeQuery,
   type ReplQueryRuntimeEvent,
 } from '../../../runtime/capabilities/execution/internal/replQueryRuntime.js'
+import { createRuntimeTurnMetricsStateProvider } from '../../../runtime/core/state/bootstrapProvider.js'
 import type { AppState } from '../../../state/AppStateStore.js'
 import type { Message as MessageType } from '../../../types/message.js'
 import type { EffortValue } from '../../../utils/effort.js'
@@ -28,6 +18,8 @@ import {
   shortCircuitReplNonQueryTurn,
   syncReplAllowedToolsForTurn,
 } from '../../replTurnShell.js'
+
+const runtimeTurnMetricsState = createRuntimeTurnMetricsStateProvider()
 
 type ReplMessageStateUpdater = (
   updater: (prev: MessageType[]) => MessageType[],
@@ -162,9 +154,7 @@ export async function runReplQueryTurnController(
 
   queryCheckpoint('query_context_loading_end')
   queryCheckpoint('query_query_start')
-  resetTurnHookDuration()
-  resetTurnToolDuration()
-  resetTurnClassifierDuration()
+  runtimeTurnMetricsState.resetTurnMetrics()
 
   await runReplRuntimeQuery({
     preparedQuery,
@@ -190,12 +180,14 @@ export async function runReplQueryTurnController(
   }
 
   if (process.env.USER_TYPE === 'ant' && host.apiMetricsRef.current.length > 0) {
-    const hookMs = getTurnHookDurationMs()
-    const hookCount = getTurnHookCount()
-    const toolMs = getTurnToolDurationMs()
-    const toolCount = getTurnToolCount()
-    const classifierMs = getTurnClassifierDurationMs()
-    const classifierCount = getTurnClassifierCount()
+    const {
+      hookDurationMs: hookMs,
+      hookCount,
+      toolDurationMs: toolMs,
+      toolCount,
+      classifierDurationMs: classifierMs,
+      classifierCount,
+    } = runtimeTurnMetricsState.getTurnMetrics()
 
     appendReplApiMetricsMessage({
       entries: host.apiMetricsRef.current,

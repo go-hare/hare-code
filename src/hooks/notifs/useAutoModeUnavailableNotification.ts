@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle'
 import { useEffect, useRef } from 'react'
 import { useNotifications } from 'src/context/notifications.js'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { useAppState } from '../../state/AppState.js'
 import type { PermissionMode } from '../../utils/permissions/PermissionMode.js'
 import {
@@ -9,6 +9,12 @@ import {
   getAutoModeUnavailableReason,
 } from '../../utils/permissions/permissionSetup.js'
 import { hasAutoModeOptIn } from '../../utils/settings/settings.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 /**
  * Shows a one-shot notification when the shift-tab carousel wraps past where
@@ -30,7 +36,7 @@ export function useAutoModeUnavailableNotification(): void {
     prevModeRef.current = mode
 
     if (!feature('TRANSCRIPT_CLASSIFIER')) return
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (shownRef.current) return
 
     const wrappedPastAutoSlot =

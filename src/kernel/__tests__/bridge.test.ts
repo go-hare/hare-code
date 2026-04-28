@@ -355,6 +355,32 @@ describe('kernel bridge surface', () => {
     expect(typeof deps.createInitialSession).toBe('function')
   })
 
+  test('updates working directory through the injected runtime path writer', async () => {
+    const runBridgeLoop = mock(async () => {})
+    const setOriginalCwd = mock((_cwd: string) => {})
+    const setCwd = mock((_cwd: string) => {})
+    const originalChdir = process.chdir
+    const mockChdir = mock((_dir: string) => {})
+    process.chdir = mockChdir as unknown as typeof process.chdir
+
+    try {
+      const deps = createBridgeHeadlessDeps(runBridgeLoop as never, {
+        pathStateWriter: {
+          setOriginalCwd,
+          setCwd,
+        },
+      })
+
+      await deps.setWorkingDirectory('/tmp/work/project')
+
+      expect(mockChdir).toHaveBeenCalledWith('/tmp/work/project')
+      expect(setOriginalCwd).toHaveBeenCalledWith('/tmp/work/project')
+      expect(setCwd).toHaveBeenCalledWith('/tmp/work/project')
+    } finally {
+      process.chdir = originalChdir
+    }
+  })
+
   test('delegates headless bridge entry through kernel-owned deps', async () => {
     const runBridgeLoop = mock(async () => {})
     const signal = new AbortController().signal

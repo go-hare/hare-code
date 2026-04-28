@@ -1,8 +1,8 @@
 import { relative } from 'path'
 import React from 'react'
-import { getCwdState } from '../../bootstrap/state.js'
 import { SandboxSettings } from '../../components/sandbox/SandboxSettings.js'
 import { color } from '@anthropic/ink'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { getPlatform } from '../../utils/platform.js'
 import {
   addToExcludedCommands,
@@ -14,6 +14,9 @@ import {
   getSettingsFilePathForSource,
 } from '../../utils/settings/settings.js'
 import type { ThemeName } from '../../utils/theme.js'
+
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
 
 export async function call(
   onDone: (result?: string) => void,
@@ -100,7 +103,10 @@ export async function call(
       // Get the local settings path and make it relative to cwd
       const localSettingsPath = getSettingsFilePathForSource('localSettings')
       const relativePath = localSettingsPath
-        ? relative(getCwdState(), localSettingsPath)
+        ? relative(
+            runtimeSessionIdentityState.getSessionIdentity().cwd,
+            localSettingsPath,
+          )
         : getProjectConfigDirDisplayPath('settings.local.json')
 
       const message = color(

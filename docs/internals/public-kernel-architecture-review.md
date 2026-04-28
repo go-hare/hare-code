@@ -1,6 +1,8 @@
 # Public Kernel 架构审查文档
 
-日期：2026-04-26
+日期：2026-04-28
+
+2026-04-28 复核：本文保留 public runtime API 的审查历史与分层分析，但封板结论已经更新。本轮“内核 + 开发接口”收口已完成：root surface、runtime/wire contract、capability lifecycle 与 developer-facing manager 均已打通，`companion` / `Kairos` / `memory` / `context` / `sessions` 已进入 package root 且连通 in-process / stdio runtime。剩余工作不再属于 blocker，而是 deeper parity，例如把 transcript 历史消息在 `sessions.resume()` 时自动 hydrate 进 live conversation state、以及未来非 NDJSON transport 扩展。
 
 2026-04-27 复核：本文保留 public runtime API 的审查结论，但内部 kernel
 主链已经继续前进一轮。`SessionRuntime.submitRuntimeTurn(...)` 已成为
@@ -45,11 +47,11 @@ interactive executor、默认 hook runner、plugin marketplace discovery/options
 
 当前代码已经形成 `Host -> Kernel -> Runtime` 的主方向，且 `@go-hare/hare-code/kernel` 具备可发布、可导入、受测试锁定的 root surface。
 
-但从完整 public kernel / runtime contract 的角度看，它仍处于“稳定 façade + runtime 下沉中”的阶段，还没有进入“完整 runtime contract 已建成”的阶段。
+截至 2026-04-28，若判断口径是“本轮内核与开发接口是否已经收口并可对外封板”，答案已经是肯定的。下文仍保留更早一轮的审查轨迹，用于解释为什么当时不能提前宣称完成。
 
 一句话判断：
 
-> 现在的代码适合作为 public kernel 的收口起点，不适合作为完整多宿主 runtime contract 的最终形态。
+> 当前代码已经达到本轮 public kernel / runtime contract 的封板状态；后续剩余的是更深的多宿主 parity 与体验增强，而不是 runtime/developer interface 缺口。
 
 架构上最强的部分：
 
@@ -59,7 +61,7 @@ interactive executor、默认 hook runner、plugin marketplace discovery/options
 - session lifecycle、registry、state provider 已经出现第一轮 runtime seam。
 - root surface 和 package smoke 已经有测试护栏。
 
-架构上最大的剩余缺口：
+下列条目保留为历史 review 轨迹；截至 2026-04-28，除 transcript hydrate 与非 NDJSON transport 之外，其余已不再构成 blocker：
 
 - `createKernelRuntime()` 第一层 public façade 已落地：默认使用
   in-process wire transport，也支持 `transportConfig.kind = 'stdio'` 启动
@@ -123,7 +125,7 @@ interactive executor、默认 hook runner、plugin marketplace discovery/options
   正式化为可导入 facade。剩余是替换更多 legacy UI callback，而不是继续扩
   legacy callback。
 - runtime state provider 仍大量代理 `bootstrap/state` singleton。
-- headless / direct-connect / bridge 的 session 模型还没有统一成完整 conversation runtime。
+- `sessions.resume()` 当前已返回 live `KernelConversation`，但 transcript 历史消息仍通过 `getTranscript()` 单独读取，尚未在 resume 时自动 hydrate 进 live conversation state。
 
 ## 2. 现有分层
 
@@ -386,7 +388,7 @@ flowchart TB
 | Server/direct-connect | contract 化较好 | 映射到统一 wire/event/permission | 中 |
 | Session core | runtime conversation / turn controller 与 active execution journal 已有 | public conversation/turn object model | 中 |
 | Permission | runtime broker 与 package-level broker facade 已有 | 替换更多 legacy UI callback | 中 |
-| Capability | descriptor/status/reload scope、默认 capability graph、resolver lazy loading、`capabilityIntent` demand-load、host-facing view/filter/group/reload 语义已进入当前 SDK surface；commands catalog + 默认 `execute_command` executor、tools catalog + 默认 `call_tool` executor、MCP readonly/status/reload + `connect_mcp` / `authenticate_mcp` / `set_mcp_enabled`、hooks catalog + `run_hook` / `register_hook`、skills catalog + `resolve_skill_context`、plugins status catalog + `set_plugin_enabled` / `install_plugin` / `uninstall_plugin` / `update_plugin`、agents registry + `spawn_agent` + process-backed run lifecycle、tasks list/get + `create_task` / `update_task` / `assign_task` 已进入 `KernelRuntime` | 完整 MCP auth interactive executor、默认 hook runner、plugin marketplace discovery/options、coordinator 专用 invocation contract 补齐 | 中 |
+| Capability | descriptor/status/reload scope、默认 capability graph、resolver lazy loading、`capabilityIntent` demand-load、host-facing view/filter/group/reload 语义已进入当前 SDK surface；commands catalog + 默认 `execute_command` executor、tools catalog + 默认 `call_tool` executor、MCP readonly/status/reload + `connect_mcp` / `authenticate_mcp` / `set_mcp_enabled`、hooks catalog + `run_hook` / `register_hook`、skills catalog + `resolve_skill_context`、plugins status catalog + `set_plugin_enabled` / `install_plugin` / `uninstall_plugin` / `update_plugin`、agents registry + `spawn_agent` + process-backed run lifecycle、tasks list/get + `create_task` / `update_task` / `assign_task` 已进入 `KernelRuntime`；companion / Kairos / memory / context / sessions 现已具备 runtime façade + wire transport 路径 | plugin marketplace 深化、coordinator 专用 invocation contract 与多宿主一致性继续补强 | 中 |
 | State ownership | provider seam 已有 | process-global singleton 退场 | 高 |
 | Tests | surface/package/contract 已有 | wire/concurrency/security contract | 中 |
 

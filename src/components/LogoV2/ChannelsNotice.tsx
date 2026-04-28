@@ -7,14 +7,16 @@
 import * as React from 'react'
 import { useState } from 'react'
 import {
-  type ChannelEntry,
-  getAllowedChannels,
-  getHasDevChannels,
-} from '../../bootstrap/state.js'
+  createRuntimeHeadlessControlStateProvider,
+} from '../../runtime/core/state/bootstrapProvider.js'
+import type { RuntimeAllowedChannelEntry as ChannelEntry } from '../../runtime/contracts/state.js'
 import { getBuiltinPlugins } from '../../plugins/builtinPlugins.js'
 import { Box, Text } from '@anthropic/ink'
 import { getMcpConfigsByScope } from '../../services/mcp/config.js'
 import { loadInstalledPluginsV2 } from '../../utils/plugins/installedPluginsManager.js'
+
+const runtimeHeadlessControlState =
+  createRuntimeHeadlessControlStateProvider()
 
 export function ChannelsNotice(): React.ReactNode {
   // Snapshot all reads at mount. This notice enters scrollback immediately
@@ -22,7 +24,9 @@ export function ChannelsNotice(): React.ReactNode {
   // reset.
   const [{ channels, list, unmatched }] =
     useState(() => {
-      const ch = getAllowedChannels()
+      const { allowedChannels } =
+        runtimeHeadlessControlState.getHeadlessControlState()
+      const ch = allowedChannels
       if (ch.length === 0)
         return {
           channels: ch,
@@ -41,10 +45,11 @@ export function ChannelsNotice(): React.ReactNode {
   // When both flags are passed, the list mixes entries and a single flag
   // name would be wrong for half of it. entry.dev distinguishes origin.
   const hasNonDev = channels.some(c => !c.dev)
+  const hasDevChannels = channels.some(c => c.dev)
   const flag =
-    getHasDevChannels() && hasNonDev
+    hasDevChannels && hasNonDev
       ? 'Channels'
-      : getHasDevChannels()
+      : hasDevChannels
         ? '--dangerously-load-development-channels'
         : '--channels'
 

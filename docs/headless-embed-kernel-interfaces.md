@@ -43,6 +43,14 @@
   任何迁移都不能导致 CLI 行为衰减。
 - 任何对外接口都按完整 runtime contract 设计；不以“先能跑一个 headless turn”为接口边界。
 
+截至 2026-04-28，本轮封板补充口径如下：
+
+> 文档中列出的 commands、tools、hooks、skills、plugins、MCP、agents、companion、Kairos、memory、context、sessions 已全部进入当前 `KernelRuntime` surface，并已连通 in-process / stdio runtime 与 wire protocol。它们不再是“后续阶段再开放”的能力域。
+
+当前唯一仍保留为深化项、但不影响封板的点是：
+
+> `sessions.resume()` 已返回 live `KernelConversation` 并允许继续运行 turn，但 transcript 历史消息仍通过 `getTranscript()` 独立读取，尚未在 resume 时自动 hydrate 到 live conversation state。
+
 ### 2.1 当前内部落地点：runtime capability materializer / refresh bundle
 
 当前落地点分两层：内部 kernel ownership 收口，以及第一批 public SDK / wire
@@ -1573,7 +1581,7 @@ Future 但尚未落地为代码：
    默认 hook runner、plugin marketplace discovery/options、
    完整 MCP auth interactive executor、真实 agent/coordinator executor 与
    coordinator invocation 仍按完整 contract 继续补齐。
-5. 再开放 companion、Kairos、memory/context/sessions。
+5. companion、Kairos、memory/context/sessions 已进入 `KernelRuntime` surface，并补齐 runtime/wire 调用路径；剩余工作只应是行为深化或宿主对齐，不再是“是否开放”。
 6. 增加 package-level smoke，确保 `@go-hare/hare-code/kernel` 可导入新增接口。
 7. 增加 runner/wire smoke，确保常驻 runtime 可被 Python/Go/机器人 host 通过协议使用。
 8. 桌面端实现 worker wrapper，worker 代码只 import `@go-hare/hare-code/kernel`，对 main 暴露 `KernelRuntimeWireProtocol`。

@@ -1,11 +1,17 @@
 import { feature } from 'bun:bundle'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { redownloadUserSettings } from '../../services/settingsSync/index.js'
 import type { LocalCommandCall } from '../../types/command.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { refreshActivePlugins } from '../../utils/plugins/refresh.js'
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js'
 import { plural } from '../../utils/stringUtils.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 export const call: LocalCommandCall = async (_args, context) => {
   // CCR: re-pull user settings before the cache sweep so enabledPlugins /
@@ -23,7 +29,7 @@ export const call: LocalCommandCall = async (_args, context) => {
   // can re-run /reload-plugins to retry. Startup path keeps its retries.
   if (
     feature('DOWNLOAD_USER_SETTINGS') &&
-    (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || getIsRemoteMode())
+    (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || isRemoteMode())
   ) {
     const applied = await redownloadUserSettings()
     // applyRemoteEntriesToLocal uses markInternalWrite to suppress the

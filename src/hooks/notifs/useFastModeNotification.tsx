@@ -10,7 +10,13 @@ import {
   onOrgFastModeChanged,
 } from 'src/utils/fastMode.js'
 import { formatDuration } from 'src/utils/format.js'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 const COOLDOWN_STARTED_KEY = 'fast-mode-cooldown-started'
 const COOLDOWN_EXPIRED_KEY = 'fast-mode-cooldown-expired'
@@ -24,7 +30,7 @@ export function useFastModeNotification(): void {
 
   // Notify when org fast mode status changes
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (!isFastModeEnabled()) {
       return
     }
@@ -52,7 +58,7 @@ export function useFastModeNotification(): void {
 
   // Notify when fast mode is rejected due to overage/extra usage issues
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (!isFastModeEnabled()) return
 
     return onFastModeOverageRejection(message => {
@@ -67,7 +73,7 @@ export function useFastModeNotification(): void {
   }, [addNotification, setAppState])
 
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (!isFastMode) {
       return
     }

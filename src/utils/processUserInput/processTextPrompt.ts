@@ -1,6 +1,6 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources'
 import { randomUUID } from 'crypto'
-import { setPromptId } from 'src/bootstrap/state.js'
+import { createRuntimeRequestDebugStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import type {
   AttachmentMessage,
   SystemMessage,
@@ -16,6 +16,8 @@ import {
   matchesNegativeKeyword,
 } from '../userPromptKeywords.js'
 
+const runtimeRequestDebugState = createRuntimeRequestDebugStateProvider()
+
 export function processTextPrompt(
   input: string | Array<ContentBlockParam>,
   imageContentBlocks: ContentBlockParam[],
@@ -29,7 +31,7 @@ export function processTextPrompt(
   shouldQuery: boolean
 } {
   const promptId = randomUUID()
-  setPromptId(promptId)
+  runtimeRequestDebugState.patchRequestDebugState({ promptId })
 
   const userPromptText =
     typeof input === 'string'

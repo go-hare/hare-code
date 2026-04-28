@@ -159,6 +159,7 @@ export class HeadlessConversationAdapter implements HeadlessConversation {
 
   async dispose(reason = 'Headless conversation disposed'): Promise<void> {
     await this.conversation.dispose(reason)
+    this.currentActiveTurnId = undefined
     this.emitConversationEvent('conversation.disposed', { reason })
     this.unsubscribe?.()
   }

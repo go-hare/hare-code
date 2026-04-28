@@ -1,10 +1,16 @@
 import * as React from 'react'
 import { useEffect, useState } from 'react'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { useNotifications } from '../../context/notifications.js'
 import { Text } from '@anthropic/ink'
 import { logForDebugging } from '../../utils/debug.js'
 import { onPluginsAutoUpdated } from '../../utils/plugins/pluginAutoupdate.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 /**
  * Hook that displays a notification when plugins have been auto-updated.
@@ -16,7 +22,7 @@ export function usePluginAutoupdateNotification(): void {
 
   // Register for autoupdate notifications
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     const unsubscribe = onPluginsAutoUpdated(plugins => {
       logForDebugging(
         `Plugin autoupdate notification: ${plugins.length} plugin(s) updated`,
@@ -29,7 +35,7 @@ export function usePluginAutoupdateNotification(): void {
 
   // Show notification when plugins are updated
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (updatedPlugins.length === 0) {
       return
     }

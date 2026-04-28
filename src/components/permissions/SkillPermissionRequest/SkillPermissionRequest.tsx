@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo } from 'react'
 import { logError } from 'src/utils/log.js'
-import { getOriginalCwd } from '../../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../../runtime/core/state/bootstrapProvider.js'
 import { Box, Text } from '@anthropic/ink'
 import { sanitizeToolNameForAnalytics } from '../../../services/analytics/metadata.js'
 import { SKILL_TOOL_NAME } from '@go-hare/builtin-tools/tools/SkillTool/constants.js'
@@ -19,6 +19,11 @@ import type { PermissionRequestProps } from '../PermissionRequest.js'
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js'
 
 type SkillOptionValue = 'yes' | 'yes-exact' | 'yes-prefix' | 'no'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 export function SkillPermissionRequest(
   props: PermissionRequestProps,

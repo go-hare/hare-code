@@ -64,7 +64,15 @@ import {
 import { parseUserSpecifiedModel } from 'src/utils/model/model.js'
 import { AwsAuthStatusManager } from 'src/utils/awsAuthStatusManager.js'
 import type { Stream } from 'src/utils/stream.js'
-import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
+import type {
+  RuntimeHeadlessControlStateProvider,
+  RuntimePromptStateProvider,
+  RuntimeSessionIdentityStateProvider,
+} from '../../../core/state/providers.js'
+
+type HeadlessControlStateProvider = RuntimeHeadlessControlStateProvider &
+  RuntimePromptStateProvider &
+  RuntimeSessionIdentityStateProvider
 
 type PromptValue = string | ContentBlockParam[]
 
@@ -453,7 +461,7 @@ export async function handleInitializeRequest(
   },
   agents: AgentDefinition[],
   getAppState: () => AppState,
-  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+  bootstrapStateProvider: HeadlessControlStateProvider,
 ): Promise<void> {
   if (initialized) {
     output.enqueue({

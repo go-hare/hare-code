@@ -4,7 +4,6 @@ import type {
   TextBlockParam,
 } from '@anthropic-ai/sdk/resources'
 import { randomUUID } from 'crypto'
-import { setPromptId } from 'src/bootstrap/state.js'
 import {
   builtInCommandNames,
   type Command,
@@ -25,9 +24,13 @@ import type {
   ProgressMessage,
   UserMessage,
 } from 'src/types/message.js'
-import { addInvokedSkill, getSessionId } from '../../bootstrap/state.js'
 import { COMMAND_MESSAGE_TAG, COMMAND_NAME_TAG } from '../../constants/xml.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
+import {
+  createRuntimeInvokedSkillStateProvider,
+  createRuntimeRequestDebugStateProvider,
+  createRuntimeSessionIdentityStateProvider,
+} from '../../runtime/core/state/bootstrapProvider.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
@@ -95,6 +98,11 @@ import type {
   ProcessUserInputBaseResult,
   ProcessUserInputContext,
 } from './processUserInput.js'
+
+const runtimeInvokedSkillState = createRuntimeInvokedSkillStateProvider()
+const runtimeRequestDebugState = createRuntimeRequestDebugStateProvider()
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
 
 type SlashCommandResult = ProcessUserInputBaseResult & {
   command: Command
@@ -470,7 +478,7 @@ export async function processSlashCommand(
     }
 
     const promptId = randomUUID()
-    setPromptId(promptId)
+    runtimeRequestDebugState.patchRequestDebugState({ promptId })
     logEvent('tengu_input_prompt', {})
     // Log user prompt event for OTLP
     void logOTelEvent('user_prompt', {
@@ -1175,7 +1183,8 @@ async function getMessagesForPromptSlashCommand(
   const hooksAllowedForThisSkill =
     !isRestrictedToPluginOnly('hooks') || isSourceAdminTrusted(command.source)
   if (command.hooks && hooksAllowedForThisSkill) {
-    const sessionId = getSessionId()
+    const sessionId =
+      runtimeSessionIdentityState.getSessionIdentity().sessionId
     registerSkillHooks(
       context.setAppState,
       sessionId,
@@ -1195,7 +1204,7 @@ async function getMessagesForPromptSlashCommand(
     .filter((b): b is TextBlockParam => b.type === 'text')
     .map(b => b.text)
     .join('\n\n')
-  addInvokedSkill(
+  runtimeInvokedSkillState.addInvokedSkill(
     command.name,
     skillPath,
     skillContent,

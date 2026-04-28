@@ -74,6 +74,7 @@ import {
 import type { AppState, QueryEngineConfig, Tools } from './runtimeDeps.js'
 import { createRuntimePermissionService } from '../../runtime/capabilities/permissions/RuntimePermissionService.js'
 import { RuntimeEventBus } from '../../runtime/core/events/RuntimeEventBus.js'
+import { createBootstrapStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 
 // ── Session state ─────────────────────────────────────────────────
 
@@ -527,6 +528,7 @@ export class AcpAgent implements Agent {
         const updated = updater(appState)
         Object.assign(appState, updated)
       },
+      bootstrapStateProvider: createBootstrapStateProvider(),
       readFileCache: new FileStateCache(500, 50 * 1024 * 1024),
       includePartialMessages: true,
       replayUserMessages: true,

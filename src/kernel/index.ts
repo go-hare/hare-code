@@ -64,6 +64,11 @@ export {
 } from '../server/types.js'
 export { runBridgeHeadless } from './bridge.js'
 export { runDaemonWorker } from './daemon.js'
+export { createKernelCompanionRuntime } from './companion.js'
+export { createKernelContextManager } from './context.js'
+export { createKernelKairosRuntime } from './kairos.js'
+export { createKernelMemoryManager } from './memory.js'
+export { createKernelSessionManager } from './sessions.js'
 export {
   KERNEL_CAPABILITY_FAMILIES,
   KERNEL_RUNTIME_EVENT_TAXONOMY,
@@ -85,6 +90,43 @@ export {
   toKernelCapabilityViews,
   KernelRuntimeRequestError,
 } from './runtime.js'
+export type {
+  KernelCompanionAction,
+  KernelCompanionEvent,
+  KernelCompanionReactionRequest,
+  KernelCompanionRuntime,
+  KernelCompanionRuntimeOptions,
+  KernelCompanionState,
+} from './companion.js'
+export type {
+  KernelContextManager,
+  KernelContextManagerOptions,
+  KernelContextSnapshot,
+} from './context.js'
+export type {
+  KernelKairosEvent,
+  KernelKairosExternalEvent,
+  KernelKairosRuntime,
+  KernelKairosRuntimeOptions,
+  KernelKairosStatus,
+  KernelKairosTickRequest,
+} from './kairos.js'
+export type {
+  KernelMemoryDescriptor,
+  KernelMemoryDocument,
+  KernelMemoryManager,
+  KernelMemoryManagerOptions,
+  KernelMemorySource,
+  KernelMemoryUpdateRequest,
+} from './memory.js'
+export type {
+  KernelSessionDescriptor,
+  KernelSessionListFilter,
+  KernelSessionManager,
+  KernelSessionManagerOptions,
+  KernelSessionResume,
+  KernelTranscript,
+} from './sessions.js'
 export type {
   KernelEventType,
   KernelKnownEvent,
@@ -155,6 +197,7 @@ export type {
   KernelRuntimeCapabilities,
   KernelRuntimeCommandDescriptor,
   KernelRuntimeCommandKind,
+  KernelRuntimeContextManager,
   KernelRuntimeCommands,
   KernelRuntimeEventCategory,
   KernelRuntimeEventReplayOptions,
@@ -163,6 +206,8 @@ export type {
   KernelRuntimeEventType,
   KernelRuntimeOptions,
   KernelRuntimePermissions,
+  KernelRuntimeSessionManager,
+  KernelRuntimeSessionResumeOptions,
   KernelRuntimeHooks,
   KernelRuntimeMcp,
   KernelRuntimePlugins,

@@ -15,10 +15,13 @@ import {
   logEvent,
 } from '../../services/analytics/index.js'
 import { createTrace, endTrace, isLangfuseEnabled } from '../../services/langfuse/index.js'
-import { getSessionId } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
 import { jsonParse } from '../../utils/slowOperations.js'
 import { asSystemPrompt } from '../../utils/systemPromptType.js'
+
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
 
 type GeneratedAgent = {
   identifier: string
@@ -151,7 +154,7 @@ export async function generateAgent(
 
   const langfuseTrace = isLangfuseEnabled()
     ? createTrace({
-        sessionId: getSessionId(),
+        sessionId: runtimeSessionIdentityState.getSessionIdentity().sessionId,
         model,
         provider: getAPIProvider(),
         name: 'agent-creation',

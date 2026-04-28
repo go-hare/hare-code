@@ -1,11 +1,17 @@
 import * as React from 'react'
 import { useEffect, useMemo } from 'react'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { useNotifications } from '../../context/notifications.js'
 import { Text } from '@anthropic/ink'
 import { useAppState } from '../../state/AppState.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { plural } from '../../utils/stringUtils.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 export function usePluginInstallationStatus(): void {
   const { addNotification } = useNotifications()
@@ -37,7 +43,7 @@ export function usePluginInstallationStatus(): void {
     }, [installationStatus])
 
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (!installationStatus) {
       logForDebugging('No installation status to monitor')
       return

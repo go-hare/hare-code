@@ -58,6 +58,20 @@ mock.module('../sdkDeps.js', () => ({
   startObservation: mockStartObservation,
   LangfuseOtelSpanAttributes: mockLangfuseOtelSpanAttributes,
   setLangfuseTracerProvider: mockSetLangfuseTracerProvider,
+  getLangfuseSdkDeps: () => ({
+    LangfuseSpanProcessor: class MockLangfuseSpanProcessor {
+      forceFlush = mockForceFlush
+      shutdown = mockShutdown
+      onStart = mock(() => {})
+      onEnd = mock(() => {})
+    },
+    BasicTracerProvider: class MockBasicTracerProvider {
+      constructor(_opts?: unknown) {}
+    },
+    startObservation: mockStartObservation,
+    LangfuseOtelSpanAttributes: mockLangfuseOtelSpanAttributes,
+    setLangfuseTracerProvider: mockSetLangfuseTracerProvider,
+  }),
 }))
 
 mock.module('../runtimeDeps.js', () => ({

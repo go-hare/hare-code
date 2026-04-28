@@ -1,11 +1,17 @@
 import { useEffect, useRef } from 'react'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import {
   type Notification,
   useNotifications,
 } from '../../context/notifications.js'
 import { useAppState } from '../../state/AppState.js'
 import { isInProcessTeammateTask } from '../../tasks/InProcessTeammateTask/types.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 function parseCount(notif: Notification): number {
   if (!('text' in notif)) {
@@ -58,7 +64,7 @@ export function useTeammateLifecycleNotification(): void {
   const seenCompletedRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     for (const [id, task] of Object.entries(tasks)) {
       if (!isInProcessTeammateTask(task)) {
         continue

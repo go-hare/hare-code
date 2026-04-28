@@ -5,8 +5,13 @@
 // names that would otherwise be misheard.
 
 import { basename } from 'path'
-import { getProjectRoot } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { getBranch } from '../utils/git.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getProjectRoot = () =>
+  runtimeSessionIdentityState.getSessionIdentity().projectRoot
 
 // ─── Global keyterms ────────────────────────────────────────────────
 

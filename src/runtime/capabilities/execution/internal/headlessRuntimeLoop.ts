@@ -251,7 +251,6 @@ import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { AppState } from 'src/state/AppStateStore.js'
-import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
 import {
   fileHistoryRewind,
   fileHistoryCanRestore,
@@ -286,6 +285,7 @@ import {
 import { prepareAutonomyTurnPrompt } from 'src/utils/autonomyAuthority.js'
 import {
   type HeadlessSessionContext,
+  type HeadlessSessionStateProvider,
   handleChannelEnable,
   handleSetPermissionMode,
   reregisterChannelHandlerAfterReconnect,
@@ -455,7 +455,7 @@ export async function runHeadlessRuntimeLoop(
     setSDKStatus?: (status: SDKStatus) => void
     runtimeEventSink?: HeadlessRuntimeEventSink
   },
-  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+  bootstrapStateProvider: HeadlessSessionStateProvider,
   session: HeadlessSessionContext,
 ): Promise<void> {
   if (

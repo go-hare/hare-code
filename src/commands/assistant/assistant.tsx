@@ -8,10 +8,12 @@ import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { findGitRoot } from '../../utils/git.js';
 import { buildCliLaunch, spawnCli } from '../../utils/cliLaunch.js';
-import { getKairosActive, setKairosActive } from '../../bootstrap/state.js';
+import { createRuntimeKairosStateProvider } from '../../runtime/core/state/bootstrapProvider.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { AppState } from '../../state/AppState.js';
+
+const runtimeKairosState = createRuntimeKairosStateProvider();
 
 /**
  * Compute the default directory for assistant daemon installation.
@@ -133,8 +135,8 @@ export async function call(
   const { setAppState, getAppState } = context;
 
   // First invocation: activate KAIROS
-  if (!getKairosActive()) {
-    setKairosActive(true);
+  if (!runtimeKairosState.getKairosActive()) {
+    runtimeKairosState.setKairosActive(true);
     setAppState(
       (prev: AppState) =>
         ({

@@ -13,6 +13,8 @@ import type {
 } from '../../contracts/runtime.js'
 import type {
   KernelRuntimeAssignTaskCommand,
+  KernelRuntimeDispatchCompanionActionCommand,
+  KernelRuntimeEnqueueKairosEventCommand,
   KernelRuntimeAuthenticateMcpCommand,
   KernelRuntimeCancelAgentRunCommand,
   KernelRuntimeCallToolCommand,
@@ -24,14 +26,21 @@ import type {
   KernelRuntimeDecidePermissionCommand,
   KernelRuntimeDisconnectHostCommand,
   KernelRuntimeExecuteCommandCommand,
+  KernelRuntimeGetCompanionStateCommand,
+  KernelRuntimeGetContextGitStatusCommand,
   KernelRuntimeGetAgentOutputCommand,
   KernelRuntimeGetAgentRunCommand,
+  KernelRuntimeGetKairosStatusCommand,
+  KernelRuntimeGetSessionTranscriptCommand,
+  KernelRuntimeGetSystemPromptInjectionCommand,
   KernelRuntimeGetTaskCommand,
   KernelRuntimeHostDisconnectPolicy,
   KernelRuntimeInstallPluginCommand,
   KernelRuntimeListAgentRunsCommand,
   KernelRuntimeListAgentsCommand,
   KernelRuntimeListCommandsCommand,
+  KernelRuntimeListMemoryCommand,
+  KernelRuntimeListSessionsCommand,
   KernelRuntimeListHooksCommand,
   KernelRuntimeListMcpResourcesCommand,
   KernelRuntimeListMcpServersCommand,
@@ -47,13 +56,22 @@ import type {
   KernelRuntimeReloadPluginsCommand,
   KernelRuntimeReloadSkillsCommand,
   KernelRuntimeRegisterHookCommand,
+  KernelRuntimeReactCompanionCommand,
+  KernelRuntimeReadContextCommand,
+  KernelRuntimeReadMemoryCommand,
+  KernelRuntimeResumeKairosCommand,
+  KernelRuntimeResumeSessionCommand,
   KernelRuntimeResolveSkillContextCommand,
+  KernelRuntimeSetSystemPromptInjectionCommand,
   KernelRuntimeRunHookCommand,
   KernelRuntimeSetMcpEnabledCommand,
   KernelRuntimeSetPluginEnabledCommand,
   KernelRuntimeSpawnAgentCommand,
+  KernelRuntimeSuspendKairosCommand,
   KernelRuntimeSubscribeEventsCommand,
+  KernelRuntimeTickKairosCommand,
   KernelRuntimeUninstallPluginCommand,
+  KernelRuntimeUpdateMemoryCommand,
   KernelRuntimeUpdatePluginCommand,
   KernelRuntimeUpdateTaskCommand,
 } from '../../contracts/wire.js'
@@ -350,6 +368,114 @@ export type KernelRuntimeWireClient = {
       'type'
     >,
   ): Promise<KernelRuntimeEnvelopeBase>
+  getCompanionState(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetCompanionStateCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  dispatchCompanionAction(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeDispatchCompanionActionCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  reactCompanion(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeReactCompanionCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getKairosStatus(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetKairosStatusCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  enqueueKairosEvent(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeEnqueueKairosEventCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  tickKairos(
+    command?: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeTickKairosCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  suspendKairos(
+    command?: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeSuspendKairosCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  resumeKairos(
+    command?: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeResumeKairosCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listMemory(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeListMemoryCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  readMemory(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeReadMemoryCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  updateMemory(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeUpdateMemoryCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  readContext(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeReadContextCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getContextGitStatus(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetContextGitStatusCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getSystemPromptInjection(
+    options?: Pick<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetSystemPromptInjectionCommand>,
+      'requestId' | 'metadata'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  setSystemPromptInjection(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeSetSystemPromptInjectionCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  listSessions(
+    command?: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeListSessionsCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  resumeSession(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeResumeSessionCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
+  getSessionTranscript(
+    command: Omit<
+      KernelRuntimeWireClientCommand<KernelRuntimeGetSessionTranscriptCommand>,
+      'type'
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase>
   publishHostEvent(
     event: KernelEvent,
     options?: { requestId?: string; metadata?: Record<string, unknown> },
@@ -616,6 +742,96 @@ export function createKernelRuntimeWireClient(
         ...command,
         type: 'assign_task',
       }),
+    getCompanionState: (command = {}) =>
+      request<KernelRuntimeGetCompanionStateCommand>({
+        ...command,
+        type: 'get_companion_state',
+      }),
+    dispatchCompanionAction: command =>
+      request<KernelRuntimeDispatchCompanionActionCommand>({
+        ...command,
+        type: 'dispatch_companion_action',
+      }),
+    reactCompanion: command =>
+      request<KernelRuntimeReactCompanionCommand>({
+        ...command,
+        type: 'react_companion',
+      }),
+    getKairosStatus: (command = {}) =>
+      request<KernelRuntimeGetKairosStatusCommand>({
+        ...command,
+        type: 'get_kairos_status',
+      }),
+    enqueueKairosEvent: command =>
+      request<KernelRuntimeEnqueueKairosEventCommand>({
+        ...command,
+        type: 'enqueue_kairos_event',
+      }),
+    tickKairos: (command = {}) =>
+      request<KernelRuntimeTickKairosCommand>({
+        ...command,
+        type: 'tick_kairos',
+      }),
+    suspendKairos: (command = {}) =>
+      request<KernelRuntimeSuspendKairosCommand>({
+        ...command,
+        type: 'suspend_kairos',
+      }),
+    resumeKairos: (command = {}) =>
+      request<KernelRuntimeResumeKairosCommand>({
+        ...command,
+        type: 'resume_kairos',
+      }),
+    listMemory: (command = {}) =>
+      request<KernelRuntimeListMemoryCommand>({
+        ...command,
+        type: 'list_memory',
+      }),
+    readMemory: command =>
+      request<KernelRuntimeReadMemoryCommand>({
+        ...command,
+        type: 'read_memory',
+      }),
+    updateMemory: command =>
+      request<KernelRuntimeUpdateMemoryCommand>({
+        ...command,
+        type: 'update_memory',
+      }),
+    readContext: (command = {}) =>
+      request<KernelRuntimeReadContextCommand>({
+        ...command,
+        type: 'read_context',
+      }),
+    getContextGitStatus: (command = {}) =>
+      request<KernelRuntimeGetContextGitStatusCommand>({
+        ...command,
+        type: 'get_context_git_status',
+      }),
+    getSystemPromptInjection: (command = {}) =>
+      request<KernelRuntimeGetSystemPromptInjectionCommand>({
+        ...command,
+        type: 'get_system_prompt_injection',
+      }),
+    setSystemPromptInjection: command =>
+      request<KernelRuntimeSetSystemPromptInjectionCommand>({
+        ...command,
+        type: 'set_system_prompt_injection',
+      }),
+    listSessions: (command = {}) =>
+      request<KernelRuntimeListSessionsCommand>({
+        ...command,
+        type: 'list_sessions',
+      }),
+    resumeSession: command =>
+      request<KernelRuntimeResumeSessionCommand>({
+        ...command,
+        type: 'resume_session',
+      }),
+    getSessionTranscript: command =>
+      request<KernelRuntimeGetSessionTranscriptCommand>({
+        ...command,
+        type: 'get_session_transcript',
+      }),
     publishHostEvent: (event, commandOptions = {}) =>
       request<Extract<KernelRuntimeCommand, { type: 'publish_host_event' }>>({
         type: 'publish_host_event',
@@ -632,10 +848,32 @@ export function createKernelRuntimeInProcessWireTransport(
   let closed = false
   const listeners = new Set<KernelRuntimeEventSink>()
   const liveSubscriptions: EventSubscriptionScope[] = []
-  const unsubscribe = options.router.eventBus.subscribe(envelope => {
+  const bufferedEvents: KernelRuntimeEnvelopeBase[] = []
+  let deliveryBarrierCount = 0
+  const bufferOrNotify = (envelope: KernelRuntimeEnvelopeBase): void => {
+    if (envelope.kind !== 'event') {
+      return
+    }
+    if (deliveryBarrierCount > 0) {
+      bufferedEvents.push(envelope)
+      return
+    }
     if (shouldDeliverEvent(liveSubscriptions, envelope)) {
       notifyListeners(listeners, envelope)
     }
+  }
+  const flushBufferedEvents = (): void => {
+    if (deliveryBarrierCount > 0 || bufferedEvents.length === 0) {
+      return
+    }
+    for (const envelope of bufferedEvents.splice(0)) {
+      if (shouldDeliverEvent(liveSubscriptions, envelope)) {
+        notifyListeners(listeners, envelope)
+      }
+    }
+  }
+  const unsubscribe = options.router.eventBus.subscribe(envelope => {
+    bufferOrNotify(envelope)
   })
 
   return {
@@ -645,33 +883,44 @@ export function createKernelRuntimeInProcessWireTransport(
         throw new Error('Kernel runtime wire transport is closed')
       }
 
-      const responses = await options.router.handleCommand(command)
-      let controlEnvelope: KernelRuntimeEnvelopeBase | undefined
-      for (const envelope of responses) {
+      deliveryBarrierCount += 1
+      try {
+        const responses = await options.router.handleCommand(command)
+        let controlEnvelope: KernelRuntimeEnvelopeBase | undefined
+        for (const envelope of responses) {
+          if (
+            envelope.requestId === command.requestId &&
+            isControlEnvelope(envelope)
+          ) {
+            controlEnvelope = envelope
+          }
+        }
         if (
-          envelope.requestId === command.requestId &&
-          isControlEnvelope(envelope)
+          command.type === 'subscribe_events' &&
+          controlEnvelope?.kind === 'ack'
         ) {
-          controlEnvelope = envelope
+          recordLiveSubscription(liveSubscriptions, command)
         }
-      }
-      if (
-        command.type === 'subscribe_events' &&
-        controlEnvelope?.kind === 'ack'
-      ) {
-        recordLiveSubscription(liveSubscriptions, command)
-      }
-      for (const envelope of responses) {
-        if (shouldDeliverEvent(liveSubscriptions, envelope)) {
-          notifyListeners(listeners, envelope)
+        for (const envelope of responses) {
+          bufferOrNotify(envelope)
         }
+        if (!controlEnvelope) {
+          throw new Error(
+            `Kernel runtime command ${command.requestId} completed without an ack, pong, or error envelope`,
+          )
+        }
+
+        return new Promise<KernelRuntimeEnvelopeBase>(resolve => {
+          resolve(controlEnvelope)
+          setTimeout(() => {
+            deliveryBarrierCount -= 1
+            flushBufferedEvents()
+          }, 0)
+        })
+      } catch (error) {
+        deliveryBarrierCount -= 1
+        throw error
       }
-      if (!controlEnvelope) {
-        throw new Error(
-          `Kernel runtime command ${command.requestId} completed without an ack, pong, or error envelope`,
-        )
-      }
-      return controlEnvelope
     },
     subscribe(handler) {
       listeners.add(handler)

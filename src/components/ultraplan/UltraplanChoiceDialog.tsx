@@ -9,7 +9,7 @@ import { Dialog } from '../design-system/Dialog.js';
 import { useSetAppState } from '../../state/AppState.js';
 import type { AppState } from '../../state/AppStateStore.js';
 import type { Message } from '../../types/message.js';
-import { getSessionId } from '../../bootstrap/state.js';
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js';
 import { clearConversation } from '../../commands/clear/conversation.js';
 import { createSystemMessage } from '../../utils/messages.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
@@ -21,6 +21,9 @@ import type { UUID } from 'crypto';
 import type { FileStateCache } from '../../utils/fileStateCache.js';
 import { getTranscriptPath } from 'src/utils/sessionStorage.js';
 import { useRegisterOverlay } from 'src/context/overlayContext.js';
+
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider();
 
 /** Maximum visible lines for the plan preview. */
 const MAX_VISIBLE_LINES = 24;
@@ -121,7 +124,8 @@ export function UltraplanChoiceDialog({
           });
           break;
         case 'fresh': 
-          const previousSessionId = getSessionId();
+          const previousSessionId =
+            runtimeSessionIdentityState.getSessionIdentity().sessionId;
           const transcriptSaved = await stat(getTranscriptPath()).then(() => true, () => false)
 
           await clearConversation({

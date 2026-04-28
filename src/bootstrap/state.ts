@@ -4,6 +4,7 @@ import type { logs } from '@opentelemetry/api-logs'
 import type { LoggerProvider } from '@opentelemetry/sdk-logs'
 import type { MeterProvider } from '@opentelemetry/sdk-metrics'
 import type { BasicTracerProvider } from '@opentelemetry/sdk-trace-base'
+import { AsyncLocalStorage } from 'async_hooks'
 import { realpathSync } from 'fs'
 import sumBy from 'lodash-es/sumBy.js'
 import { cwd } from 'process'
@@ -58,6 +59,9 @@ type State = {
   turnToolCount: number
   turnHookCount: number
   turnClassifierCount: number
+  outputTokensAtTurnStart: number
+  currentTurnTokenBudget: number | null
+  budgetContinuationCount: number
   startTime: number
   lastInteractionTime: number
   totalLinesAdded: number
@@ -287,6 +291,9 @@ function getInitialState(): State {
     turnToolCount: 0,
     turnHookCount: 0,
     turnClassifierCount: 0,
+    outputTokensAtTurnStart: 0,
+    currentTurnTokenBudget: null,
+    budgetContinuationCount: 0,
     startTime: Date.now(),
     lastInteractionTime: Date.now(),
     totalLinesAdded: 0,
@@ -425,8 +432,102 @@ function getInitialState(): State {
   return state
 }
 
+export type BootstrapStateSnapshot = State
+
+function cloneRegisteredHooks(
+  hooks: State['registeredHooks'],
+): State['registeredHooks'] {
+  if (!hooks) {
+    return null
+  }
+  return Object.fromEntries(
+    Object.entries(hooks).map(([event, matchers]) => [
+      event,
+      matchers ? [...matchers] : matchers,
+    ]),
+  ) as State['registeredHooks']
+}
+
+export function cloneBootstrapState(
+  source: BootstrapStateSnapshot = getActiveBootstrapState(),
+): BootstrapStateSnapshot {
+  return {
+    ...source,
+    modelUsage: { ...source.modelUsage },
+    flagSettingsInline: source.flagSettingsInline
+      ? { ...source.flagSettingsInline }
+      : null,
+    allowedSettingSources: [...source.allowedSettingSources],
+    agentColorMap: new Map(source.agentColorMap),
+    lastClassifierRequests: source.lastClassifierRequests
+      ? [...source.lastClassifierRequests]
+      : null,
+    inMemoryErrorLog: [...source.inMemoryErrorLog],
+    inlinePlugins: [...source.inlinePlugins],
+    sessionCronTasks: [...source.sessionCronTasks],
+    sessionCreatedTeams: new Set(source.sessionCreatedTeams),
+    initJsonSchema: source.initJsonSchema
+      ? { ...source.initJsonSchema }
+      : null,
+    registeredHooks: cloneRegisteredHooks(source.registeredHooks),
+    planSlugCache: new Map(source.planSlugCache),
+    teleportedSessionInfo: source.teleportedSessionInfo
+      ? { ...source.teleportedSessionInfo }
+      : null,
+    invokedSkills: new Map(
+      Array.from(source.invokedSkills, ([key, value]) => [
+        key,
+        { ...value },
+      ]),
+    ),
+    slowOperations: [...source.slowOperations],
+    sdkBetas: source.sdkBetas ? [...source.sdkBetas] : undefined,
+    systemPromptSectionCache: new Map(source.systemPromptSectionCache),
+    additionalDirectoriesForClaudeMd: [
+      ...source.additionalDirectoriesForClaudeMd,
+    ],
+    allowedChannels: source.allowedChannels.map(entry => ({ ...entry })),
+    promptCache1hAllowlist: source.promptCache1hAllowlist
+      ? [...source.promptCache1hAllowlist]
+      : null,
+  }
+}
+
+const GLOBAL_STATE: State = getInitialState()
+const bootstrapStateStorage = new AsyncLocalStorage<BootstrapStateSnapshot>()
+
+export function getActiveBootstrapState(): BootstrapStateSnapshot {
+  return bootstrapStateStorage.getStore() ?? GLOBAL_STATE
+}
+
+export function runWithBootstrapState<T>(
+  state: BootstrapStateSnapshot,
+  fn: () => T,
+): T {
+  return bootstrapStateStorage.run(state, fn)
+}
+
 // AND ESPECIALLY HERE
-const STATE: State = getInitialState()
+const STATE: State = new Proxy(GLOBAL_STATE, {
+  get(_target, property) {
+    return Reflect.get(getActiveBootstrapState(), property)
+  },
+  set(_target, property, value) {
+    return Reflect.set(getActiveBootstrapState(), property, value)
+  },
+  has(_target, property) {
+    return property in getActiveBootstrapState()
+  },
+  ownKeys() {
+    return Reflect.ownKeys(getActiveBootstrapState())
+  },
+  getOwnPropertyDescriptor(_target, property) {
+    return Reflect.getOwnPropertyDescriptor(
+      getActiveBootstrapState(),
+      property,
+    )
+  },
+})
 
 export function getSessionId(): SessionId {
   return STATE.sessionId
@@ -721,25 +822,22 @@ export function getTotalWebSearchRequests(): number {
   return sumBy(Object.values(STATE.modelUsage), 'webSearchRequests')
 }
 
-let outputTokensAtTurnStart = 0
-let currentTurnTokenBudget: number | null = null
 export function getTurnOutputTokens(): number {
-  return getTotalOutputTokens() - outputTokensAtTurnStart
+  return getTotalOutputTokens() - STATE.outputTokensAtTurnStart
 }
 export function getCurrentTurnTokenBudget(): number | null {
-  return currentTurnTokenBudget
+  return STATE.currentTurnTokenBudget
 }
-let budgetContinuationCount = 0
 export function snapshotOutputTokensForTurn(budget: number | null): void {
-  outputTokensAtTurnStart = getTotalOutputTokens()
-  currentTurnTokenBudget = budget
-  budgetContinuationCount = 0
+  STATE.outputTokensAtTurnStart = getTotalOutputTokens()
+  STATE.currentTurnTokenBudget = budget
+  STATE.budgetContinuationCount = 0
 }
 export function getBudgetContinuationCount(): number {
-  return budgetContinuationCount
+  return STATE.budgetContinuationCount
 }
 export function incrementBudgetContinuationCount(): void {
-  budgetContinuationCount++
+  STATE.budgetContinuationCount++
 }
 
 export function setHasUnknownModelCost(): void {
@@ -923,9 +1021,6 @@ export function resetStateForTests(): void {
   Object.entries(getInitialState()).forEach(([key, value]) => {
     STATE[key as keyof State] = value as never
   })
-  outputTokensAtTurnStart = 0
-  currentTurnTokenBudget = null
-  budgetContinuationCount = 0
   sessionSwitched.clear()
 }
 

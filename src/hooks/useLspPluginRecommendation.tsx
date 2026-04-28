@@ -12,11 +12,8 @@
 
 import { extname, join } from 'path'
 import * as React from 'react'
-import {
-  hasShownLspRecommendationThisSession,
-  setLspRecommendationShownThisSession,
-} from '../bootstrap/state.js'
 import { useNotifications } from '../context/notifications.js'
+import { createRuntimeLspRecommendationStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { useAppState } from '../state/AppState.js'
 import { saveGlobalConfig } from '../utils/config.js'
 import { logForDebugging } from '../utils/debug.js'
@@ -35,6 +32,9 @@ import {
   installPluginAndNotify,
   usePluginRecommendationBase,
 } from './usePluginRecommendationBase.js'
+
+const runtimeLspRecommendationState =
+  createRuntimeLspRecommendationStateProvider()
 
 // Threshold for detecting timeout vs explicit dismiss (ms)
 // Menu auto-dismisses at 30s, so anything over 28s is likely timeout
@@ -62,7 +62,8 @@ export function useLspPluginRecommendation(): UseLspPluginRecommendationResult {
 
   React.useEffect(() => {
     tryResolve(async () => {
-      if (hasShownLspRecommendationThisSession()) return null
+      if (runtimeLspRecommendationState.hasShownLspRecommendationThisSession())
+        return null
 
       const newFiles: string[] = []
       for (const file of trackedFiles) {
@@ -80,7 +81,9 @@ export function useLspPluginRecommendation(): UseLspPluginRecommendationResult {
             logForDebugging(
               `[useLspPluginRecommendation] Found match: ${match.pluginName} for ${filePath}`,
             )
-            setLspRecommendationShownThisSession(true)
+            runtimeLspRecommendationState.setLspRecommendationShownThisSession(
+              true,
+            )
             return {
               pluginId: match.pluginId,
               pluginName: match.pluginName,

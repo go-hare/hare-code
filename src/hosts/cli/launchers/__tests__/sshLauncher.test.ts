@@ -54,6 +54,8 @@ const mockStatsStore = {
   },
 } as never
 
+const actualMessages = await import('../../../../utils/messages.js')
+
 mock.module('../../../../ssh/createSSHSession.js', () => ({
   createSSHSession: mockCreateSSHSession,
   createLocalSSHSession: mockCreateLocalSSHSession,
@@ -65,6 +67,7 @@ mock.module('../../../../replLauncher.js', () => ({
 }))
 
 mock.module('../../../../utils/messages.js', () => ({
+  ...actualMessages,
   createSystemMessage: mockCreateSystemMessage,
   createUserMessage: mockCreateUserMessage,
 }))

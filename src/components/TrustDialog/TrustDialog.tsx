@@ -1,11 +1,11 @@
 import { homedir } from 'os'
 import React from 'react'
 import { logEvent } from 'src/services/analytics/index.js'
-import { setSessionTrustAccepted } from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js'
 import { Box, Link, Text } from '@anthropic/ink'
 import { useKeybinding } from '../../keybindings/useKeybinding.js'
+import { createRuntimeSessionPolicyStateWriter } from '../../runtime/core/state/bootstrapProvider.js'
 import { getMcpConfigsByScope } from '../../services/mcp/config.js'
 import { BASH_TOOL_NAME } from '@go-hare/builtin-tools/tools/BashTool/toolName.js'
 import {
@@ -26,6 +26,9 @@ import {
   getHooksSources,
   getOtelHeadersHelperSources,
 } from './utils.js'
+
+const runtimeSessionPolicyStateWriter =
+  createRuntimeSessionPolicyStateWriter()
 
 type Props = {
   onDone(): void
@@ -142,7 +145,7 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
       // For home directory, store trust in session memory only (not persisted to disk)
       // This allows hooks and other trust-requiring features to work during this session
       // while preserving the security intent of not permanently trusting home dir
-      setSessionTrustAccepted(true)
+      runtimeSessionPolicyStateWriter.setSessionTrustAccepted(true)
     } else {
       saveCurrentProjectConfig(current => ({
         ...current,

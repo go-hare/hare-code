@@ -6,7 +6,7 @@
  * The coordinator can only use Agent, SendMessage, and TaskStop.
  */
 import { feature } from 'bun:bundle'
-import { getOriginalCwd } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import type { ToolUseContext } from '../Tool.js'
 import type {
   Command,
@@ -15,6 +15,11 @@ import type {
 } from '../types/command.js'
 import { refreshAgentDefinitionsFromCurrentState } from '../utils/agentDefinitionsRefresh.js'
 import { saveMode } from '../utils/sessionStorage.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 const coordinator = {
   type: 'local-jsx',

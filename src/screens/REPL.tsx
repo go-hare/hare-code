@@ -1,13 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle';
 import { spawnSync } from 'child_process';
-import {
-  snapshotOutputTokensForTurn,
-  getCurrentTurnTokenBudget,
-  getTurnOutputTokens,
-  getBudgetContinuationCount,
-  getTotalInputTokens,
-} from '../bootstrap/state.js';
 import { parseTokenBudget } from '../utils/tokenBudget.js';
 import { count } from '../utils/array.js';
 import { dirname, join } from 'path';
@@ -55,23 +48,11 @@ import {
   READ_FILE_STATE_CACHE_SIZE,
 } from '../utils/fileStateCache.js';
 import {
-  updateLastInteractionTime,
-  getLastInteractionTime,
-  getOriginalCwd,
-  getProjectRoot,
-  getSessionId,
-  switchSession,
-  setCostStateForRestore,
-  getTurnHookDurationMs,
-  getTurnHookCount,
-  resetTurnHookDuration,
-  getTurnToolDurationMs,
-  getTurnToolCount,
-  resetTurnToolDuration,
-  getTurnClassifierDurationMs,
-  getTurnClassifierCount,
-  resetTurnClassifierDuration,
-} from '../bootstrap/state.js';
+  createRuntimeCostRestoreStateWriter,
+  createRuntimeInputTokenStateProvider,
+  createRuntimeSessionIdentityStateProvider,
+  createRuntimeUsageStateProvider,
+} from '../runtime/core/state/bootstrapProvider.js';
 import { asSessionId, asAgentId } from '../types/ids.js';
 import { logForDebugging } from '../utils/debug.js';
 import { QueryGuard } from '../utils/QueryGuard.js';
@@ -165,6 +146,44 @@ import { errorMessage, toError } from '../utils/errors.js';
 import { isHumanTurn } from '../utils/messagePredicates.js';
 import { logError } from '../utils/log.js';
 import { getCwd } from '../utils/cwd.js';
+
+const runtimeCostRestoreState = createRuntimeCostRestoreStateWriter();
+const runtimeInputTokenState = createRuntimeInputTokenStateProvider();
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider();
+const runtimeUsageState = createRuntimeUsageStateProvider();
+
+function getReplSessionIdentity() {
+  return runtimeSessionIdentityState.getSessionIdentity();
+}
+
+function snapshotReplTurnBudget(budget: number | null) {
+  runtimeUsageState.snapshotTurnBudget(budget);
+}
+
+function getReplCurrentTurnTokenBudget() {
+  return runtimeUsageState.getExecutionBudget().currentTurnTokenBudget;
+}
+
+function getReplTurnOutputTokens() {
+  return runtimeUsageState.getExecutionBudget().turnOutputTokens;
+}
+
+function getReplBudgetContinuationCount() {
+  return runtimeUsageState.getExecutionBudget().budgetContinuationCount;
+}
+
+function getReplTotalInputTokens() {
+  return runtimeInputTokenState.getTotalInputTokens();
+}
+
+function markReplInteraction(immediate = true) {
+  runtimeUsageState.markInteraction(immediate);
+}
+
+function getReplLastInteractionTime() {
+  return runtimeUsageState.getUsageSnapshot().lastInteractionTime;
+}
+
 // Dead code elimination: conditional imports
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const useVoiceIntegration: typeof import('../hooks/useVoiceIntegration.js').useVoiceIntegration = feature('VOICE_MODE')
@@ -866,7 +885,10 @@ export function REPL({
   const [localCommands, setLocalCommands] = useState(initialCommands);
 
   // Watch for skill file changes and reload all commands
-  useSkillsChange(isRemoteSession ? undefined : getProjectRoot(), setLocalCommands);
+  useSkillsChange(
+    isRemoteSession ? undefined : getReplSessionIdentity().projectRoot,
+    setLocalCommands,
+  );
 
   // Track proactive mode for tools dependency - SleepTool filters by proactive state
   const proactiveActive = React.useSyncExternalStore(
@@ -1311,7 +1333,9 @@ export function REPL({
   // the agent name, which wins over the Haiku-extracted topic;
   // all fall back to the product name.
   const terminalTitleFromRename = useAppState(s => s.settings.terminalTitleFromRename) !== false;
-  const sessionTitle = terminalTitleFromRename ? getCurrentSessionTitle(getSessionId()) : undefined;
+  const sessionTitle = terminalTitleFromRename
+    ? getCurrentSessionTitle(getReplSessionIdentity().sessionId)
+    : undefined;
   const [haikuTitle, setHaikuTitle] = useState<string>();
   // Gates the one-shot Haiku call that generates the tab title. Seeded true
   // on resume (initialMessages present) so we don't re-title a resumed
@@ -1606,7 +1630,7 @@ export function REPL({
   const transportRuntimeEventFacade = useMemo(
     () =>
       createKernelRuntimeEventFacade({
-        runtimeId: `repl-transport:${getSessionId()}`,
+        runtimeId: `repl-transport:${getReplSessionIdentity().sessionId}`,
         maxReplayEvents: 512,
       }),
     [],
@@ -2093,7 +2117,7 @@ export function REPL({
             // Re-derive agent definitions after mode switch so built-in agents
             // reflect the new coordinator/normal mode
             const freshAgentDefs = await refreshRuntimeAgentDefinitions({
-              cwd: getOriginalCwd(),
+              cwd: getReplSessionIdentity().originalCwd,
               activeFromAll: true,
             });
 
@@ -2159,7 +2183,10 @@ export function REPL({
         void updateSessionName(log.agentName);
 
         // Restore read file state from the message history
-        restoreReadFileState(messages, log.projectPath ?? getOriginalCwd());
+        restoreReadFileState(
+          messages,
+          log.projectPath ?? getReplSessionIdentity().originalCwd,
+        );
 
         // Clear any active loading state (no queryId since we're not in a query)
         resetLoadingState();
@@ -2180,7 +2207,10 @@ export function REPL({
         // Switch session (id + project dir atomically). fullPath may point to
         // a different project (cross-worktree, /branch); null derives from
         // current originalCwd.
-        switchSession(asSessionId(sessionId), log.fullPath ? dirname(log.fullPath) : null);
+        runtimeSessionIdentityState.switchSession(
+          asSessionId(sessionId),
+          log.fullPath ? dirname(log.fullPath) : null,
+        );
         // Rename asciicast recording to match the resumed session ID
         const { renameRecordingForSession } = await import('../utils/asciicast.js');
         await renameRecordingForSession();
@@ -2238,7 +2268,7 @@ export function REPL({
 
         // Restore target session's costs from the data we read earlier
         if (targetSessionCosts) {
-          setCostStateForRestore(targetSessionCosts);
+          runtimeCostRestoreState.setCostStateForRestore(targetSessionCosts);
         }
 
         // Reconstruct replacement state for the resumed session. Runs after
@@ -2319,7 +2349,7 @@ export function REPL({
   // where messages are passed as props rather than through the resume callback
   useEffect(() => {
     if (initialMessages && initialMessages.length > 0) {
-      restoreReadFileState(initialMessages, getOriginalCwd());
+      restoreReadFileState(initialMessages, getReplSessionIdentity().originalCwd);
       void restoreRemoteAgentTasks({
         abortController: new AbortController(),
         getAppState: () => store.getState(),
@@ -2507,7 +2537,7 @@ export function REPL({
       resetLoadingState,
       shouldClearTokenBudget,
       clearTokenBudget: () => {
-        snapshotOutputTokensForTurn(null);
+        snapshotReplTurnBudget(null);
       },
       abortToolUseConfirm: () => {
         toolUseConfirmQueue[0]?.onAbort();
@@ -3306,8 +3336,8 @@ export function REPL({
           messagesRef,
           resetTimingRefs,
           responseLengthRef,
-          snapshotOutputTokensForTurn,
-          getCurrentTurnTokenBudget,
+          snapshotOutputTokensForTurn: snapshotReplTurnBudget,
+          getCurrentTurnTokenBudget: getReplCurrentTurnTokenBudget,
           parseTokenBudget,
           apiMetricsRef,
           setStreamingToolUses,
@@ -3344,8 +3374,8 @@ export function REPL({
           setAbortController,
           loadingStartTimeRef,
           totalPausedMsRef,
-          getTurnOutputTokens,
-          getBudgetContinuationCount,
+          getTurnOutputTokens: getReplTurnOutputTokens,
+          getBudgetContinuationCount: getReplBudgetContinuationCount,
           proactiveActive: proactiveActive === true,
           hasRunningSwarmAgents: () =>
             getAllInProcessTeammateTasks(store.getState().tasks).some(
@@ -3406,7 +3436,7 @@ export function REPL({
         bashToolsProcessedIdx.current = 0;
 
         if (oldPlanSlug) {
-          setPlanSlug(getSessionId(), oldPlanSlug);
+          setPlanSlug(getReplSessionIdentity().sessionId, oldPlanSlug);
         }
       },
       setAppState,
@@ -3513,7 +3543,7 @@ export function REPL({
             variant: idleHintShownRef.current as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             idleMinutes: Math.round((Date.now() - lastQueryCompletionTimeRef.current) / 60_000),
             messageCount: messagesRef.current.length,
-            totalInputTokens: getTotalInputTokens(),
+            totalInputTokens: getReplTotalInputTokens(),
           });
           idleHintShownRef.current = false;
         }
@@ -3647,7 +3677,7 @@ export function REPL({
           !speculationAccept &&
           !input.trim().startsWith('/') &&
           lastQueryCompletionTimeRef.current > 0 &&
-          getTotalInputTokens() >= tokenThreshold
+          getReplTotalInputTokens() >= tokenThreshold
         ) {
           const idleMs = Date.now() - lastQueryCompletionTimeRef.current;
           const idleMinutes = idleMs / 60_000;
@@ -3751,7 +3781,7 @@ export function REPL({
           {
             setMessages,
             readFileState,
-            cwd: getOriginalCwd(),
+            cwd: getReplSessionIdentity().originalCwd,
           },
         );
         if (queryRequired) {
@@ -4326,7 +4356,7 @@ export function REPL({
   // Must be immediate because useEffect runs after the Ink render cycle flush.
   useEffect(() => {
     activityManager.recordUserActivity();
-    updateLastInteractionTime(true);
+    markReplInteraction(true);
   }, [inputValue, submitCount]);
 
   useEffect(() => {
@@ -4350,7 +4380,7 @@ export function REPL({
     const timer = setTimeout(
       (lastQueryCompletionTime, isLoading, toolJSX, focusedInputDialogRef, terminal) => {
         // Check if user has interacted since the response ended
-        const lastUserInteraction = getLastInteractionTime();
+        const lastUserInteraction = getReplLastInteractionTime();
 
         if (lastUserInteraction > lastQueryCompletionTime) {
           // User has interacted since Claude finished - they're not idle, don't notify
@@ -4397,7 +4427,7 @@ export function REPL({
     if (getGlobalConfig().idleReturnDismissed) return;
 
     const tokenThreshold = Number(process.env.CLAUDE_CODE_IDLE_TOKEN_THRESHOLD ?? 100_000);
-    if (getTotalInputTokens() < tokenThreshold) return;
+    if (getReplTotalInputTokens() < tokenThreshold) return;
 
     const idleThresholdMs = Number(process.env.CLAUDE_CODE_IDLE_THRESHOLD_MINUTES ?? 75) * 60_000;
     const elapsed = Date.now() - lastQueryCompletionTime;
@@ -4406,7 +4436,7 @@ export function REPL({
     const timer = setTimeout(
       (lqct, addNotif, msgsRef, mode, hintRef) => {
         if (msgsRef.current.length === 0) return;
-        const totalTokens = getTotalInputTokens();
+        const totalTokens = getReplTotalInputTokens();
         const formattedTokens = formatTokens(totalTokens);
         const idleMinutes = (Date.now() - lqct) / 60_000;
         addNotif({
@@ -5266,7 +5296,7 @@ export function REPL({
           {focusedInputDialog === 'idle-return' && idleReturnPending && (
             <IdleReturnDialog
               idleMinutes={idleReturnPending.idleMinutes}
-              totalInputTokens={getTotalInputTokens()}
+              totalInputTokens={getReplTotalInputTokens()}
               onDone={async action => {
                 const pending = idleReturnPending;
                 setIdleReturnPending(null);
@@ -5274,7 +5304,7 @@ export function REPL({
                   action: action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                   idleMinutes: Math.round(pending.idleMinutes),
                   messageCount: messagesRef.current.length,
-                  totalInputTokens: getTotalInputTokens(),
+                  totalInputTokens: getReplTotalInputTokens(),
                 });
                 if (action === 'dismiss') {
                   setInputValue(pending.input);

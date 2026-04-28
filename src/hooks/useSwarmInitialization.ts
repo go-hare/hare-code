@@ -8,7 +8,7 @@
  */
 
 import { useEffect } from 'react'
-import { getSessionId } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import type { AppState } from '../state/AppState.js'
 import type { Message } from '../types/message.js'
 import { isAgentSwarmsEnabled } from '../utils/agentSwarmsEnabled.js'
@@ -16,6 +16,11 @@ import { initializeTeammateContextFromSession } from '../utils/swarm/reconnectio
 import { readTeamFile } from '../utils/swarm/teamHelpers.js'
 import { initializeTeammateHooks } from '../utils/swarm/teammateInit.js'
 import { getDynamicTeamContext } from '../utils/teammate.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
 
 type SetAppState = (f: (prevState: AppState) => AppState) => void
 

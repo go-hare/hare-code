@@ -41,14 +41,19 @@ const EXPECTED_KERNEL_EXPORTS = [
   'createDefaultKernelHeadlessEnvironment',
   'createDefaultKernelRuntimeWireRouter',
   'createDirectConnectSession',
+  'createKernelCompanionRuntime',
+  'createKernelContextManager',
   'createKernelHeadlessSession',
   'createKernelHeadlessStore',
+  'createKernelKairosRuntime',
+  'createKernelMemoryManager',
   'createKernelPermissionBroker',
   'createKernelRuntimeEventFacade',
   'createKernelRuntimeInProcessWireTransport',
   'createKernelRuntimeStdioWireTransport',
   'createKernelRuntimeWireClient',
   'createKernelRuntime',
+  'createKernelSessionManager',
   'createKernelSession',
   'getDirectConnectErrorMessage',
   'getKernelEventFromEnvelope',
@@ -157,6 +162,16 @@ describe('kernel package entry', () => {
     expect(declaration).toContain('createKernelPermissionBroker(')
     expect(declaration).toContain('export type KernelRuntime = {')
     expect(declaration).toContain('createKernelRuntime(')
+    expect(declaration).toContain('export type KernelCompanionRuntime = {')
+    expect(declaration).toContain('createKernelCompanionRuntime(')
+    expect(declaration).toContain('export type KernelKairosRuntime = {')
+    expect(declaration).toContain('createKernelKairosRuntime(')
+    expect(declaration).toContain('export type KernelMemoryManager = {')
+    expect(declaration).toContain('createKernelMemoryManager(')
+    expect(declaration).toContain('export type KernelContextManager = {')
+    expect(declaration).toContain('createKernelContextManager(')
+    expect(declaration).toContain('export type KernelSessionManager = {')
+    expect(declaration).toContain('createKernelSessionManager(')
     expect(declaration).toContain(
       'export declare class KernelRuntimeRequestError extends Error',
     )
@@ -453,5 +468,35 @@ describe('kernel package entry', () => {
     expect(packageEntry.KernelRuntimeRequestError).toBe(
       kernel.KernelRuntimeRequestError,
     )
+    expect(
+      Object.is(
+        packageEntry.createKernelCompanionRuntime,
+        kernel.createKernelCompanionRuntime,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        packageEntry.createKernelContextManager,
+        kernel.createKernelContextManager,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        packageEntry.createKernelKairosRuntime,
+        kernel.createKernelKairosRuntime,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        packageEntry.createKernelMemoryManager,
+        kernel.createKernelMemoryManager,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        packageEntry.createKernelSessionManager,
+        kernel.createKernelSessionManager,
+      ),
+    ).toBe(true)
   })
 })

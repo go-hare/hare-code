@@ -1,9 +1,14 @@
 import { basename, sep } from 'path'
 import React, { type ReactNode } from 'react'
-import { getOriginalCwd } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { Text } from '@anthropic/ink'
 import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js'
 import { permissionRuleExtractPrefix } from '../../utils/permissions/shellRuleMatching.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 function commandListDisplay(commands: string[]): ReactNode {
   switch (commands.length) {

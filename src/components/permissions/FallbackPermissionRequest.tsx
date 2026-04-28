@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react'
-import { getOriginalCwd } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { Box, Text, useTheme } from '@anthropic/ink'
 import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.js'
 import { env } from '../../utils/env.js'
@@ -17,6 +17,11 @@ import type { PermissionRequestProps } from './PermissionRequest.js'
 import { PermissionRuleExplanation } from './PermissionRuleExplanation.js'
 
 type FallbackOptionValue = 'yes' | 'yes-dont-ask-again' | 'no'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 export function FallbackPermissionRequest({
   toolUseConfirm,

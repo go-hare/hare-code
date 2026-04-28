@@ -96,6 +96,20 @@ export type RuntimeRequestDebugStatePatch = {
   lastApiCompletionTimestamp?: number
 }
 
+export type RuntimeTeleportedSessionInfo = {
+  isTeleported: boolean
+  hasLoggedFirstMessage: boolean
+  sessionId: string | null
+}
+
+export type RuntimeInvokedSkillInfo = {
+  skillName: string
+  skillPath: string
+  content: string
+  invokedAt: number
+  agentId: string | null
+}
+
 export type RuntimeAllowedChannelEntry =
   | { kind: 'plugin'; name: string; marketplace: string; dev?: boolean }
   | { kind: 'server'; name: string; dev?: boolean }
@@ -126,28 +140,85 @@ export type RuntimeExecutionAppStateSlice = Pick<
   'toolPermissionContext' | 'fileHistory' | 'attribution' | 'fastMode'
 >
 
-export interface RuntimeBootstrapStateProvider {
+export interface RuntimeSessionIdentityStateProvider {
   getSessionIdentity(): RuntimeSessionIdentity
   regenerateSessionId(options?: { setCurrentAsParent?: boolean }): SessionId
   switchSession(sessionId: SessionId, projectDir?: string | null): void
   setCwd(cwd: string): void
   setProjectRoot(projectRoot: string): void
+  isSessionPersistenceDisabled(): boolean
+}
+
+export interface RuntimeUsageStateProvider {
   getUsageSnapshot(): RuntimeUsageSnapshot
   markInteraction(immediate?: boolean): void
+  recordApiDuration(
+    durationMs: number,
+    durationWithoutRetriesMs: number,
+  ): void
   getExecutionBudget(): RuntimeExecutionBudgetState
   snapshotTurnBudget(budget: number | null): void
   incrementBudgetContinuationCount(): void
+}
+
+export interface RuntimePromptStateProvider {
   getPromptState(): RuntimeExecutionPromptState
   patchPromptState(patch: RuntimeExecutionPromptStatePatch): void
+}
+
+export interface RuntimeRequestDebugStateProvider {
   getRequestDebugState(): RuntimeRequestDebugState
   patchRequestDebugState(patch: RuntimeRequestDebugStatePatch): void
+}
+
+export interface RuntimeHeadlessControlStateProvider {
   getHeadlessControlState(): RuntimeHeadlessControlState
   patchHeadlessControlState(patch: RuntimeHeadlessControlStatePatch): void
   registerHookCallbacks(hooks: RuntimeRegisteredHookCallbacks): void
+}
+
+export interface RuntimeCompactionStateProvider {
   markPostCompaction(): void
   consumePostCompaction(): boolean
-  isSessionPersistenceDisabled(): boolean
 }
+
+export interface RuntimeTeleportStateProvider {
+  getTeleportedSessionInfo(): RuntimeTeleportedSessionInfo | null
+  markFirstTeleportMessageLogged(): void
+}
+
+export interface RuntimeInvokedSkillStateProvider {
+  addInvokedSkill(
+    skillName: string,
+    skillPath: string,
+    content: string,
+    agentId?: string | null,
+  ): void
+  getInvokedSkillsForAgent(
+    agentId: string | undefined | null,
+  ): Map<string, RuntimeInvokedSkillInfo>
+}
+
+export interface RuntimeBootstrapStateScope {
+  runWithState<T>(fn: () => T): T
+}
+
+export interface RuntimeBootstrapStateProvider
+  extends RuntimeBootstrapStateScope,
+    RuntimeSessionIdentityStateProvider,
+    RuntimeUsageStateProvider,
+    RuntimePromptStateProvider,
+    RuntimeRequestDebugStateProvider,
+    RuntimeHeadlessControlStateProvider,
+    RuntimeCompactionStateProvider,
+    RuntimeTeleportStateProvider,
+    RuntimeInvokedSkillStateProvider {}
+
+export interface RuntimeExecutionSessionStateProvider
+  extends Pick<
+    RuntimeBootstrapStateProvider,
+    'getSessionIdentity' | 'isSessionPersistenceDisabled' | 'runWithState'
+  > {}
 
 export interface RuntimeAppStateProvider {
   getExecutionState(): RuntimeExecutionAppStateSlice
@@ -172,5 +243,10 @@ export interface RuntimeAppStateProvider {
 
 export interface RuntimeStateProviders {
   bootstrap: RuntimeBootstrapStateProvider
+  app: RuntimeAppStateProvider
+}
+
+export interface RuntimeExecutionStateProviders {
+  bootstrap: RuntimeExecutionSessionStateProvider
   app: RuntimeAppStateProvider
 }

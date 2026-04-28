@@ -13,7 +13,10 @@ import type {
 } from '../../../contracts/session.js'
 import type {
   RuntimeAllowedChannelEntry,
-  RuntimeBootstrapStateProvider,
+  RuntimeBootstrapStateScope,
+  RuntimeHeadlessControlStateProvider,
+  RuntimePromptStateProvider,
+  RuntimeSessionIdentityStateProvider,
 } from '../../../core/state/providers.js'
 import { feature } from 'bun:bundle'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -43,6 +46,12 @@ import { RuntimeSessionRegistry } from '../../../core/session/RuntimeSessionRegi
 
 const MAX_RECEIVED_UUIDS = 10_000
 
+export type HeadlessSessionStateProvider =
+  RuntimeBootstrapStateScope &
+    RuntimeHeadlessControlStateProvider &
+    RuntimePromptStateProvider &
+    RuntimeSessionIdentityStateProvider
+
 export type HeadlessSessionControl = {
   trackReceivedMessageUuid(uuid: UUID): boolean
   hasReceivedMessageUuid(uuid: UUID): boolean
@@ -55,7 +64,7 @@ export type HeadlessSessionControl = {
 
 export type HeadlessSessionContext = {
   control: HeadlessSessionControl
-  bootstrapStateProvider: RuntimeBootstrapStateProvider
+  bootstrapStateProvider: HeadlessSessionStateProvider
   bootstrap: HeadlessSessionBootstrap
   getIndexedSession(sessionId: string): IndexedRuntimeSession | null
   listIndexedSessions(): IndexedRuntimeSession[]
@@ -68,7 +77,7 @@ export type HeadlessSessionContext = {
 }
 
 export function createHeadlessSessionContext(
-  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+  bootstrapStateProvider: HeadlessSessionStateProvider,
   options: {
     indexStore?: RuntimeSessionIndexStore
   } = {},
@@ -294,7 +303,7 @@ export function handleChannelEnable(
   serverName: string,
   connectionPool: readonly MCPServerConnection[],
   output: Stream<StdoutMessage>,
-  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+  bootstrapStateProvider: RuntimeHeadlessControlStateProvider,
 ): void {
   const respondError = (error: string) =>
     output.enqueue({
@@ -398,7 +407,10 @@ export function handleChannelEnable(
 
 export function reregisterChannelHandlerAfterReconnect(
   connection: MCPServerConnection,
-  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+  bootstrapStateProvider: Pick<
+    RuntimeHeadlessControlStateProvider,
+    'getHeadlessControlState'
+  >,
 ): void {
   if (connection.type !== 'connected') return
 

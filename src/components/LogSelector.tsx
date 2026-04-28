@@ -2,7 +2,7 @@ import chalk from 'chalk'
 import figures from 'figures'
 import Fuse from 'fuse.js'
 import React from 'react'
-import { getOriginalCwd, getSessionId } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js'
 import { useSearchInput } from '../hooks/useSearchInput.js'
 import { useTerminalSize } from '../hooks/useTerminalSize.js'
@@ -29,6 +29,14 @@ import { Spinner } from './Spinner.js'
 import { TagTabs } from './TagTabs.js'
 import TextInput from './TextInput.js'
 import { type TreeNode, TreeSelect } from './ui/TreeSelect.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
 
 type AgenticSearchState =
   | { status: 'idle' }

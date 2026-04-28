@@ -2,7 +2,7 @@ import chalk from 'chalk'
 import type { UUID } from 'crypto'
 import figures from 'figures'
 import * as React from 'react'
-import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import type { CommandResultDisplay, ResumeEntrypoint } from '../../commands.js'
 import { LogSelector } from '../../components/LogSelector.js'
 import { MessageResponse } from '../../components/MessageResponse.js'
@@ -28,6 +28,14 @@ import {
   searchSessionsByCustomTitle,
 } from '../../utils/sessionStorage.js'
 import { validateUuid } from '../../utils/uuid.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 type ResumeResult =
   | { resultType: 'sessionNotFound'; arg: string }

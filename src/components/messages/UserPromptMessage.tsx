@@ -1,15 +1,22 @@
 import { feature } from 'bun:bundle'
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import React, { useContext, useMemo } from 'react'
-import { getKairosActive, getUserMsgOptIn } from '../../bootstrap/state.js'
 import { Box } from '@anthropic/ink'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import {
+  createRuntimeKairosStateProvider,
+  createRuntimeUserMessageOptInStateProvider,
+} from '../../runtime/core/state/bootstrapProvider.js'
 import { useAppState } from '../../state/AppState.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { logError } from '../../utils/log.js'
 import { countCharInString } from '../../utils/stringUtils.js'
 import { MessageActionsSelectedContext } from '../messageActions.js'
 import { HighlightedThinkingText } from './HighlightedThinkingText.js'
+
+const runtimeKairosState = createRuntimeKairosStateProvider()
+const runtimeUserMessageOptInState =
+  createRuntimeUserMessageOptInStateProvider()
 
 type Props = {
   addMargin: boolean
@@ -66,8 +73,8 @@ export function UserPromptMessage({
       : false
   const useBriefLayout =
     feature('KAIROS') || feature('KAIROS_BRIEF')
-      ? (getKairosActive() ||
-          (getUserMsgOptIn() &&
+      ? (runtimeKairosState.getKairosActive() ||
+          (runtimeUserMessageOptInState.getUserMsgOptIn() &&
             (briefEnvEnabled ||
               getFeatureValue_CACHED_MAY_BE_STALE(
                 'tengu_kairos_brief',

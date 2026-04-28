@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { getLastInteractionTime } from '../bootstrap/state.js'
+import { createRuntimeUsageStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { fetchPrStatus, type PrReviewState } from '../utils/ghPrStatus.js'
+
+const runtimeUsageState = createRuntimeUsageStateProvider()
 
 const POLL_INTERVAL_MS = 60_000
 const SLOW_GH_THRESHOLD_MS = 4_000
@@ -49,7 +51,8 @@ export function usePrStatus(isLoading: boolean, enabled = true): PrStatusState {
     async function poll() {
       if (cancelled) return
 
-      const currentInteractionTime = getLastInteractionTime()
+      const currentInteractionTime =
+        runtimeUsageState.getUsageSnapshot().lastInteractionTime
       if (lastSeenInteractionTime !== currentInteractionTime) {
         lastSeenInteractionTime = currentInteractionTime
         lastActivityTimestamp = Date.now()

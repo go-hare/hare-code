@@ -1,6 +1,6 @@
 import { basename, sep } from 'path'
 import React, { type ReactNode } from 'react'
-import { getOriginalCwd } from '../../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../../runtime/core/state/bootstrapProvider.js'
 import { Text } from '@anthropic/ink'
 import { getShortcutDisplay } from '../../../keybindings/shortcutFormat.js'
 import type { ToolPermissionContext } from '../../../Tool.js'
@@ -14,6 +14,11 @@ import {
   pathInAllowedWorkingPath,
 } from '../../../utils/permissions/filesystem.js'
 import type { OptionWithDescription } from '../../CustomSelect/select.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 function isWithinFolder(filePath: string, folderPath: string): boolean {
   const normalizedAbsolutePath = normalizeCaseForComparison(expandPath(filePath))

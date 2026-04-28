@@ -10,10 +10,10 @@ import React, {
 } from 'react'
 import { KeybindingWarnings } from 'src/components/KeybindingWarnings.js'
 import { McpParsingWarnings } from 'src/components/mcp/McpParsingWarnings.js'
+import { createRuntimeSessionIdentityStateProvider } from 'src/runtime/core/state/bootstrapProvider.js'
 import { getModelMaxOutputTokens } from 'src/utils/context.js'
 import { getClaudeConfigHomeDir } from 'src/utils/envUtils.js'
 import type { SettingSource } from 'src/utils/settings/constants.js'
-import { getOriginalCwd } from '../bootstrap/state.js'
 import type { CommandResultDisplay } from '../commands.js'
 import { Pane } from '@anthropic/ink'
 import { PressEnterToContinue } from '../components/PressEnterToContinue.js'
@@ -56,6 +56,9 @@ import {
   TASK_MAX_OUTPUT_UPPER_LIMIT,
 } from '../utils/task/outputFormatting.js'
 import { getXDGStateHome } from '../utils/xdg.js'
+
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
 
 type Props = {
   onDone: (
@@ -173,7 +176,9 @@ export function Doctor({ onDone }: Props): React.ReactNode {
 
     void (async () => {
       const userAgentsDir = join(getClaudeConfigHomeDir(), 'agents')
-      const projectAgentsDir = join(getOriginalCwd(), '.claude', 'agents')
+      const { originalCwd } =
+        runtimeSessionIdentityState.getSessionIdentity()
+      const projectAgentsDir = join(originalCwd, '.claude', 'agents')
 
       const { activeAgents, allAgents, failedFiles } = agentDefinitions
 

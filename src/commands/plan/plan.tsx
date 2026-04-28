@@ -1,7 +1,7 @@
 import * as React from 'react'
-import { handlePlanModeTransition } from '../../bootstrap/state.js'
 import type { LocalJSXCommandContext } from '../../commands.js'
 import { Box, Text } from '@anthropic/ink'
+import { createRuntimePlanModeStateWriter } from '../../runtime/core/state/bootstrapProvider.js'
 import type { LocalJSXCommandOnDone } from '../../types/command.js'
 import { getExternalEditor } from '../../utils/editor.js'
 import { toIDEDisplayName } from '../../utils/ide.js'
@@ -10,6 +10,8 @@ import { prepareContextForPlanMode } from '../../utils/permissions/permissionSet
 import { getPlan, getPlanFilePath } from '../../utils/plans.js'
 import { editFileInEditor } from '../../utils/promptEditor.js'
 import { renderToString } from '../../utils/staticRender.js'
+
+const runtimePlanModeState = createRuntimePlanModeStateWriter()
 
 function PlanDisplay({
   planContent,
@@ -51,7 +53,7 @@ export async function call(
 
   // If not in plan mode, enable it
   if (currentMode !== 'plan') {
-    handlePlanModeTransition(currentMode, 'plan')
+    runtimePlanModeState.handlePlanModeTransition(currentMode, 'plan')
     setAppState(prev => ({
       ...prev,
       toolPermissionContext: applyPermissionUpdate(

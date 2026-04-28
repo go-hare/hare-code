@@ -2,7 +2,6 @@ import { feature } from 'bun:bundle'
 import { dirname } from 'path'
 import React from 'react'
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js'
-import { getOriginalCwd, switchSession } from '../bootstrap/state.js'
 import type { Command } from '../commands.js'
 import { LogSelector } from '../components/LogSelector.js'
 import { Spinner } from '../components/Spinner.js'
@@ -53,7 +52,11 @@ import {
 import type { ThinkingConfig } from '../utils/thinking.js'
 import type { ContentReplacementRecord } from '../utils/toolResultStorage.js'
 import { refreshRuntimeAgentDefinitions } from '../runtime/capabilities/execution/headlessCapabilityMaterializer.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { REPL } from './REPL.js'
+
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
 
 function parsePrIdentifier(value: string): number | null {
   const directNumber = parseInt(value, 10)
@@ -249,8 +252,10 @@ export function ResumeConversation({
         /* eslint-enable @typescript-eslint/no-require-imports */
         const warning = coordinatorModule.matchSessionMode(result.mode)
         if (warning) {
+          const { originalCwd } =
+            runtimeSessionIdentityState.getSessionIdentity()
           const freshAgentDefs = await refreshRuntimeAgentDefinitions({
-            cwd: getOriginalCwd(),
+            cwd: originalCwd,
             activeFromAll: true,
           })
           setAppState(prev => ({
@@ -262,7 +267,7 @@ export function ResumeConversation({
       }
 
       if (result.sessionId && !forkSession) {
-        switchSession(
+        runtimeSessionIdentityState.switchSession(
           asSessionId(result.sessionId),
           log.fullPath ? dirname(log.fullPath) : null,
         )

@@ -1,10 +1,16 @@
 import { useEffect, useRef } from 'react'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import {
   type Notification,
   useNotifications,
 } from '../../context/notifications.js'
 import { logError } from '../../utils/log.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 type Result = Notification | Notification[] | null | any
 
@@ -25,7 +31,7 @@ export function useStartupNotification(
   computeRef.current = compute
 
   useEffect(() => {
-    if (getIsRemoteMode() || hasRunRef.current) return
+    if (isRemoteMode() || hasRunRef.current) return
     hasRunRef.current = true
 
     void Promise.resolve()

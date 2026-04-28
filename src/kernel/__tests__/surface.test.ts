@@ -1,15 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 
 import * as bridge from '../bridge.js'
+import * as companion from '../companion.js'
 import * as daemon from '../daemon.js'
+import * as context from '../context.js'
 import * as headless from '../headless.js'
 import * as headlessMcp from '../headlessMcp.js'
 import * as headlessStartup from '../headlessStartup.js'
 import * as events from '../events.js'
 import * as kernel from '../index.js'
+import * as kairos from '../kairos.js'
+import * as memory from '../memory.js'
 import * as permissions from '../permissions.js'
 import * as runtime from '../runtime.js'
 import * as runtimeEvents from '../runtimeEvents.js'
+import * as sessions from '../sessions.js'
 import * as serverHost from '../serverHost.js'
 import * as wireProtocol from '../wireProtocol.js'
 import * as serverTypes from '../../server/types.js'
@@ -29,14 +34,19 @@ const EXPECTED_KERNEL_EXPORTS = [
   'createDefaultKernelHeadlessEnvironment',
   'createDefaultKernelRuntimeWireRouter',
   'createDirectConnectSession',
+  'createKernelCompanionRuntime',
+  'createKernelContextManager',
   'createKernelHeadlessSession',
   'createKernelHeadlessStore',
+  'createKernelKairosRuntime',
+  'createKernelMemoryManager',
   'createKernelPermissionBroker',
   'createKernelRuntimeEventFacade',
   'createKernelRuntimeInProcessWireTransport',
   'createKernelRuntimeStdioWireTransport',
   'createKernelRuntimeWireClient',
   'createKernelRuntime',
+  'createKernelSessionManager',
   'filterKernelCapabilities',
   'getKernelCapabilityFamily',
   'createKernelSession',
@@ -261,6 +271,36 @@ describe('kernel index surface', () => {
       true,
     )
     expect(Object.is(kernel.runDaemonWorker, daemon.runDaemonWorker)).toBe(true)
+    expect(
+      Object.is(
+        kernel.createKernelCompanionRuntime,
+        companion.createKernelCompanionRuntime,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.createKernelContextManager,
+        context.createKernelContextManager,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.createKernelKairosRuntime,
+        kairos.createKernelKairosRuntime,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.createKernelMemoryManager,
+        memory.createKernelMemoryManager,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.createKernelSessionManager,
+        sessions.createKernelSessionManager,
+      ),
+    ).toBe(true)
     expect(
       Object.is(kernel.createKernelRuntime, runtime.createKernelRuntime),
     ).toBe(true)

@@ -1,5 +1,5 @@
 import type { UUID } from 'crypto'
-import { getSessionId } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import {
   getBridgeBaseUrlOverride,
   getBridgeTokenOverride,
@@ -17,6 +17,11 @@ import {
 } from '../../utils/sessionStorage.js'
 import { isTeammate } from '../../utils/teammate.js'
 import { generateSessionName } from './generateSessionName.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
 
 export async function call(
   onDone: LocalJSXCommandOnDone,

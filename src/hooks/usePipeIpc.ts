@@ -12,6 +12,7 @@
  */
 import { feature } from 'bun:bundle'
 import { useEffect } from 'react'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import type {
   PipeMessage,
   PipeServer,
@@ -26,14 +27,15 @@ const pr = () =>
   require('../utils/pipeRegistry.js') as typeof import('../utils/pipeRegistry.js')
 const mm = () =>
   require('./useMasterMonitor.js') as typeof import('./useMasterMonitor.js')
-const bs = () =>
-  require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
 const lb = () =>
   require('../utils/lanBeacon.js') as typeof import('../utils/lanBeacon.js')
 const pp = () =>
   require('../utils/pipePermissionRelay.js') as typeof import('../utils/pipePermissionRelay.js')
 const osm = () => require('os') as typeof import('os')
 /* eslint-enable @typescript-eslint/no-require-imports */
+
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
 
 // ---------------------------------------------------------------------------
 // Types
@@ -462,7 +464,7 @@ export function usePipeIpc({
   if (!feature('UDS_INBOX')) return
 
   useEffect(() => {
-    const pipeName = `cli-${bs().getSessionId().slice(0, 8)}`
+    const pipeName = `cli-${runtimeSessionIdentityState.getSessionIdentity().sessionId.slice(0, 8)}`
     const disposed = { current: false }
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
     let heartbeatBusy = false

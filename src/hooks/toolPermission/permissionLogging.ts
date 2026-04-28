@@ -7,7 +7,7 @@ import {
   logEvent,
 } from '../../services/analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.js'
-import { getCodeEditToolDecisionCounter } from '../../bootstrap/state.js'
+import { createRuntimeObservabilityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import type { Tool as ToolType, ToolUseContext } from '../../Tool.js'
 import { getLanguageName } from '../../utils/cliHighlight.js'
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
@@ -16,6 +16,8 @@ import type {
   PermissionApprovalSource,
   PermissionRejectionSource,
 } from './PermissionContext.js'
+
+const runtimeObservabilityState = createRuntimeObservabilityStateProvider()
 
 type PermissionLogContext = {
   tool: ToolType
@@ -213,7 +215,10 @@ function logPermissionDecision(
   // Track code editing tool metrics
   if (isCodeEditingTool(tool.name)) {
     void buildCodeEditToolAttributes(tool, input, decision, sourceString).then(
-      attributes => getCodeEditToolDecisionCounter()?.add(1, attributes),
+      attributes =>
+        runtimeObservabilityState
+          .getCodeEditToolDecisionCounter()
+          ?.add(1, attributes),
     )
   }
 

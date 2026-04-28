@@ -549,7 +549,7 @@ describe('KernelRuntimeWireRouter', () => {
     expect(observed.slice(observedBeforeSubscribe)).toEqual([error])
   })
 
-  test('returns retryable gap errors when replay cursors have expired', async () => {
+  test('treats evicted replay cursors as gone instead of retryable gaps', async () => {
     const { router, observed } = createRouter({ maxReplayEvents: 1 })
 
     await router.handleCommand({
@@ -589,11 +589,11 @@ describe('KernelRuntimeWireRouter', () => {
       requestId: 'subscribe-expired',
       conversationId: 'conversation-1',
       error: {
-        code: 'unavailable',
-        retryable: true,
+        code: 'not_found',
+        retryable: false,
         details: {
           eventId: 'conversation-1:1',
-          replayError: 'expired',
+          replayError: 'not_found',
         },
       },
     })
@@ -1229,6 +1229,115 @@ describe('KernelRuntimeWireRouter', () => {
     })
   })
 
+  test('resumes aborting recovered executions instead of leaving zombie turns', async () => {
+    const snapshots: KernelRuntimeWireConversationRecoverySnapshot[] = []
+    const store: KernelRuntimeWireConversationSnapshotStore = {
+      readLatest(conversationId) {
+        for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+          const snapshot = snapshots[index]
+          if (snapshot?.conversation.conversationId === conversationId) {
+            return snapshot
+          }
+        }
+        return undefined
+      },
+      append(snapshot) {
+        snapshots.push(snapshot)
+      },
+    }
+    const stalledExecutor: KernelRuntimeWireTurnExecutor =
+      async function* stalled() {
+        await new Promise<never>(() => {})
+      }
+    const first = createRouter({
+      conversationSnapshotStore: store,
+      runTurnExecutor: stalledExecutor,
+    })
+    await first.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-1',
+      conversationId: 'conversation-1',
+      workspacePath: '/tmp/workspace',
+    })
+    await first.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_turn',
+      requestId: 'run-1',
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      prompt: 'resume aborted turn',
+    })
+    await first.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'abort_turn',
+      requestId: 'abort-1',
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      reason: 'crashed_before_abort_observed',
+    })
+
+    expect(snapshots.at(-1)).toMatchObject({
+      activeTurn: {
+        turnId: 'turn-1',
+        state: 'aborting',
+      },
+      activeExecution: {
+        type: 'run_turn',
+        requestId: 'run-1',
+        turnId: 'turn-1',
+        prompt: 'resume aborted turn',
+      },
+    })
+
+    const resumedSignals: boolean[] = []
+    const second = createRouter({
+      conversationSnapshotStore: store,
+      runTurnExecutor: async context => {
+        resumedSignals.push(context.signal.aborted)
+      },
+    })
+    const [recovered] = await second.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-2',
+      conversationId: 'conversation-1',
+      workspacePath: '/tmp/workspace',
+    })
+
+    expect(recovered).toMatchObject({
+      kind: 'ack',
+      requestId: 'create-2',
+      payload: {
+        state: 'detached',
+        activeTurnId: 'turn-1',
+      },
+    })
+    const completed = await waitForObserved(
+      second.observed,
+      envelope =>
+        (envelope as { payload?: { type?: string } }).payload?.type ===
+        'turn.completed',
+    )
+    expect(completed).toMatchObject({
+      payload: {
+        type: 'turn.completed',
+        payload: {
+          stopReason: 'crashed_before_abort_observed',
+        },
+      },
+    })
+    expect(resumedSignals).toEqual([true])
+    expect(snapshots.at(-1)).toMatchObject({
+      conversation: {
+        conversationId: 'conversation-1',
+        state: 'ready',
+      },
+    })
+    expect(snapshots.at(-1)?.activeTurn).toBeUndefined()
+    expect(snapshots.at(-1)?.activeExecution).toBeUndefined()
+  })
+
   test('resumes recovered active turn execution from the persisted run command', async () => {
     const snapshots: KernelRuntimeWireConversationRecoverySnapshot[] = []
     const store: KernelRuntimeWireConversationSnapshotStore = {
@@ -1339,6 +1448,194 @@ describe('KernelRuntimeWireRouter', () => {
     })
     expect(snapshots.at(-1)?.activeTurn).toBeUndefined()
     expect(snapshots.at(-1)?.activeExecution).toBeUndefined()
+  })
+
+  test('does not resurrect disposed conversations from snapshot storage', async () => {
+    const snapshots: KernelRuntimeWireConversationRecoverySnapshot[] = []
+    const store: KernelRuntimeWireConversationSnapshotStore = {
+      readLatest(conversationId) {
+        for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+          const snapshot = snapshots[index]
+          if (snapshot?.conversation.conversationId === conversationId) {
+            return snapshot
+          }
+        }
+        return undefined
+      },
+      append(snapshot) {
+        snapshots.push(snapshot)
+      },
+    }
+
+    const first = createRouter({ conversationSnapshotStore: store })
+    await first.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-1',
+      conversationId: 'conversation-1',
+      workspacePath: '/tmp/workspace',
+    })
+    await first.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'dispose_conversation',
+      requestId: 'dispose-1',
+      conversationId: 'conversation-1',
+      reason: 'done',
+    })
+
+    expect(snapshots.at(-1)).toMatchObject({
+      conversation: {
+        conversationId: 'conversation-1',
+        state: 'disposed',
+      },
+    })
+
+    const second = createRouter({ conversationSnapshotStore: store })
+    const [ack] = await second.router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-2',
+      conversationId: 'conversation-1',
+      workspacePath: '/tmp/workspace',
+    })
+
+    expect(ack).toMatchObject({
+      kind: 'ack',
+      requestId: 'create-2',
+      conversationId: 'conversation-1',
+    })
+    expect((ack.payload as { activeTurnId?: string }).activeTurnId).toBeUndefined()
+    expect(
+      second.observed.some(
+        envelope =>
+          (envelope as { payload?: { type?: string } }).payload?.type ===
+          'conversation.recovered',
+      ),
+    ).toBe(false)
+    expect(
+      second.observed.some(
+        envelope =>
+          (envelope as { payload?: { type?: string } }).payload?.type ===
+          'conversation.ready',
+      ),
+    ).toBe(true)
+  })
+
+  test('uses the updated runtime workspace after init_runtime', async () => {
+    const capabilityCwds: Array<string | undefined> = []
+    const commandCwds: Array<string | undefined> = []
+    const { router } = createRouter({
+      capabilityResolver: {
+        listDescriptors: () => [],
+        async requireCapability(_name, context) {
+          capabilityCwds.push(context?.cwd)
+        },
+        async reloadCapabilities() {
+          return []
+        },
+      },
+      commandCatalog: {
+        async listCommands(context) {
+          commandCwds.push(context?.cwd)
+          return []
+        },
+      },
+    })
+
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'init_runtime',
+      requestId: 'init-1',
+      workspacePath: '/tmp/next-workspace',
+    })
+    const [ack] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'list_commands',
+      requestId: 'list-1',
+    })
+
+    expect(ack).toMatchObject({
+      kind: 'ack',
+      requestId: 'list-1',
+      payload: {
+        entries: [],
+      },
+    })
+    expect(capabilityCwds).toEqual(['/tmp/next-workspace'])
+    expect(commandCwds).toEqual(['/tmp/next-workspace'])
+  })
+
+  test('disposing one conversation does not abort sibling execution keys', async () => {
+    const abortedConversations: string[] = []
+    const { router } = createRouter({
+      runTurnExecutor: async context => {
+        await new Promise<void>(resolve => {
+          context.signal.addEventListener(
+            'abort',
+            () => {
+              abortedConversations.push(context.command.conversationId)
+              resolve()
+            },
+            { once: true },
+          )
+        })
+      },
+    })
+
+    for (const conversationId of ['a', 'a:b'] as const) {
+      await router.handleCommand({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'create_conversation',
+        requestId: `create-${conversationId}`,
+        conversationId,
+        workspacePath: '/tmp/workspace',
+      })
+    }
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_turn',
+      requestId: 'run-a',
+      conversationId: 'a',
+      turnId: 'turn-a-1',
+      prompt: 'parent',
+    })
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_turn',
+      requestId: 'run-a:b',
+      conversationId: 'a:b',
+      turnId: 'turn-ab-1',
+      prompt: 'child',
+    })
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'dispose_conversation',
+      requestId: 'dispose-a',
+      conversationId: 'a',
+      reason: 'cleanup',
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(abortedConversations).toEqual(['a'])
+
+    const [busy] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_turn',
+      requestId: 'run-a:b-2',
+      conversationId: 'a:b',
+      turnId: 'turn-ab-2',
+      prompt: 'still running',
+    })
+
+    expect(busy).toMatchObject({
+      kind: 'error',
+      requestId: 'run-a:b-2',
+      conversationId: 'a:b',
+      turnId: 'turn-ab-1',
+      error: {
+        code: 'busy',
+      },
+    })
   })
 
   test('returns not_found for commands targeting missing conversations', async () => {

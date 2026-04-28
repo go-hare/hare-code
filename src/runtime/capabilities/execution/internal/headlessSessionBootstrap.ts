@@ -16,7 +16,10 @@ import {
   saveAiGeneratedTitle,
   saveMode,
 } from 'src/utils/sessionStorage.js'
-import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
+import type {
+  RuntimePromptStateProvider,
+  RuntimeSessionIdentityStateProvider,
+} from '../../../core/state/providers.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const coordinatorModeModule = feature('COORDINATOR_MODE')
@@ -84,6 +87,9 @@ export type HeadlessSessionBootstrap = {
   persistGeneratedTitle(title: string): void
 }
 
+type HeadlessSessionBootstrapStateProvider =
+  RuntimeSessionIdentityStateProvider & RuntimePromptStateProvider
+
 const defaultDeps: HeadlessSessionBootstrapDeps = {
   resetSessionFilePointer,
   resetSessionMetadataForResume,
@@ -119,7 +125,7 @@ const defaultDeps: HeadlessSessionBootstrapDeps = {
 }
 
 export function createHeadlessSessionBootstrap(
-  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+  bootstrapStateProvider: HeadlessSessionBootstrapStateProvider,
   deps: HeadlessSessionBootstrapDeps = defaultDeps,
 ): HeadlessSessionBootstrap {
   const adoptLoadedConversation = async (

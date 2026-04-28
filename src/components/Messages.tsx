@@ -5,7 +5,7 @@ import type { RefObject } from 'react'
 import * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { every } from 'src/utils/set.js'
-import { getIsRemoteMode } from '../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import type { Command } from '../commands.js'
 import { BLACK_CIRCLE } from '../constants/figures.js'
 import { useTerminalSize } from '../hooks/useTerminalSize.js'
@@ -115,6 +115,11 @@ const SEND_USER_FILE_TOOL_NAME: string | null = feature('KAIROS')
 
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { VirtualMessageList } from './VirtualMessageList.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+const getIsRemoteMode = () =>
+  runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
 
 /**
  * In brief-only mode, filter messages to show ONLY Brief tool_use blocks,

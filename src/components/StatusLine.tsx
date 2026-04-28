@@ -5,13 +5,11 @@ import { logEvent } from 'src/services/analytics/index.js'
 import { useAppState, useSetAppState } from 'src/state/AppState.js'
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js'
 import {
-  getIsRemoteMode,
-  getKairosActive,
-  getMainThreadAgentType,
-  getOriginalCwd,
-  getSdkBetas,
-  getSessionId,
-} from '../bootstrap/state.js'
+  createRuntimeHeadlessControlStateProvider,
+  createRuntimeKairosStateProvider,
+  createRuntimePromptStateProvider,
+  createRuntimeSessionIdentityStateProvider,
+} from '../runtime/core/state/bootstrapProvider.js'
 import { DEFAULT_OUTPUT_STYLE_NAME } from '../constants/outputStyles.js'
 import { useNotifications } from '../context/notifications.js'
 import {
@@ -56,10 +54,17 @@ import {
 import { getCurrentWorktreeSession } from '../utils/worktree.js'
 import { isVimModeEnabled } from './PromptInput/utils.js'
 
+const runtimeHeadlessControlState =
+  createRuntimeHeadlessControlStateProvider()
+const runtimeKairosState = createRuntimeKairosStateProvider()
+const runtimePromptState = createRuntimePromptStateProvider()
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
+
 export function statusLineShouldDisplay(settings: ReadonlySettings): boolean {
   // Assistant mode: statusline fields (model, permission mode, cwd) reflect the
   // REPL/daemon process, not what the agent child is actually running. Hide it.
-  if (feature('KAIROS') && getKairosActive()) return false
+  if (feature('KAIROS') && runtimeKairosState.getKairosActive()) return false
   return settings?.statusLine !== undefined
 }
 
@@ -72,7 +77,12 @@ function buildStatusLineCommandInput(
   mainLoopModel: ModelName,
   vimMode?: VimMode,
 ): StatusLineCommandInput {
-  const agentType = getMainThreadAgentType()
+  const { mainThreadAgentType, isRemoteMode } =
+    runtimeHeadlessControlState.getHeadlessControlState()
+  const { sdkBetas } = runtimePromptState.getPromptState()
+  const { originalCwd, sessionId } =
+    runtimeSessionIdentityState.getSessionIdentity()
+  const agentType = mainThreadAgentType
   const worktreeSession = getCurrentWorktreeSession()
   const runtimeModel = getRuntimeMainLoopModel({
     permissionMode,
@@ -84,14 +94,13 @@ function buildStatusLineCommandInput(
   const currentUsage = getCurrentUsage(messages)
   const contextWindowSize = getContextWindowForModel(
     runtimeModel,
-    getSdkBetas(),
+    sdkBetas,
   )
   const contextPercentages = calculateContextPercentages(
     currentUsage,
     contextWindowSize,
   )
 
-  const sessionId = getSessionId()
   const sessionName = getCurrentSessionTitle(sessionId)
   const rawUtil = getRawUtilization()
   const rateLimits: StatusLineCommandInput['rate_limits'] = {
@@ -117,7 +126,7 @@ function buildStatusLineCommandInput(
     },
     workspace: {
       current_dir: getCwd(),
-      project_dir: getOriginalCwd(),
+      project_dir: originalCwd,
       added_dirs: addedDirs,
     },
     version: MACRO.VERSION,
@@ -153,9 +162,9 @@ function buildStatusLineCommandInput(
         name: agentType,
       },
     }),
-    ...(getIsRemoteMode() && {
+    ...(isRemoteMode && {
       remote: {
-        session_id: getSessionId(),
+        session_id: sessionId,
       },
     }),
     ...(worktreeSession && {

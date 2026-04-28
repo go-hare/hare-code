@@ -1,3 +1,5 @@
+import { dirname } from 'path'
+
 import type {
   KernelCapabilityDescriptor,
   KernelCapabilityName,
@@ -81,6 +83,19 @@ import type {
 } from '../../contracts/task.js'
 import type { KernelTurnId, KernelTurnSnapshot } from '../../contracts/turn.js'
 import type {
+  KernelRuntimeCompanionAction,
+  KernelRuntimeCompanionReactionRequest,
+  KernelRuntimeCompanionState,
+  KernelRuntimeContextSnapshot,
+  KernelRuntimeKairosExternalEvent,
+  KernelRuntimeKairosStatus,
+  KernelRuntimeKairosTickRequest,
+  KernelRuntimeMemoryDescriptor,
+  KernelRuntimeMemoryDocument,
+  KernelRuntimeMemoryUpdateRequest,
+  KernelRuntimeSessionDescriptor,
+  KernelRuntimeSessionListFilter,
+  KernelRuntimeSessionTranscript,
   KernelRuntimeCommand,
   KernelRuntimeConnectHostCommand,
   KernelRuntimeCreateConversationCommand,
@@ -175,6 +190,11 @@ export type KernelRuntimeWireTurnExecutor = (
 ) => KernelRuntimeWireTurnExecutionResult
 
 type Awaitable<T> = T | Promise<T>
+
+export type KernelRuntimeWireRequestContext = {
+  cwd?: string
+  metadata?: Record<string, unknown>
+}
 
 export type KernelRuntimeWireCommandCatalog = {
   listCommands(context?: {
@@ -375,6 +395,89 @@ export type KernelRuntimeWireTaskRegistry = {
   ): Awaitable<RuntimeTaskMutationResult>
 }
 
+export type KernelRuntimeWireCompanionRuntime = {
+  getState(
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<KernelRuntimeCompanionState | null>
+  dispatch(
+    action: KernelRuntimeCompanionAction,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<KernelRuntimeCompanionState | null>
+  reactToTurn(
+    request: KernelRuntimeCompanionReactionRequest,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<void>
+  onEvent?(handler: (event: unknown) => void): (() => void) | void
+}
+
+export type KernelRuntimeWireKairosRuntime = {
+  getStatus(
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<KernelRuntimeKairosStatus>
+  enqueueEvent(
+    event: KernelRuntimeKairosExternalEvent,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<void>
+  tick(
+    request?: KernelRuntimeKairosTickRequest,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<void>
+  suspend(
+    reason?: string,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<void>
+  resume(
+    reason?: string,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<void>
+  onEvent?(handler: (event: unknown) => void): (() => void) | void
+}
+
+export type KernelRuntimeWireMemoryManager = {
+  listMemory(
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<readonly KernelRuntimeMemoryDescriptor[]>
+  readMemory(
+    id: string,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<KernelRuntimeMemoryDocument>
+  updateMemory(
+    request: KernelRuntimeMemoryUpdateRequest,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<KernelRuntimeMemoryDocument>
+}
+
+export type KernelRuntimeWireContextManager = {
+  readContext(
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<KernelRuntimeContextSnapshot>
+  getGitStatus(
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<string | null>
+  getSystemPromptInjection(
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<string | null>
+  setSystemPromptInjection(
+    value: string | null,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<string | null>
+}
+
+export type KernelRuntimeWireSessionManager = {
+  listSessions(
+    filter?: KernelRuntimeSessionListFilter,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<readonly KernelRuntimeSessionDescriptor[]>
+  resumeSession(
+    sessionId: string,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<KernelRuntimeSessionTranscript>
+  getSessionTranscript(
+    sessionId: string,
+    context?: KernelRuntimeWireRequestContext,
+  ): Awaitable<KernelRuntimeSessionTranscript>
+}
+
 export type KernelRuntimeWireRouterOptions = {
   runtimeId: KernelRuntimeId
   workspacePath: string
@@ -389,6 +492,11 @@ export type KernelRuntimeWireRouterOptions = {
   pluginCatalog?: KernelRuntimeWirePluginCatalog
   agentRegistry?: KernelRuntimeWireAgentRegistry
   taskRegistry?: KernelRuntimeWireTaskRegistry
+  companionRuntime?: KernelRuntimeWireCompanionRuntime
+  kairosRuntime?: KernelRuntimeWireKairosRuntime
+  memoryManager?: KernelRuntimeWireMemoryManager
+  contextManager?: KernelRuntimeWireContextManager
+  sessionManager?: KernelRuntimeWireSessionManager
   permissionBroker?: KernelRuntimeWirePermissionBroker
   runTurnExecutor?: KernelRuntimeWireTurnExecutor
   createConversation(
@@ -447,19 +555,33 @@ export type KernelRuntimeWirePermissionBroker = {
 
 export class KernelRuntimeWireRouter {
   readonly eventBus: RuntimeEventBus
+  private runtimeWorkspacePath: string
   private readonly conversations = new Map<
     KernelConversationId,
     KernelRuntimeWireConversation
   >()
-  private readonly activeExecutions = new Map<string, AbortController>()
+  private readonly activeExecutions = new Map<
+    string,
+    {
+      controller: AbortController
+      command: KernelRuntimeRunTurnCommand
+    }
+  >()
   private readonly hosts = new Map<string, KernelRuntimeWireHostRecord>()
 
   constructor(private readonly options: KernelRuntimeWireRouterOptions) {
+    this.runtimeWorkspacePath = options.workspacePath
     this.eventBus =
       options.eventBus ??
       new RuntimeEventBus({
         runtimeId: options.runtimeId,
       })
+    options.companionRuntime?.onEvent?.(event => {
+      this.emitRuntimeDomainEvent('companion.event', event)
+    })
+    options.kairosRuntime?.onEvent?.(event => {
+      this.emitRuntimeDomainEvent('kairos.event', event)
+    })
   }
 
   async handleCommand(
@@ -470,7 +592,7 @@ export class KernelRuntimeWireRouter {
         case 'ping':
           return [this.eventBus.pong({ requestId: command.requestId })]
         case 'init_runtime':
-          return this.handleInit(command.requestId)
+          return this.handleInit(command)
         case 'connect_host':
           return this.handleConnectHost(command)
         case 'disconnect_host':
@@ -561,6 +683,42 @@ export class KernelRuntimeWireRouter {
           return [await this.handleUpdateTask(command)]
         case 'assign_task':
           return [await this.handleAssignTask(command)]
+        case 'get_companion_state':
+          return [await this.handleGetCompanionState(command)]
+        case 'dispatch_companion_action':
+          return [await this.handleDispatchCompanionAction(command)]
+        case 'react_companion':
+          return [await this.handleReactCompanion(command)]
+        case 'get_kairos_status':
+          return [await this.handleGetKairosStatus(command)]
+        case 'enqueue_kairos_event':
+          return [await this.handleEnqueueKairosEvent(command)]
+        case 'tick_kairos':
+          return [await this.handleTickKairos(command)]
+        case 'suspend_kairos':
+          return [await this.handleSuspendKairos(command)]
+        case 'resume_kairos':
+          return [await this.handleResumeKairos(command)]
+        case 'list_memory':
+          return [await this.handleListMemory(command)]
+        case 'read_memory':
+          return [await this.handleReadMemory(command)]
+        case 'update_memory':
+          return [await this.handleUpdateMemory(command)]
+        case 'read_context':
+          return [await this.handleReadContext(command)]
+        case 'get_context_git_status':
+          return [await this.handleGetContextGitStatus(command)]
+        case 'get_system_prompt_injection':
+          return [await this.handleGetSystemPromptInjection(command)]
+        case 'set_system_prompt_injection':
+          return [await this.handleSetSystemPromptInjection(command)]
+        case 'list_sessions':
+          return [await this.handleListSessionsCatalog(command)]
+        case 'resume_session':
+          return [await this.handleResumeSession(command)]
+        case 'get_session_transcript':
+          return [await this.handleGetSessionTranscript(command)]
         case 'publish_host_event':
           return [this.handlePublishHostEvent(command)]
       }
@@ -619,12 +777,16 @@ export class KernelRuntimeWireRouter {
     }
   }
 
-  private handleInit(requestId: string): KernelRuntimeEnvelopeBase[] {
+  private handleInit(
+    command: Extract<KernelRuntimeCommand, { type: 'init_runtime' }>,
+  ): KernelRuntimeEnvelopeBase[] {
+    this.runtimeWorkspacePath = command.workspacePath ?? this.runtimeWorkspacePath
     const ack = this.eventBus.ack({
-      requestId,
+      requestId: command.requestId,
       payload: {
         runtimeId: this.options.runtimeId,
         state: 'ready',
+        workspacePath: this.runtimeWorkspacePath,
       },
     })
     this.eventBus.emit({
@@ -632,7 +794,7 @@ export class KernelRuntimeWireRouter {
       replayable: true,
       payload: {
         runtimeId: this.options.runtimeId,
-        workspacePath: this.options.workspacePath,
+        workspacePath: this.runtimeWorkspacePath,
       },
     })
     return [ack]
@@ -747,18 +909,21 @@ export class KernelRuntimeWireRouter {
       recoveredSnapshot?.activeTurn,
       recoveredSnapshot?.activeExecution,
     )
-    if (recoveredSnapshot?.activeExecution && recoveredSnapshot.activeTurn) {
-      this.startTurnExecution(
-        recoveredSnapshot.activeExecution,
-        conversation,
-        recoveredSnapshot.activeTurn,
-      )
-    }
-    return this.eventBus.ack({
+    const ack = this.eventBus.ack({
       requestId: command.requestId,
       conversationId: conversation.id,
       payload: sanitizeWirePayload(conversation.snapshot()),
     })
+    if (recoveredSnapshot?.activeExecution && recoveredSnapshot.activeTurn) {
+      queueMicrotask(() => {
+        this.startTurnExecution(
+          recoveredSnapshot.activeExecution!,
+          conversation,
+          recoveredSnapshot.activeTurn!,
+        )
+      })
+    }
+    return ack
   }
 
   private async handleRunTurn(
@@ -775,13 +940,16 @@ export class KernelRuntimeWireRouter {
       metadata: command.metadata,
     })
     await this.recordConversationSnapshot(conversation, snapshot, command)
-    this.startTurnExecution(command, conversation, snapshot)
-    return this.eventBus.ack({
+    const ack = this.eventBus.ack({
       requestId: command.requestId,
       conversationId: command.conversationId,
       turnId: command.turnId,
       payload: sanitizeWirePayload(snapshot),
     })
+    queueMicrotask(() => {
+      this.startTurnExecution(command, conversation, snapshot)
+    })
+    return ack
   }
 
   private async handleAbortTurn(
@@ -792,10 +960,15 @@ export class KernelRuntimeWireRouter {
       command.requestId,
     )
     const snapshot = conversation.abortTurn(command.turnId, command.reason)
-    await this.recordConversationSnapshot(conversation, snapshot)
-    this.activeExecutions
-      .get(this.turnExecutionKey(command.conversationId, command.turnId))
-      ?.abort(command.reason ?? 'aborted')
+    const activeExecution = this.activeExecutions.get(
+      this.turnExecutionKey(command.conversationId, command.turnId),
+    )
+    await this.recordConversationSnapshot(
+      conversation,
+      snapshot,
+      activeExecution?.command,
+    )
+    activeExecution?.controller.abort(command.reason ?? 'aborted')
     return this.eventBus.ack({
       requestId: command.requestId,
       conversationId: command.conversationId,
@@ -830,14 +1003,17 @@ export class KernelRuntimeWireRouter {
       command.conversationId,
       command.requestId,
     )
+    const activeTurnId = conversation.activeTurnId
     await conversation.dispose(command.reason)
     await this.recordConversationSnapshot(conversation)
     this.conversations.delete(command.conversationId)
-    for (const [key, controller] of this.activeExecutions) {
-      if (key.startsWith(`${command.conversationId}:`)) {
-        controller.abort(command.reason ?? 'conversation_disposed')
-        this.activeExecutions.delete(key)
-      }
+    if (activeTurnId) {
+      const key = this.turnExecutionKey(command.conversationId, activeTurnId)
+      const activeExecution = this.activeExecutions.get(key)
+      activeExecution?.controller.abort(
+        command.reason ?? 'conversation_disposed',
+      )
+      this.activeExecutions.delete(key)
     }
     return this.eventBus.ack({
       requestId: command.requestId,
@@ -961,7 +1137,7 @@ export class KernelRuntimeWireRouter {
 
     const descriptors =
       await this.options.capabilityResolver.reloadCapabilities(command.scope, {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       })
     this.eventBus.emit({
@@ -996,7 +1172,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('commands', command)
     const entries = await this.options.commandCatalog.listCommands({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1022,7 +1198,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('commands', command)
     const result = await executeCommand(stripWireCommandFields(command), {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     this.eventBus.emit({
@@ -1051,7 +1227,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('tools', command)
     const tools = await this.options.toolCatalog.listTools({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1077,7 +1253,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('tools', command)
     const result = await callTool(stripWireCommandFields(command), {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     this.eventBus.emit({
@@ -1106,7 +1282,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('mcp', command)
     const servers = await this.options.mcpRegistry.listServers({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1131,7 +1307,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('mcp', command)
     const tools = await this.options.mcpRegistry.listToolBindings({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1160,7 +1336,7 @@ export class KernelRuntimeWireRouter {
     const resources = await this.options.mcpRegistry.listResources(
       command.serverName,
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1186,7 +1362,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('mcp', command)
     await this.options.mcpRegistry.reload?.({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     const snapshot = await this.readMcpRegistrySnapshot(command.metadata)
@@ -1218,7 +1394,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.mcpRegistry.connectServer(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1241,7 +1417,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.mcpRegistry.authenticateServer(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1264,7 +1440,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.mcpRegistry.setServerEnabled(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1296,7 +1472,7 @@ export class KernelRuntimeWireRouter {
     metadata: Record<string, unknown> | undefined,
   ): Promise<RuntimeMcpRegistrySnapshot> {
     const context = {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata,
     }
     const [servers, resources, toolBindings] = await Promise.all([
@@ -1321,7 +1497,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('hooks', command)
     const hooks = await this.options.hookCatalog.listHooks({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1346,12 +1522,12 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('hooks', command)
     await this.options.hookCatalog.reload?.({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     const snapshot: RuntimeHookRegistrySnapshot = {
       hooks: await this.options.hookCatalog.listHooks({
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       }),
     }
@@ -1383,7 +1559,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.hookCatalog.runHook(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1415,7 +1591,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.hookCatalog.registerHook(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1445,7 +1621,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('skills', command)
     const skills = await this.options.skillCatalog.listSkills({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1470,12 +1646,12 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('skills', command)
     await this.options.skillCatalog.reload?.({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     const snapshot: RuntimeSkillCatalogSnapshot = {
       skills: await this.options.skillCatalog.listSkills({
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       }),
     }
@@ -1507,7 +1683,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.skillCatalog.resolvePromptContext(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1537,7 +1713,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('plugins', command)
     const snapshot = await this.options.pluginCatalog.listPlugins({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1563,11 +1739,11 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('plugins', command)
     await this.options.pluginCatalog.reload?.({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     const listed = await this.options.pluginCatalog.listPlugins({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     const snapshot: RuntimePluginCatalogSnapshot = {
@@ -1602,7 +1778,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.pluginCatalog.setPluginEnabled(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1634,7 +1810,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.pluginCatalog.installPlugin(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1666,7 +1842,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.pluginCatalog.uninstallPlugin(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1698,7 +1874,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.pluginCatalog.updatePlugin(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1728,7 +1904,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('agents', command)
     const snapshot = await this.options.agentRegistry.listAgents({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1751,11 +1927,11 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('agents', command)
     await this.options.agentRegistry.reload?.({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     const snapshot = await this.options.agentRegistry.listAgents({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     this.eventBus.emit({
@@ -1786,7 +1962,7 @@ export class KernelRuntimeWireRouter {
     const result = await this.options.agentRegistry.spawnAgent(
       stripWireCommandFields(command),
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1817,7 +1993,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('agents', command)
     const snapshot = await listAgentRuns({
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1841,7 +2017,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('agents', command)
     const run = await getAgentRun(command.runId, {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1867,7 +2043,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('agents', command)
     const output = await getAgentOutput(stripWireCommandFields(command), {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     return this.eventBus.ack({
@@ -1891,7 +2067,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('agents', command)
     const result = await cancelAgentRun(stripWireCommandFields(command), {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     if (result.cancelled) {
@@ -1924,7 +2100,7 @@ export class KernelRuntimeWireRouter {
     const snapshot = await this.options.taskRegistry.listTasks(
       command.taskListId,
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1951,7 +2127,7 @@ export class KernelRuntimeWireRouter {
       command.taskId,
       command.taskListId,
       {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       },
     )
@@ -1978,7 +2154,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('tasks', command)
     const result = await createTask(stripWireCommandFields(command), {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     this.eventBus.emit({
@@ -2008,7 +2184,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('tasks', command)
     const result = await updateTask(stripWireCommandFields(command), {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     this.eventBus.emit({
@@ -2038,7 +2214,7 @@ export class KernelRuntimeWireRouter {
 
     await this.requireCatalogCapability('tasks', command)
     const result = await assignTask(stripWireCommandFields(command), {
-      cwd: this.options.workspacePath,
+      cwd: this.runtimeWorkspacePath,
       metadata: command.metadata,
     })
     this.eventBus.emit({
@@ -2053,13 +2229,520 @@ export class KernelRuntimeWireRouter {
     })
   }
 
+  private async handleGetCompanionState(
+    command: Extract<KernelRuntimeCommand, { type: 'get_companion_state' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.companionRuntime) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Companion runtime is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('companion', command)
+    const state = await this.options.companionRuntime.getState({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ state }),
+    })
+  }
+
+  private async handleDispatchCompanionAction(
+    command: Extract<
+      KernelRuntimeCommand,
+      { type: 'dispatch_companion_action' }
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.companionRuntime) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Companion runtime is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('companion', command)
+    const state = await this.options.companionRuntime.dispatch(command.action, {
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ state }),
+    })
+  }
+
+  private async handleReactCompanion(
+    command: Extract<KernelRuntimeCommand, { type: 'react_companion' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.companionRuntime) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Companion runtime is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('companion', command)
+    await this.options.companionRuntime.reactToTurn(
+      { messages: command.messages },
+      {
+        cwd: this.runtimeWorkspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: { ok: true },
+    })
+  }
+
+  private async handleGetKairosStatus(
+    command: Extract<KernelRuntimeCommand, { type: 'get_kairos_status' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.kairosRuntime) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Kairos runtime is not available',
+        retryable: false,
+      })
+    }
+
+    const status = await this.options.kairosRuntime.getStatus({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ status }),
+    })
+  }
+
+  private async handleEnqueueKairosEvent(
+    command: Extract<KernelRuntimeCommand, { type: 'enqueue_kairos_event' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.kairosRuntime) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Kairos runtime is not available',
+        retryable: false,
+      })
+    }
+
+    await this.options.kairosRuntime.enqueueEvent(command.event, {
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    const status = await this.options.kairosRuntime.getStatus({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ status }),
+    })
+  }
+
+  private async handleTickKairos(
+    command: Extract<KernelRuntimeCommand, { type: 'tick_kairos' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.kairosRuntime) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Kairos runtime is not available',
+        retryable: false,
+      })
+    }
+
+    await this.options.kairosRuntime.tick(
+      {
+        reason: command.reason,
+        drain: command.drain,
+      },
+      {
+        cwd: this.runtimeWorkspacePath,
+        metadata: command.metadata,
+      },
+    )
+    const status = await this.options.kairosRuntime.getStatus({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ status }),
+    })
+  }
+
+  private async handleSuspendKairos(
+    command: Extract<KernelRuntimeCommand, { type: 'suspend_kairos' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.kairosRuntime) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Kairos runtime is not available',
+        retryable: false,
+      })
+    }
+
+    await this.options.kairosRuntime.suspend(command.reason, {
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    const status = await this.options.kairosRuntime.getStatus({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ status }),
+    })
+  }
+
+  private async handleResumeKairos(
+    command: Extract<KernelRuntimeCommand, { type: 'resume_kairos' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.kairosRuntime) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Kairos runtime is not available',
+        retryable: false,
+      })
+    }
+
+    await this.options.kairosRuntime.resume(command.reason, {
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    const status = await this.options.kairosRuntime.getStatus({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ status }),
+    })
+  }
+
+  private async handleListMemory(
+    command: Extract<KernelRuntimeCommand, { type: 'list_memory' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.memoryManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Memory manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('memory', command)
+    const descriptors = await this.options.memoryManager.listMemory({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ descriptors }),
+    })
+  }
+
+  private async handleReadMemory(
+    command: Extract<KernelRuntimeCommand, { type: 'read_memory' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.memoryManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Memory manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('memory', command)
+    const document = await this.options.memoryManager.readMemory(command.id, {
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ document }),
+    })
+  }
+
+  private async handleUpdateMemory(
+    command: Extract<KernelRuntimeCommand, { type: 'update_memory' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.memoryManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Memory manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('memory', command)
+    const document = await this.options.memoryManager.updateMemory(
+      {
+        id: command.id,
+        content: command.content,
+      },
+      {
+        cwd: this.runtimeWorkspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ document }),
+    })
+  }
+
+  private async handleReadContext(
+    command: Extract<KernelRuntimeCommand, { type: 'read_context' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.contextManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Context manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('context', command)
+    const snapshot = await this.options.contextManager.readContext({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ snapshot }),
+    })
+  }
+
+  private async handleGetContextGitStatus(
+    command: Extract<KernelRuntimeCommand, { type: 'get_context_git_status' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.contextManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Context manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('context', command)
+    const gitStatus = await this.options.contextManager.getGitStatus({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ gitStatus }),
+    })
+  }
+
+  private async handleGetSystemPromptInjection(
+    command: Extract<
+      KernelRuntimeCommand,
+      { type: 'get_system_prompt_injection' }
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.contextManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Context manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('context', command)
+    const value = await this.options.contextManager.getSystemPromptInjection({
+      cwd: this.runtimeWorkspacePath,
+      metadata: command.metadata,
+    })
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ value }),
+    })
+  }
+
+  private async handleSetSystemPromptInjection(
+    command: Extract<
+      KernelRuntimeCommand,
+      { type: 'set_system_prompt_injection' }
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.contextManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Context manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('context', command)
+    const value = await this.options.contextManager.setSystemPromptInjection(
+      command.value,
+      {
+        cwd: this.runtimeWorkspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ value }),
+    })
+  }
+
+  private async handleListSessionsCatalog(
+    command: Extract<KernelRuntimeCommand, { type: 'list_sessions' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.sessionManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Session manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('sessions', command)
+    const sessions = await this.options.sessionManager.listSessions(
+      {
+        cwd: command.cwd,
+        limit: command.limit,
+        offset: command.offset,
+        includeWorktrees: command.includeWorktrees,
+      },
+      {
+        cwd: this.runtimeWorkspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ sessions }),
+    })
+  }
+
+  private async handleResumeSession(
+    command: Extract<KernelRuntimeCommand, { type: 'resume_session' }>,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    await this.requireCatalogCapability('sessions', command)
+    const pathResume = command.sessionId.endsWith('.jsonl')
+    if (!pathResume && !this.options.sessionManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Session manager is not available',
+        retryable: false,
+      })
+    }
+
+    let workspacePath = command.workspacePath
+    if (pathResume) {
+      if (!(await Bun.file(command.sessionId).exists())) {
+        return this.eventBus.error({
+          requestId: command.requestId,
+          code: 'not_found',
+          message: `Unknown session transcript: ${command.sessionId}`,
+          retryable: false,
+        })
+      }
+      workspacePath ??= dirname(command.sessionId)
+    } else {
+      const descriptor = await this.findSessionDescriptor(
+        command.sessionId,
+        command.metadata,
+      )
+      if (!descriptor) {
+        return this.eventBus.error({
+          requestId: command.requestId,
+          code: 'not_found',
+          message: `Unknown session: ${command.sessionId}`,
+          retryable: false,
+        })
+      }
+      workspacePath ??= descriptor.cwd ?? this.runtimeWorkspacePath
+    }
+
+    const createConversationCommand: KernelRuntimeCreateConversationCommand = {
+      schemaVersion: command.schemaVersion,
+      type: 'create_conversation',
+      requestId: command.requestId,
+      conversationId:
+        command.conversationId ?? `session-${command.sessionId}`,
+      workspacePath: workspacePath ?? this.runtimeWorkspacePath,
+      sessionId: command.sessionId,
+      sessionMeta: sanitizeWirePayload({
+        resumeSource: pathResume ? 'transcript_path' : 'session_id',
+        sessionId: command.sessionId,
+      }),
+      metadata: command.metadata,
+    }
+    const ack = await this.handleCreateConversation(createConversationCommand)
+    const snapshot = ack.payload as KernelConversationSnapshot
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      conversationId: snapshot.conversationId,
+      payload: sanitizeWirePayload({ conversation: snapshot }),
+    })
+  }
+
+  private async handleGetSessionTranscript(
+    command: Extract<
+      KernelRuntimeCommand,
+      { type: 'get_session_transcript' }
+    >,
+  ): Promise<KernelRuntimeEnvelopeBase> {
+    if (!this.options.sessionManager) {
+      return this.eventBus.error({
+        requestId: command.requestId,
+        code: 'unavailable',
+        message: 'Session manager is not available',
+        retryable: false,
+      })
+    }
+
+    await this.requireCatalogCapability('sessions', command)
+    const transcript = await this.options.sessionManager.getSessionTranscript(
+      command.sessionId,
+      {
+        cwd: this.runtimeWorkspacePath,
+        metadata: command.metadata,
+      },
+    )
+    return this.eventBus.ack({
+      requestId: command.requestId,
+      payload: sanitizeWirePayload({ transcript }),
+    })
+  }
+
   private async requireCatalogCapability(
     name: KernelCapabilityName,
     command: Pick<KernelRuntimeCommand, 'requestId' | 'metadata'>,
   ): Promise<void> {
     try {
       await this.options.capabilityResolver?.requireCapability?.(name, {
-        cwd: this.options.workspacePath,
+        cwd: this.runtimeWorkspacePath,
         metadata: command.metadata,
       })
     } catch {
@@ -2097,7 +2780,10 @@ export class KernelRuntimeWireRouter {
     conversation: KernelRuntimeWireConversation,
     snapshot: KernelTurnSnapshot,
   ): void {
-    if (!this.options.runTurnExecutor || snapshot.state !== 'running') {
+    if (
+      !this.options.runTurnExecutor ||
+      (snapshot.state !== 'running' && snapshot.state !== 'aborting')
+    ) {
       return
     }
 
@@ -2110,7 +2796,13 @@ export class KernelRuntimeWireRouter {
     }
 
     const controller = new AbortController()
-    this.activeExecutions.set(executionKey, controller)
+    this.activeExecutions.set(executionKey, {
+      controller,
+      command,
+    })
+    if (snapshot.state === 'aborting') {
+      controller.abort(snapshot.stopReason ?? 'aborted')
+    }
     void this.runTurnExecution({
       command,
       conversation,
@@ -2138,6 +2830,11 @@ export class KernelRuntimeWireRouter {
         await result
       }
 
+      if (!terminalEmitted && context.signal.aborted) {
+        await this.completeTurnExecution(context, 'aborted')
+        return
+      }
+
       if (!terminalEmitted) {
         await this.completeTurnExecution(context, 'end_turn')
       }
@@ -2157,6 +2854,10 @@ export class KernelRuntimeWireRouter {
     context: KernelRuntimeWireTurnExecutionContext,
     event: KernelRuntimeWireTurnExecutionEvent,
   ): Promise<boolean> {
+    if (!this.shouldAcceptTurnExecutionEvent(context, event)) {
+      return false
+    }
+
     switch (event.type) {
       case 'output':
         this.eventBus.emit({
@@ -2188,6 +2889,47 @@ export class KernelRuntimeWireRouter {
         await this.failTurnExecution(context, event.error, event.metadata)
         return true
     }
+  }
+
+  private async findSessionDescriptor(
+    sessionId: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<KernelRuntimeSessionDescriptor | undefined> {
+    if (!this.options.sessionManager) {
+      return undefined
+    }
+
+    const sessions = await this.options.sessionManager.listSessions(
+      {},
+      {
+        cwd: this.runtimeWorkspacePath,
+        metadata,
+      },
+    )
+    return sessions.find(session => session.sessionId === sessionId)
+  }
+
+  private emitRuntimeDomainEvent(type: string, event: unknown): void {
+    this.eventBus.emit({
+      type,
+      replayable: true,
+      payload: sanitizeWirePayload({ event }),
+    })
+  }
+
+  private shouldAcceptTurnExecutionEvent(
+    context: KernelRuntimeWireTurnExecutionContext,
+    event: KernelRuntimeWireTurnExecutionEvent,
+  ): boolean {
+    if (context.conversation.activeTurnId !== context.command.turnId) {
+      return false
+    }
+
+    if (!context.signal.aborted) {
+      return true
+    }
+
+    return false
   }
 
   private async completeTurnExecution(
@@ -2253,10 +2995,17 @@ export class KernelRuntimeWireRouter {
         continue
       }
       const snapshot = conversation.abortTurn(activeTurnId, reason)
-      await this.recordConversationSnapshot(conversation, snapshot)
+      const activeExecution = this.activeExecutions.get(
+        this.turnExecutionKey(conversationId, activeTurnId),
+      )
+      await this.recordConversationSnapshot(
+        conversation,
+        snapshot,
+        activeExecution?.command,
+      )
       this.activeExecutions
         .get(this.turnExecutionKey(conversationId, activeTurnId))
-        ?.abort(reason)
+        ?.controller.abort(reason)
       abortedTurnIds.push(activeTurnId)
     }
     return abortedTurnIds
@@ -2281,6 +3030,9 @@ export class KernelRuntimeWireRouter {
         recovered.conversation.sessionId !== undefined &&
         command.sessionId !== recovered.conversation.sessionId
       ) {
+        return undefined
+      }
+      if (recovered.conversation.state === 'disposed') {
         return undefined
       }
       const conversation = normalizeRecoveredConversationSnapshot(
@@ -2333,7 +3085,8 @@ export class KernelRuntimeWireRouter {
           : undefined,
       activeExecution:
         activeExecution &&
-        activeTurnSnapshot?.state === 'running' &&
+        (activeTurnSnapshot?.state === 'running' ||
+          activeTurnSnapshot?.state === 'aborting') &&
         conversationSnapshot.activeTurnId === activeExecution.turnId &&
         activeTurnSnapshot.turnId === activeExecution.turnId
           ? activeExecution
@@ -2610,7 +3363,11 @@ function selectRecoveredActiveExecution(
   activeTurn: KernelTurnSnapshot | undefined,
   activeExecution: KernelRuntimeRunTurnCommand | undefined,
 ): KernelRuntimeRunTurnCommand | undefined {
-  if (!activeTurn || activeTurn.state !== 'running' || !activeExecution) {
+  if (
+    !activeTurn ||
+    (activeTurn.state !== 'running' && activeTurn.state !== 'aborting') ||
+    !activeExecution
+  ) {
     return undefined
   }
   if (

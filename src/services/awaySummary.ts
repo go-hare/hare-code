@@ -11,9 +11,14 @@ import { asSystemPrompt } from '../utils/systemPromptType.js'
 import { getResolvedLanguage } from '../utils/language.js'
 import { queryModelWithoutStreaming } from './api/claude.js'
 import { createTrace, endTrace, isLangfuseEnabled } from './langfuse/index.js'
-import { getSessionId } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { getAPIProvider } from '../utils/model/providers.js'
 import { getSessionMemoryContent } from './SessionMemory/sessionMemoryUtils.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getSessionId = () =>
+  runtimeSessionIdentityState.getSessionIdentity().sessionId
 
 // Recap only needs recent context — truncate to avoid "prompt too long" on
 // large sessions. 30 messages ≈ ~15 exchanges, plenty for "where we left off."

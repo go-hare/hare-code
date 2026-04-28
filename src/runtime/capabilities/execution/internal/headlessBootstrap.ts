@@ -31,7 +31,7 @@ import { errorMessage } from '../../../../utils/errors.js'
 import { isEnvTruthy } from '../../../../utils/envUtils.js'
 import { jsonStringify } from '../../../../utils/slowOperations.js'
 import type { UUID } from 'crypto'
-import type { RuntimeBootstrapStateProvider } from '../../../core/state/providers.js'
+import type { RuntimeSessionIdentityStateProvider } from '../../../core/state/providers.js'
 import type { HeadlessSessionContext } from './headlessSessionControl.js'
 import type { HeadlessLoadedConversationResult } from './headlessSessionBootstrap.js'
 
@@ -55,7 +55,7 @@ export type LoadInitialMessagesResult = {
 }
 
 export function emitLoadError(
-  bootstrapStateProvider: RuntimeBootstrapStateProvider,
+  bootstrapStateProvider: RuntimeSessionIdentityStateProvider,
   message: string,
   outputFormat: string | undefined,
 ): void {

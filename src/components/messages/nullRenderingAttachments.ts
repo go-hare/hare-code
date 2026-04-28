@@ -15,6 +15,7 @@ const NULL_RENDERING_TYPES = [
   'hook_success',
   'hook_additional_context',
   'hook_cancelled',
+  'active_task_completion_reminder',
   'command_permissions',
   'agent_mention',
   'budget_usd',

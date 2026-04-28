@@ -27,7 +27,10 @@ import { hasWorktreeCreateHook } from '../utils/hooks.js'
 import { findGitRoot, getBranch, getRemoteUrl } from '../utils/git.js'
 import { initSinks } from '../utils/sinks.js'
 import { checkHasTrustDialogAccepted, enableConfigs } from '../utils/config.js'
-import { setCwdState, setOriginalCwd } from '../bootstrap/state.js'
+import {
+  createRuntimePathStateWriter,
+  type RuntimePathStateWriter,
+} from '../runtime/core/state/bootstrapProvider.js'
 import { getBootstrapArgs, getScriptPath } from '../utils/cliLaunch.js'
 import { BridgeHeadlessPermanentError, type HeadlessBridgeOpts } from '../runtime/capabilities/bridge/HeadlessBridgeRuntime.js'
 import type {
@@ -492,7 +495,12 @@ export async function startBridgeCliPointerRefresh(
 
 export function createBridgeHeadlessDeps(
   runBridgeLoop: BridgeLoopRunner,
+  options: {
+    pathStateWriter?: RuntimePathStateWriter
+  } = {},
 ): HeadlessBridgeDeps {
+  const pathStateWriter =
+    options.pathStateWriter ?? createRuntimePathStateWriter()
   return {
     bridgeLoginError: BRIDGE_LOGIN_ERROR,
     async getBaseUrl() {
@@ -500,8 +508,8 @@ export function createBridgeHeadlessDeps(
     },
     async setWorkingDirectory(dir: string) {
       process.chdir(dir)
-      setOriginalCwd(dir)
-      setCwdState(dir)
+      pathStateWriter.setOriginalCwd(dir)
+      pathStateWriter.setCwd(dir)
     },
     async ensureTrustedWorkspace() {
       enableConfigs()

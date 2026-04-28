@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNotifications } from 'src/context/notifications.js'
-import { getIsRemoteMode } from '../../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { getSettingsWithAllErrors } from '../../utils/settings/allErrors.js'
 import type { ValidationError } from '../../utils/settings/validation.js'
 import { useSettingsChange } from '../useSettingsChange.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 const SETTINGS_ERRORS_NOTIFICATION_KEY = 'settings-errors'
 
@@ -22,7 +28,7 @@ export function useSettingsErrors(): ValidationError[] {
   useSettingsChange(handleSettingsChange)
 
   useEffect(() => {
-    if (getIsRemoteMode()) return
+    if (isRemoteMode()) return
     if (errors.length > 0) {
       const message = `Found ${errors.length} settings ${errors.length === 1 ? 'issue' : 'issues'} · /doctor for details`
       addNotification({

@@ -1,15 +1,14 @@
 import type { AppState } from 'src/state/AppStateStore.js'
 import type {
   RuntimeAppStateProvider,
-  RuntimeBootstrapStateProvider,
-  RuntimeStateProviders,
+  RuntimeExecutionSessionStateProvider,
+  RuntimeExecutionStateProviders,
 } from './providers.js'
-import { createBootstrapStateProvider } from './bootstrapProvider.js'
 
 type RuntimeAppStateAdapterOptions = {
   getAppState: () => AppState
   setAppState: (updater: (prev: AppState) => AppState) => void
-  bootstrapStateProvider?: RuntimeBootstrapStateProvider
+  bootstrapStateProvider: RuntimeExecutionSessionStateProvider
 }
 
 export function createAppStateProvider(
@@ -80,10 +79,12 @@ export function createAppStateProvider(
 
 export function createExecutionStateProviders(
   options: RuntimeAppStateAdapterOptions,
-): RuntimeStateProviders {
+): RuntimeExecutionStateProviders {
+  if (!options.bootstrapStateProvider) {
+    throw new Error('bootstrapStateProvider is required')
+  }
   return {
-    bootstrap:
-      options.bootstrapStateProvider ?? createBootstrapStateProvider(),
+    bootstrap: options.bootstrapStateProvider,
     app: createAppStateProvider(options),
   }
 }

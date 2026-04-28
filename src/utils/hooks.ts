@@ -3139,7 +3139,7 @@ export function hasBlockingResult(results: HookOutsideReplResult[]): boolean {
  * @param timeoutMs Optional timeout in milliseconds for hook execution
  * @returns Array of HookOutsideReplResult objects containing command, succeeded, and output
  */
-async function executeHooksOutsideREPL({
+export async function executeHooksOutsideREPL({
   getAppState,
   hookInput,
   matchQuery,

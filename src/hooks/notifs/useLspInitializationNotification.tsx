@@ -1,8 +1,11 @@
 import * as React from 'react'
 import { useInterval } from 'usehooks-ts'
-import { getIsRemoteMode, getIsScrollDraining } from '../../bootstrap/state.js'
 import { useNotifications } from '../../context/notifications.js'
 import { Text } from '@anthropic/ink'
+import {
+  createRuntimeHeadlessControlStateProvider,
+  createRuntimeHostRenderLoopStateProvider,
+} from '../../runtime/core/state/bootstrapProvider.js'
 import {
   getInitializationStatus,
   getLspServerManager,
@@ -12,6 +15,10 @@ import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 
 const LSP_POLL_INTERVAL_MS = 5000
+const runtimeHeadlessControlState =
+  createRuntimeHeadlessControlStateProvider()
+const runtimeHostRenderLoopState =
+  createRuntimeHostRenderLoopStateProvider()
 
 /**
  * Hook that polls LSP status and shows a notification when:
@@ -99,10 +106,11 @@ export function useLspInitializationNotification(): void {
   )
 
   const poll = React.useCallback(() => {
-    if (getIsRemoteMode()) return
+    if (runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode)
+      return
     // Skip during scroll drain — iterating all LSP servers + setAppState
     // competes for the event loop with scroll frames. Next interval picks up.
-    if (getIsScrollDraining()) return
+    if (runtimeHostRenderLoopState.getIsScrollDraining()) return
 
     const status = getInitializationStatus()
 
@@ -135,7 +143,11 @@ export function useLspInitializationNotification(): void {
 
   // Initial poll on mount
   React.useEffect(() => {
-    if (getIsRemoteMode() || !shouldPoll) return
+    if (
+      runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode ||
+      !shouldPoll
+    )
+      return
     poll()
   }, [poll, shouldPoll])
 }

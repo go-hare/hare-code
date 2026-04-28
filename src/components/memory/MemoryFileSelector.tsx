@@ -4,7 +4,7 @@ import { mkdir } from 'fs/promises'
 import { join } from 'path'
 import * as React from 'react'
 import { use, useEffect, useState } from 'react'
-import { getOriginalCwd } from '../../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../../runtime/core/state/bootstrapProvider.js'
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js'
 import { Box, Text, ListItem } from '@anthropic/ink'
 import { useKeybinding } from '../../keybindings/useKeybinding.js'
@@ -33,6 +33,11 @@ interface ExtendedMemoryFileInfo extends MemoryFileInfo {
   isNested?: boolean
   exists: boolean
 }
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 // Remember last selected path
 let lastSelectedPath: string | undefined

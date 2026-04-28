@@ -54,7 +54,7 @@ describe('SessionRuntime contracts', () => {
     )
     expect(content).toContain('for await (const envelope of askRuntime(options))')
     expect(content).toContain('getSDKMessageFromRuntimeEnvelope(envelope)')
-    expect(content).toContain('for await (const message of this.runQueryTurn')
+    expect(content).toContain('for await (const message of this.bindBootstrapState(')
     expect(queryEngineEntryContent).not.toContain('ask,')
     expect(acpAgentContent).toContain(
       'session.queryEngine.submitRuntimeTurn(promptInput)',

@@ -2,7 +2,7 @@ import axios from 'axios'
 import { readFile, stat } from 'fs/promises'
 import * as React from 'react'
 import { useCallback, useEffect, useState } from 'react'
-import { getLastAPIRequest } from 'src/bootstrap/state.js'
+import { createRuntimeRequestDebugStateProvider } from 'src/runtime/core/state/bootstrapProvider.js'
 import { logEventTo1P } from 'src/services/analytics/firstPartyEventLogger.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -38,6 +38,11 @@ import { asSystemPrompt } from '../utils/systemPromptType.js'
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js'
 import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink'
 import TextInput from './TextInput.js'
+
+const runtimeRequestDebugState = createRuntimeRequestDebugStateProvider()
+
+const getLastAPIRequest = () =>
+  runtimeRequestDebugState.getRequestDebugState().lastApiRequest
 
 // This value was determined experimentally by testing the URL length limit
 const GITHUB_URL_LIMIT = 7250

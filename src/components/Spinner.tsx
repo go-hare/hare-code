@@ -8,8 +8,12 @@ import {
   SHIMMER_INTERVAL_MS,
 } from '../bridge/bridgeStatusUtil.js'
 import { feature } from 'bun:bundle'
-import { getKairosActive, getUserMsgOptIn } from '../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import {
+  createRuntimeKairosStateProvider,
+  createRuntimeUsageStateProvider,
+  createRuntimeUserMessageOptInStateProvider,
+} from '../runtime/core/state/bootstrapProvider.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { count } from '../utils/array.js'
 import sample from 'lodash-es/sample.js'
@@ -38,15 +42,16 @@ import { getMainLoopModel } from '../utils/model/model.js'
 import { getViewedTeammateTask } from '../state/selectors.js'
 import { TEARDROP_ASTERISK } from '../constants/figures.js'
 import figures from 'figures'
-import {
-  getCurrentTurnTokenBudget,
-  getTurnOutputTokens,
-} from '../bootstrap/state.js'
 
 import { TeammateSpinnerTree } from './Spinner/TeammateSpinnerTree.js'
 import { useAnimationFrame } from '@anthropic/ink'
 import { getGlobalConfig } from '../utils/config.js'
 export type { SpinnerMode } from './Spinner/index.js'
+
+const runtimeKairosState = createRuntimeKairosStateProvider()
+const runtimeUsageState = createRuntimeUsageStateProvider()
+const runtimeUserMessageOptInState =
+  createRuntimeUserMessageOptInStateProvider()
 
 const DEFAULT_CHARACTERS = getDefaultCharacters()
 
@@ -104,8 +109,8 @@ export function SpinnerWithVerb(props: Props): React.ReactNode {
   // spinner instance → hooks stay unconditional (two subs, negligible).
   if (
     (feature('KAIROS') || feature('KAIROS_BRIEF')) &&
-    (getKairosActive() ||
-      (getUserMsgOptIn() &&
+    (runtimeKairosState.getKairosActive() ||
+      (runtimeUserMessageOptInState.getUserMsgOptIn() &&
         (briefEnvEnabled ||
           getFeatureValue_CACHED_MAY_BE_STALE('tengu_kairos_brief', false)))) &&
     isBriefOnly &&
@@ -349,9 +354,10 @@ function SpinnerWithVerbInner({
   // Budget text (ant-only) — shown above the tip line
   let budgetText: string | null = null
   if (feature('TOKEN_BUDGET')) {
-    const budget = getCurrentTurnTokenBudget()
+    const executionBudget = runtimeUsageState.getExecutionBudget()
+    const budget = executionBudget.currentTurnTokenBudget
     if (budget !== null && budget > 0) {
-      const tokens = getTurnOutputTokens()
+      const tokens = executionBudget.turnOutputTokens
       if (tokens >= budget) {
         budgetText = `Target: ${formatNumber(tokens)} used (${formatNumber(budget)} min ${figures.tick})`
       } else {

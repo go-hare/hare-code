@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { AssistantChatLaunchOptions } from '../assistantChatLauncher.js'
 
 const callOrder: string[] = []
@@ -83,11 +83,15 @@ const mockPrepareApiRequest = mock(async () => {
   }
 })
 
+const actualMessages = await import('../../../../utils/messages.js')
+const actualCommands = await import('../../../../commands.js')
+
 mock.module('../../../../replLauncher.js', () => ({
   launchRepl: mockLaunchRepl,
 }))
 
 mock.module('../../../../utils/messages.js', () => ({
+  ...actualMessages,
   createSystemMessage: mockCreateSystemMessage,
   createUserMessage: mockCreateUserMessage,
 }))
@@ -97,6 +101,7 @@ mock.module('../../../../remote/RemoteSessionManager.js', () => ({
 }))
 
 mock.module('../../../../commands.js', () => ({
+  ...actualCommands,
   filterCommandsForRemoteMode: mockFilterCommandsForRemoteMode,
 }))
 
@@ -124,6 +129,10 @@ mock.module('../teleportApiDeps.js', () => ({
 }))
 
 const { runAssistantChatLaunch } = await import('../assistantChatLauncher.js')
+
+afterAll(() => {
+  mock.restore()
+})
 
 function createLaunchOptions(): AssistantChatLaunchOptions {
   return {

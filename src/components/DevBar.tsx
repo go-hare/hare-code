@@ -1,7 +1,9 @@
 import * as React from 'react'
 import { useState } from 'react'
-import { getSlowOperations } from '../bootstrap/state.js'
 import { Text, useInterval } from '@anthropic/ink'
+import { createRuntimeObservabilityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
+
+const runtimeObservabilityState = createRuntimeObservabilityStateProvider()
 
 // Show DevBar for dev builds or all ants
 function shouldShowDevBar(): boolean {
@@ -18,11 +20,11 @@ export function DevBar(): React.ReactNode {
         durationMs: number
         timestamp: number
       }>
-    >(getSlowOperations)
+    >(runtimeObservabilityState.getSlowOperations)
 
   useInterval(
     () => {
-      setSlowOps(getSlowOperations())
+      setSlowOps(runtimeObservabilityState.getSlowOperations())
     },
     shouldShowDevBar() ? 500 : null,
   )

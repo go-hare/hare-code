@@ -1,7 +1,7 @@
 import { APIError } from '@anthropic-ai/sdk'
 import type { MessageParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import isEqual from 'lodash-es/isEqual.js'
-import { getIsNonInteractiveSession } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { isClaudeAISubscriber } from '../utils/auth.js'
 import { getModelBetas } from '../utils/betas.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
@@ -18,6 +18,12 @@ import {
 } from './rateLimitMocking.js'
 import { anthropicAdapter } from './providerUsage/adapters/anthropic.js'
 import { updateProviderBuckets } from './providerUsage/store.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+function isNonInteractiveSession(): boolean {
+  return !runtimeSessionIdentityState.getSessionIdentity().isInteractive
+}
 
 // Re-export message functions from centralized location
 export {
@@ -233,7 +239,7 @@ export async function checkQuotaStatus(): Promise<void> {
   // In non-interactive mode (-p), the real query follows immediately and
   // extractQuotaStatusFromHeaders() will update limits from its response
   // headers (claude.ts), so skip this pre-check API call.
-  if (getIsNonInteractiveSession()) {
+  if (isNonInteractiveSession()) {
     return
   }
 

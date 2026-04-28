@@ -64,6 +64,7 @@ export function createDefaultRuntimeCapabilityDefinitions(): readonly RuntimeCap
     }),
     capability('agents', { dependencies: ['tools', 'permissions'] }),
     capability('tasks', { dependencies: ['agents', 'sessions'] }),
+    capability('context', { dependencies: ['runtime', 'events'] }),
     capability('memory', { dependencies: ['runtime', 'events'] }),
     capability('sessions', { dependencies: ['runtime', 'events'] }),
     capability('execution', {

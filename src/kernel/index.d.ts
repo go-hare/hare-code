@@ -2248,6 +2248,89 @@ export type KernelRuntimeWireProtocolOptions = {
   pluginCatalog?: KernelRuntimeWirePluginCatalog
   agentRegistry?: KernelRuntimeWireAgentRegistry
   taskRegistry?: KernelRuntimeWireTaskRegistry
+  companionRuntime?: {
+    getState(
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): KernelCompanionState | null | Promise<KernelCompanionState | null>
+    dispatch(
+      action: KernelCompanionAction,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): KernelCompanionState | null | Promise<KernelCompanionState | null>
+    reactToTurn(
+      request: KernelCompanionReactionRequest,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): void | Promise<void>
+    onEvent?(handler: (event: KernelCompanionEvent) => void): (() => void) | void
+  }
+  kairosRuntime?: {
+    getStatus(
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): KernelKairosStatus | Promise<KernelKairosStatus>
+    enqueueEvent(
+      event: KernelKairosExternalEvent,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): void | Promise<void>
+    tick(
+      request?: KernelKairosTickRequest,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): void | Promise<void>
+    suspend(
+      reason?: string,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): void | Promise<void>
+    resume(
+      reason?: string,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): void | Promise<void>
+    onEvent?(handler: (event: KernelKairosEvent) => void): (() => void) | void
+  }
+  memoryManager?: {
+    listMemory(
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): readonly KernelMemoryDescriptor[] | Promise<readonly KernelMemoryDescriptor[]>
+    readMemory(
+      id: string,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): KernelMemoryDocument | Promise<KernelMemoryDocument>
+    updateMemory(
+      request: { id: string; content: string },
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): KernelMemoryDocument | Promise<KernelMemoryDocument>
+  }
+  contextManager?: {
+    readContext(
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): KernelContextSnapshot | Promise<KernelContextSnapshot>
+    getGitStatus(
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): string | null | Promise<string | null>
+    getSystemPromptInjection(
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): string | null | Promise<string | null>
+    setSystemPromptInjection(
+      value: string | null,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): string | null | Promise<string | null>
+  }
+  sessionManager?: {
+    listSessions(
+      filter?: {
+        cwd?: string
+        limit?: number
+        offset?: number
+        includeWorktrees?: boolean
+      },
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): readonly KernelSessionDescriptor[] | Promise<readonly KernelSessionDescriptor[]>
+    resumeSession(
+      sessionId: string,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): KernelTranscript | Promise<KernelTranscript>
+    getSessionTranscript(
+      sessionId: string,
+      context?: { cwd?: string; metadata?: Record<string, unknown> },
+    ): KernelTranscript | Promise<KernelTranscript>
+  }
   permissionBroker?: KernelRuntimeWirePermissionBroker
   runTurnExecutor?: KernelRuntimeWireTurnExecutor
   headlessExecutor?: false | KernelRuntimeHeadlessProcessExecutorOptions
@@ -2525,6 +2608,32 @@ export type KernelRuntimePermissions = {
   decide(decision: KernelPermissionDecision): Promise<KernelPermissionDecision>
 }
 
+export type KernelRuntimeContextManager = {
+  read(): Promise<KernelContextSnapshot>
+  getSystem(): Promise<Record<string, string>>
+  getUser(): Promise<Record<string, string>>
+  getGitStatus(): Promise<string | null>
+  getSystemPromptInjection(): Promise<string | null>
+  setSystemPromptInjection(value: string | null): Promise<string | null>
+}
+
+export type KernelRuntimeSessionResumeOptions = {
+  conversationId?: string
+  workspacePath?: string
+  metadata?: Record<string, unknown>
+}
+
+export type KernelRuntimeSessionManager = {
+  list(
+    filter?: KernelSessionListFilter,
+  ): Promise<readonly KernelSessionDescriptor[]>
+  resume(
+    sessionId: string,
+    options?: KernelRuntimeSessionResumeOptions,
+  ): Promise<KernelConversation>
+  getTranscript(sessionId: string): Promise<KernelTranscript>
+}
+
 export type KernelTurn = {
   readonly id: string
   readonly conversationId: string
@@ -2583,6 +2692,11 @@ export type KernelRuntime = {
   readonly plugins: KernelRuntimePlugins
   readonly agents: KernelRuntimeAgents
   readonly tasks: KernelRuntimeTasks
+  readonly companion: KernelCompanionRuntime
+  readonly kairos: KernelKairosRuntime
+  readonly memory: KernelMemoryManager
+  readonly context: KernelRuntimeContextManager
+  readonly sessions: KernelRuntimeSessionManager
   readonly permissions: KernelRuntimePermissions
   readonly state: KernelRuntimeState
   start(): Promise<void>
@@ -2938,3 +3052,259 @@ export declare function createKernelRuntimeWireClient(
 export declare function runKernelRuntimeWireProtocol(
   options?: KernelRuntimeWireRunnerOptions,
 ): Promise<void>
+
+export type KernelCompanionState = {
+  seed: string
+  muted: boolean
+  hasStoredCompanion: boolean
+  profile: Record<string, unknown> | null
+  companion: Record<string, unknown> | null
+}
+
+export type KernelCompanionAction =
+  | { type: 'hatch'; seed?: string }
+  | { type: 'rehatch'; seed?: string }
+  | { type: 'mute' }
+  | { type: 'unmute' }
+  | { type: 'pet'; note?: string }
+  | { type: 'clear'; seed?: string }
+
+export type KernelCompanionReactionRequest = {
+  messages: readonly unknown[]
+}
+
+export type KernelCompanionEvent =
+  | {
+      type: 'state_changed'
+      action: KernelCompanionAction['type']
+      state: KernelCompanionState | null
+    }
+  | {
+      type: 'petted'
+      note?: string
+      state: KernelCompanionState | null
+    }
+  | {
+      type: 'reaction'
+      reaction: string
+      state: KernelCompanionState | null
+    }
+  | {
+      type: 'reaction_skipped'
+      reason: string
+      state: KernelCompanionState | null
+    }
+
+export type KernelCompanionRuntime = {
+  getState(): Promise<KernelCompanionState | null>
+  dispatch(
+    action: KernelCompanionAction,
+  ): Promise<KernelCompanionState | null>
+  reactToTurn(request: KernelCompanionReactionRequest): Promise<void>
+  onEvent(handler: (event: KernelCompanionEvent) => void): () => void
+}
+
+export type KernelCompanionRuntimeOptions = {
+  signal?: AbortSignal
+  generateStoredCompanion?: (
+    seed: string,
+    signal: AbortSignal,
+  ) => Promise<Record<string, unknown>>
+  triggerReaction?: (
+    messages: readonly unknown[],
+    setReaction: (reaction: string | undefined) => void,
+  ) => void
+}
+
+export declare function createKernelCompanionRuntime(
+  options?: KernelCompanionRuntimeOptions,
+): KernelCompanionRuntime
+
+export type KernelKairosStatus = {
+  enabled: boolean
+  runtimeEnabled: boolean
+  suspended: boolean
+  pendingEvents: number
+  lastTickAt?: string
+  suspendedReason?: string
+}
+
+export type KernelKairosExternalEvent = {
+  type: string
+  payload?: unknown
+  metadata?: Record<string, unknown>
+}
+
+export type KernelKairosTickRequest = {
+  reason?: string
+  drain?: boolean
+}
+
+export type KernelKairosEvent =
+  | {
+      type: 'event_enqueued'
+      event: KernelKairosExternalEvent
+      status: KernelKairosStatus
+    }
+  | {
+      type: 'tick'
+      request?: KernelKairosTickRequest
+      drainedEvents: readonly KernelKairosExternalEvent[]
+      status: KernelKairosStatus
+    }
+  | { type: 'suspended'; reason?: string; status: KernelKairosStatus }
+  | { type: 'resumed'; reason?: string; status: KernelKairosStatus }
+
+export type KernelKairosRuntime = {
+  getStatus(): Promise<KernelKairosStatus>
+  enqueueEvent(event: KernelKairosExternalEvent): Promise<void>
+  tick(request?: KernelKairosTickRequest): Promise<void>
+  suspend(reason?: string): Promise<void>
+  resume(reason?: string): Promise<void>
+  onEvent(handler: (event: KernelKairosEvent) => void): () => void
+}
+
+export type KernelKairosRuntimeOptions = {
+  isEnabled?: () => boolean
+  isRuntimeEnabled?: () => Promise<boolean>
+  now?: () => string
+}
+
+export declare function createKernelKairosRuntime(
+  options?: KernelKairosRuntimeOptions,
+): KernelKairosRuntime
+
+export type KernelMemorySource =
+  | 'managed'
+  | 'user'
+  | 'project'
+  | 'local'
+  | 'auto'
+  | 'team'
+  | 'unknown'
+
+export type KernelMemoryDescriptor = {
+  id: string
+  path: string
+  source: KernelMemorySource
+  bytes: number
+  parent?: string
+  globs?: readonly string[]
+}
+
+export type KernelMemoryDocument = KernelMemoryDescriptor & {
+  content: string
+}
+
+export type KernelMemoryUpdateRequest = {
+  id: string
+  content: string
+}
+
+export type KernelMemoryManager = {
+  list(): Promise<readonly KernelMemoryDescriptor[]>
+  read(id: string): Promise<KernelMemoryDocument>
+  update(request: KernelMemoryUpdateRequest): Promise<KernelMemoryDocument>
+}
+
+export type KernelMemoryManagerOptions = {
+  loadFiles?: () => Promise<
+    Array<{
+      path: string
+      type: string
+      content: string
+      parent?: string
+      globs?: string[]
+    }>
+  >
+  readFile?: (path: string) => Promise<string>
+  writeFile?: (path: string, content: string) => Promise<void>
+  invalidateCaches?: () => void
+}
+
+export declare function createKernelMemoryManager(
+  options?: KernelMemoryManagerOptions,
+): KernelMemoryManager
+
+export type KernelContextSnapshot = {
+  system: Record<string, string>
+  user: Record<string, string>
+}
+
+export type KernelContextManager = {
+  read(): Promise<KernelContextSnapshot>
+  getSystem(): Promise<Record<string, string>>
+  getUser(): Promise<Record<string, string>>
+  getGitStatus(): Promise<string | null>
+  getSystemPromptInjection(): string | null
+  setSystemPromptInjection(value: string | null): void
+}
+
+export type KernelContextManagerOptions = {
+  getSystem?: () => Promise<Record<string, string>>
+  getUser?: () => Promise<Record<string, string>>
+  getGitStatus?: () => Promise<string | null>
+  getSystemPromptInjection?: () => string | null
+  setSystemPromptInjection?: (value: string | null) => void
+}
+
+export declare function createKernelContextManager(
+  options?: KernelContextManagerOptions,
+): KernelContextManager
+
+export type KernelSessionDescriptor = {
+  sessionId: string
+  summary: string
+  lastModified: number
+  fileSize?: number
+  customTitle?: string
+  firstPrompt?: string
+  gitBranch?: string
+  cwd?: string
+  tag?: string
+  createdAt?: number
+}
+
+export type KernelSessionListFilter = {
+  cwd?: string
+  limit?: number
+  offset?: number
+  includeWorktrees?: boolean
+}
+
+export type KernelTranscript = {
+  sessionId?: string
+  fullPath?: string
+  messages: readonly unknown[]
+  customTitle?: string
+  summary?: string
+  tag?: string
+  mode?: 'coordinator' | 'normal'
+  turnInterruptionState: 'none' | 'interrupted_prompt'
+}
+
+export type KernelSessionResume = KernelTranscript
+
+export type KernelSessionManager = {
+  list(
+    filter?: KernelSessionListFilter,
+  ): Promise<readonly KernelSessionDescriptor[]>
+  resume(sessionId: string): Promise<KernelSessionResume>
+  getTranscript(sessionId: string): Promise<KernelTranscript>
+}
+
+export type KernelSessionManagerOptions = {
+  listSessions?: (
+    options?: {
+      dir?: string
+      limit?: number
+      offset?: number
+      includeWorktrees?: boolean
+    },
+  ) => Promise<readonly KernelSessionDescriptor[]>
+  loadTranscript?: (sessionId: string) => Promise<KernelTranscript>
+}
+
+export declare function createKernelSessionManager(
+  options?: KernelSessionManagerOptions,
+): KernelSessionManager

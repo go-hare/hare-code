@@ -30,6 +30,13 @@ import type {
   KernelRuntimeTools,
 } from './runtime.js'
 import {
+  createKernelRuntimeAsyncContextFacade,
+  createKernelRuntimeCompanionFacade,
+  createKernelRuntimeKairosFacade,
+  createKernelRuntimeMemoryFacade,
+  createKernelRuntimeSessionFacade,
+} from './runtimeDeveloperFacades.js'
+import {
   createDefaultKernelRuntimeWireRouter,
   createKernelRuntimeInProcessWireTransport,
   createKernelRuntimeStdioWireTransport,
@@ -74,6 +81,11 @@ class KernelRuntimeFacade implements KernelRuntime {
   readonly plugins: KernelRuntime['plugins']
   readonly agents: KernelRuntime['agents']
   readonly tasks: KernelRuntime['tasks']
+  readonly companion: KernelRuntime['companion']
+  readonly kairos: KernelRuntime['kairos']
+  readonly memory: KernelRuntime['memory']
+  readonly context: KernelRuntime['context']
+  readonly sessions: KernelRuntime['sessions']
   readonly permissions: KernelRuntimePermissions
   private readonly client: KernelRuntimeWireClient
   private currentState: KernelRuntimeState = 'created'
@@ -96,6 +108,11 @@ class KernelRuntimeFacade implements KernelRuntime {
     this.plugins = createKernelRuntimePluginsFacade(this.client)
     this.agents = createKernelRuntimeAgentsFacade(this.client)
     this.tasks = createKernelRuntimeTasksFacade(this.client)
+    this.companion = createKernelRuntimeCompanionFacade(this.client)
+    this.kairos = createKernelRuntimeKairosFacade(this.client)
+    this.memory = createKernelRuntimeMemoryFacade(this.client)
+    this.context = createKernelRuntimeAsyncContextFacade(this.client)
+    this.sessions = createKernelRuntimeSessionFacade(this.client)
     this.permissions = { decide: decision => this.decidePermission(decision) }
   }
 

@@ -5,13 +5,11 @@
 import { feature } from 'bun:bundle'
 import { randomUUID, type UUID } from 'crypto'
 import { getReplBridgeHandle } from '../../bridge/replBridgeHandle.js'
-import {
-  getLastMainRequestId,
-  getOriginalCwd,
-  getSessionId,
-  regenerateSessionId,
-} from '../../bootstrap/state.js'
 import type { SDKStatusMessage } from '../../entrypoints/sdk/coreTypes.js'
+import {
+  createRuntimeRequestDebugStateProvider,
+  createRuntimeSessionIdentityStateProvider,
+} from '../../runtime/core/state/bootstrapProvider.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -47,6 +45,10 @@ import {
 } from '../../utils/task/diskOutput.js'
 import { getCurrentWorktreeSession } from '../../utils/worktree.js'
 import { clearSessionCaches } from './caches.js'
+
+const runtimeRequestDebugState = createRuntimeRequestDebugStateProvider()
+const runtimeSessionIdentityState =
+  createRuntimeSessionIdentityStateProvider()
 
 function notifyRemoteConversationCleared(): void {
   const handle = getReplBridgeHandle()
@@ -91,7 +93,8 @@ export async function clearConversation({
   })
 
   // Signal to inference that this conversation's cache can be evicted.
-  const lastRequestId = getLastMainRequestId()
+  const lastRequestId =
+    runtimeRequestDebugState.getRequestDebugState().lastMainRequestId
   if (lastRequestId) {
     logEvent('tengu_cache_eviction_hint', {
       scope:
@@ -144,7 +147,7 @@ export async function clearConversation({
   // tracking) is retained so those agents keep functioning.
   clearSessionCaches(preservedAgentIds)
 
-  setCwd(getOriginalCwd())
+  setCwd(runtimeSessionIdentityState.getSessionIdentity().originalCwd)
   readFileState.clear()
   discoveredSkillNames?.clear()
   loadedNestedMemoryPaths?.clear()
@@ -218,10 +221,11 @@ export async function clearConversation({
 
   // Generate new session ID to provide fresh state
   // Set the old session as parent for analytics lineage tracking
-  regenerateSessionId({ setCurrentAsParent: true })
+  runtimeSessionIdentityState.regenerateSessionId({ setCurrentAsParent: true })
   // Update the environment variable so subprocesses use the new session ID
   if (process.env.USER_TYPE === 'ant' && process.env.CLAUDE_CODE_SESSION_ID) {
-    process.env.CLAUDE_CODE_SESSION_ID = getSessionId()
+    process.env.CLAUDE_CODE_SESSION_ID =
+      runtimeSessionIdentityState.getSessionIdentity().sessionId
   }
   await resetSessionFilePointer()
 

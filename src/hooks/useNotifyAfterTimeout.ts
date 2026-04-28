@@ -1,15 +1,14 @@
 import { useEffect } from 'react'
-import {
-  getLastInteractionTime,
-  updateLastInteractionTime,
-} from '../bootstrap/state.js'
 import { useTerminalNotification } from '@anthropic/ink'
+import { createRuntimeUsageStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { sendNotification } from '../services/notifier.js'
 // The time threshold in milliseconds for considering an interaction "recent" (6 seconds)
 export const DEFAULT_INTERACTION_THRESHOLD_MS = 6000
 
+const runtimeUsageState = createRuntimeUsageStateProvider()
+
 function getTimeSinceLastInteraction(): number {
-  return Date.now() - getLastInteractionTime()
+  return Date.now() - runtimeUsageState.getUsageSnapshot().lastInteractionTime
 }
 
 function hasRecentInteraction(threshold: number): boolean {
@@ -47,7 +46,7 @@ export function useNotifyAfterTimeout(
   // already flushed; without it the timestamp stays stale and a premature
   // notification fires if the user is idle (no subsequent renders to flush).
   useEffect(() => {
-    updateLastInteractionTime(true)
+    runtimeUsageState.markInteraction(true)
   }, [])
 
   useEffect(() => {

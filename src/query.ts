@@ -103,13 +103,11 @@ import { buildQueryConfig } from './query/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
 import type { Terminal, Continue } from './query/transitions.js'
 import { createTurnEngine } from './runtime/capabilities/execution/TurnEngine.js'
-import { feature } from 'bun:bundle'
 import {
-  getCurrentTurnTokenBudget,
-  getSessionId,
-  getTurnOutputTokens,
-  incrementBudgetContinuationCount,
-} from './bootstrap/state.js'
+  createRuntimeSessionIdentityStateProvider,
+  createRuntimeUsageStateProvider,
+} from './runtime/core/state/bootstrapProvider.js'
+import { feature } from 'bun:bundle'
 import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
 import { count } from './utils/array.js'
 
@@ -121,6 +119,9 @@ const taskSummaryModule = feature('BG_SESSIONS')
   ? (require('./utils/taskSummary.js') as typeof import('./utils/taskSummary.js'))
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+const runtimeUsageState = createRuntimeUsageStateProvider()
 
 function* yieldMissingToolResultBlocks(
   assistantMessages: AssistantMessage[],
@@ -229,7 +230,8 @@ export async function* query(
   Terminal
 > {
   const turnEngine = createTurnEngine({
-    getSessionId,
+    getSessionId: () =>
+      runtimeSessionIdentityState.getSessionIdentity().sessionId,
     runLoop: queryLoop,
     onCommandCompleted: uuid => notifyCommandLifecycle(uuid, 'completed'),
   })
@@ -1309,15 +1311,16 @@ async function* queryLoop(
       }
 
       if (feature('TOKEN_BUDGET')) {
+        const executionBudget = runtimeUsageState.getExecutionBudget()
         const decision = checkTokenBudget(
           budgetTracker!,
           toolUseContext.agentId,
-          getCurrentTurnTokenBudget(),
-          getTurnOutputTokens(),
+          executionBudget.currentTurnTokenBudget,
+          executionBudget.turnOutputTokens,
         )
 
         if (decision.action === 'continue') {
-          incrementBudgetContinuationCount()
+          runtimeUsageState.incrementBudgetContinuationCount()
           logForDebugging(
             `Token budget continuation #${decision.continuationCount}: ${decision.pct}% (${decision.turnTokens.toLocaleString()} / ${decision.budget.toLocaleString()})`,
           )

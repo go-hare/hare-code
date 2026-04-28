@@ -1,6 +1,5 @@
 import { feature } from 'bun:bundle'
 import * as React from 'react'
-import { resetCostState } from '../../bootstrap/state.js'
 import {
   clearTrustedDeviceToken,
   enrollTrustedDevice,
@@ -11,6 +10,7 @@ import { ConsoleOAuthFlow } from '../../components/ConsoleOAuthFlow.js'
 import { Dialog } from '@anthropic/ink'
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js'
 import { Text } from '@anthropic/ink'
+import { createRuntimeUsageResetWriter } from '../../runtime/core/state/bootstrapProvider.js'
 import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growthbook.js'
 import { refreshPolicyLimits } from '../../services/policyLimits/index.js'
 import { refreshRemoteManagedSettings } from '../../services/remoteManagedSettings/index.js'
@@ -21,6 +21,8 @@ import {
   resetAutoModeGateCheck,
 } from '../../utils/permissions/bypassPermissionsKillswitch.js'
 import { resetUserCache } from '../../utils/user.js'
+
+const runtimeUsageResetState = createRuntimeUsageResetWriter()
 
 export async function call(
   onDone: LocalJSXCommandOnDone,
@@ -36,7 +38,7 @@ export async function call(
         if (success) {
           // Post-login refresh logic. Keep in sync with onboarding in src/interactiveHelpers.tsx
           // Reset cost state when switching accounts
-          resetCostState()
+          runtimeUsageResetState.resetCostState()
           // Refresh remotely managed settings after login (non-blocking)
           void refreshRemoteManagedSettings()
           // Refresh policy limits after login (non-blocking)

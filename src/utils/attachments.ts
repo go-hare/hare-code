@@ -24,12 +24,15 @@ import { readdir, stat } from 'fs/promises'
 import type { IDESelection } from '../hooks/useIdeSelection.js'
 import { TODO_WRITE_TOOL_NAME } from '@go-hare/builtin-tools/tools/TodoWriteTool/constants.js'
 import { TASK_CREATE_TOOL_NAME } from '@go-hare/builtin-tools/tools/TaskCreateTool/constants.js'
+import { TASK_GET_TOOL_NAME } from '@go-hare/builtin-tools/tools/TaskGetTool/constants.js'
+import { TASK_LIST_TOOL_NAME } from '@go-hare/builtin-tools/tools/TaskListTool/constants.js'
 import { TASK_UPDATE_TOOL_NAME } from '@go-hare/builtin-tools/tools/TaskUpdateTool/constants.js'
 import { BASH_TOOL_NAME } from '@go-hare/builtin-tools/tools/BashTool/toolName.js'
 import { SKILL_TOOL_NAME } from '@go-hare/builtin-tools/tools/SkillTool/constants.js'
 import type { TodoList } from './todo/types.js'
 import {
   type Task,
+  getTask,
   getTaskExecutionMetadata,
   listTasks,
   getTaskListId,
@@ -621,6 +624,11 @@ export type Attachment =
       linkedTaskStatus?: 'pending' | 'in_progress' | 'completed'
       shouldSuggestTaskCompletion?: boolean
     }
+  | {
+      type: 'active_task_completion_reminder'
+      taskId: string
+      subject: string
+    }
   | AsyncHookResponseAttachment
   | {
       type: 'token_usage'
@@ -746,6 +754,13 @@ export type AttachmentBatchResult = {
   attachments: Attachment[]
   attachedQueuedCommands: QueuedCommand[]
 }
+
+const TASK_MANAGEMENT_TOOL_NAMES = new Set([
+  TASK_CREATE_TOOL_NAME,
+  TASK_GET_TOOL_NAME,
+  TASK_LIST_TOOL_NAME,
+  TASK_UPDATE_TOOL_NAME,
+])
 
 /**
  * This is janky
@@ -962,6 +977,9 @@ export async function getAttachmentBatch(
         ),
         maybe('lsp_diagnostics', async () =>
           getLSPDiagnosticAttachments(toolUseContext),
+        ),
+        maybe('active_task_completion', async () =>
+          getActiveTaskCompletionReminderAttachment(messages, toolUseContext),
         ),
         maybe('unified_tasks', async () =>
           getUnifiedTaskAttachments(toolUseContext),
@@ -3496,6 +3514,102 @@ async function getTaskReminderAttachments(
   }
 
   return []
+}
+
+function hasToolActivityAfterTaskActivation(
+  messages: Message[] | undefined,
+  taskId: string,
+): boolean {
+  if (!messages || messages.length === 0) {
+    return false
+  }
+
+  let sawFollowUpToolActivity = false
+
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = messages[messageIndex]
+    if (
+      message?.type !== 'assistant' ||
+      !Array.isArray(message.message?.content)
+    ) {
+      continue
+    }
+
+    for (
+      let blockIndex = message.message.content.length - 1;
+      blockIndex >= 0;
+      blockIndex--
+    ) {
+      const block = message.message.content[blockIndex]
+      if (block?.type !== 'tool_use' || typeof block.name !== 'string') {
+        continue
+      }
+
+      if (block.name === TASK_UPDATE_TOOL_NAME) {
+        const input =
+          block.input && typeof block.input === 'object'
+            ? (block.input as Record<string, unknown>)
+            : undefined
+        const inputTaskId =
+          typeof input?.taskId === 'string' ? input.taskId.trim() : undefined
+        const inputStatus =
+          typeof input?.status === 'string' ? input.status : undefined
+
+        if (inputTaskId === taskId && inputStatus === 'in_progress') {
+          return sawFollowUpToolActivity
+        }
+      }
+
+      if (!TASK_MANAGEMENT_TOOL_NAMES.has(block.name)) {
+        sawFollowUpToolActivity = true
+      }
+    }
+  }
+
+  return false
+}
+
+export async function getActiveTaskCompletionReminderAttachment(
+  messages: Message[] | undefined,
+  toolUseContext: ToolUseContext,
+): Promise<Attachment[]> {
+  if (toolUseContext.agentId) {
+    return []
+  }
+
+  const activeContext = toolUseContext.activeTaskExecutionContext
+  if (!activeContext) {
+    return []
+  }
+
+  if (
+    !toolUseContext.options.tools.some(t =>
+      toolMatchesName(t, TASK_UPDATE_TOOL_NAME),
+    )
+  ) {
+    return []
+  }
+
+  const task = await getTask(activeContext.taskListId, activeContext.taskId)
+  if (!task || task.status !== 'in_progress') {
+    return []
+  }
+
+  if (getTaskExecutionMetadata(task)?.linkedBackgroundTaskId) {
+    return []
+  }
+
+  if (!hasToolActivityAfterTaskActivation(messages, task.id)) {
+    return []
+  }
+
+  return [
+    {
+      type: 'active_task_completion_reminder',
+      taskId: task.id,
+      subject: task.subject,
+    },
+  ]
 }
 
 /**

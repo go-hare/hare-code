@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { getIsNonInteractiveSession } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { verifyApiKey } from '../services/api/claude.js'
 import {
   getAnthropicApiKeyWithSource,
@@ -7,6 +7,12 @@ import {
   isAnthropicAuthEnabled,
   isClaudeAISubscriber,
 } from '../utils/auth.js'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+function isNonInteractiveSession(): boolean {
+  return !runtimeSessionIdentityState.getSessionIdentity().isInteractive
+}
 
 export type VerificationStatus =
   | 'loading'
@@ -47,7 +53,7 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
     }
     // Warm the apiKeyHelper cache (no-op if not configured), then read from
     // all sources. getAnthropicApiKeyWithSource() reads the now-warm cache.
-    await getApiKeyFromApiKeyHelper(getIsNonInteractiveSession())
+    await getApiKeyFromApiKeyHelper(isNonInteractiveSession())
     const { key: apiKey, source } = getAnthropicApiKeyWithSource()
     if (!apiKey) {
       if (source === 'apiKeyHelper') {

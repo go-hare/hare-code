@@ -6,11 +6,17 @@
 
 import figures from 'figures'
 import * as React from 'react'
-import { getIsRemoteMode } from '../bootstrap/state.js'
+import { createRuntimeHeadlessControlStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import type { useNotifications } from '../context/notifications.js'
 import { Text } from '@anthropic/ink'
 import { logError } from '../utils/log.js'
 import { getPluginById } from '../utils/plugins/marketplaceManager.js'
+
+const runtimeHeadlessControlState = createRuntimeHeadlessControlStateProvider()
+
+function isRemoteMode(): boolean {
+  return runtimeHeadlessControlState.getHeadlessControlState().isRemoteMode
+}
 
 type AddNotification = ReturnType<typeof useNotifications>['addNotification']
 type PluginData = NonNullable<Awaited<ReturnType<typeof getPluginById>>>
@@ -31,7 +37,7 @@ export function usePluginRecommendationBase<T>(): {
 
   const tryResolve = React.useCallback(
     (resolve: () => Promise<T | null>) => {
-      if (getIsRemoteMode()) return
+      if (isRemoteMode()) return
       if (recommendation) return
       if (isCheckingRef.current) return
 

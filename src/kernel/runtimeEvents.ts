@@ -100,6 +100,8 @@ export const KERNEL_RUNTIME_EVENT_TAXONOMY = [
   { type: 'tasks.created', category: 'extension', scope: 'runtime' },
   { type: 'tasks.updated', category: 'extension', scope: 'runtime' },
   { type: 'tasks.assigned', category: 'extension', scope: 'runtime' },
+  { type: 'companion.event', category: 'extension', scope: 'runtime' },
+  { type: 'kairos.event', category: 'extension', scope: 'runtime' },
   {
     type: 'headless.sdk_message',
     category: 'compatibility',

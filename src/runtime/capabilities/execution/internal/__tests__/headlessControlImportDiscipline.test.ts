@@ -10,6 +10,14 @@ const headlessSessionControlContent = readFileSync(
   join(import.meta.dir, '../headlessSessionControl.ts'),
   'utf8',
 )
+const headlessSessionContent = readFileSync(
+  join(import.meta.dir, '../headlessSession.ts'),
+  'utf8',
+)
+const headlessRuntimeLoopContent = readFileSync(
+  join(import.meta.dir, '../headlessRuntimeLoop.ts'),
+  'utf8',
+)
 
 describe('headless control import discipline', () => {
   test('headlessControl does not import bootstrap state directly for headless control state', () => {
@@ -41,16 +49,46 @@ describe('headless control import discipline', () => {
       "from 'src/bootstrap/state.js'",
     )
     expect(headlessSessionControlContent).not.toContain(
+      'RuntimeBootstrapStateProvider',
+    )
+    expect(headlessSessionControlContent).not.toContain(
       "from '../../server/SessionRegistry.js'",
     )
     expect(headlessSessionControlContent).toContain(
       "from '../../../core/session/RuntimeSessionRegistry.js'",
     )
     expect(headlessSessionControlContent).toContain(
+      'HeadlessSessionStateProvider',
+    )
+    expect(headlessSessionControlContent).toContain(
       'bootstrapStateProvider.getHeadlessControlState().allowedChannels',
     )
     expect(headlessSessionControlContent).toContain(
       'bootstrapStateProvider.patchHeadlessControlState({',
+    )
+  })
+
+  test('headlessSession keeps the wrapper seam scoped to the runtime headless provider', () => {
+    expect(headlessSessionContent).not.toContain(
+      'RuntimeBootstrapStateProvider',
+    )
+    expect(headlessSessionContent).toContain(
+      'HeadlessSessionStateProvider',
+    )
+    expect(headlessSessionContent).toContain(
+      'createHeadlessSessionContext(bootstrapStateProvider)',
+    )
+  })
+
+  test('headlessRuntimeLoop accepts the narrowed headless session provider', () => {
+    expect(headlessRuntimeLoopContent).not.toContain(
+      'RuntimeBootstrapStateProvider',
+    )
+    expect(headlessRuntimeLoopContent).toContain(
+      'bootstrapStateProvider: HeadlessSessionStateProvider',
+    )
+    expect(headlessRuntimeLoopContent).toContain(
+      'bootstrapStateProvider: session.bootstrapStateProvider,',
     )
   })
 })

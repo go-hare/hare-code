@@ -4001,6 +4001,17 @@ You have exited auto mode. The user may now want to interact more directly. You 
         }),
       ])
     }
+    case 'active_task_completion_reminder': {
+      return wrapMessagesInSystemReminder([
+        createUserMessage({
+          content:
+            `Task #${attachment.taskId} (${attachment.subject}) is still marked in_progress. ` +
+            `You have already done follow-up work after starting it. Before ending this turn, call ${TASK_UPDATE_TOOL_NAME} with status: "completed" if the work is done. ` +
+            `Leave it open only if you intentionally plan to continue it in a later turn.`,
+          isMeta: true,
+        }),
+      ])
+    }
     case 'task_status': {
       const displayStatus =
         attachment.status === 'killed' ? 'stopped' : attachment.status

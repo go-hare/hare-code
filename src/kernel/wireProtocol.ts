@@ -12,11 +12,16 @@ import {
   type KernelRuntimeWireAgentRegistry,
   type KernelRuntimeWireCapabilityResolver,
   type KernelRuntimeWireCommandCatalog,
+  type KernelRuntimeWireCompanionRuntime,
+  type KernelRuntimeWireContextManager,
   type KernelRuntimeWireHookCatalog,
+  type KernelRuntimeWireKairosRuntime,
+  type KernelRuntimeWireMemoryManager,
   type KernelRuntimeWireMcpRegistry,
   type KernelRuntimeWirePermissionBroker,
   type KernelRuntimeWirePluginCatalog,
   type KernelRuntimeWireRouter,
+  type KernelRuntimeWireSessionManager,
   type KernelRuntimeWireSkillCatalog,
   type KernelRuntimeWireTaskRegistry,
   type KernelRuntimeWireToolCatalog,
@@ -63,6 +68,13 @@ import {
   createDefaultKernelRuntimeAgentRegistry,
   createDefaultKernelRuntimeTaskRegistry,
 } from './runtimeAgentTaskRegistries.js'
+import {
+  createDefaultKernelRuntimeCompanionRuntime,
+  createDefaultKernelRuntimeContextManager,
+  createDefaultKernelRuntimeKairosRuntime,
+  createDefaultKernelRuntimeMemoryManager,
+  createDefaultKernelRuntimeSessionManager,
+} from './runtimeDeveloperInterfaces.js'
 
 export type KernelRuntimeWireProtocolOptions = {
   runtimeId?: KernelRuntimeId
@@ -80,6 +92,11 @@ export type KernelRuntimeWireProtocolOptions = {
   pluginCatalog?: KernelRuntimeWirePluginCatalog
   agentRegistry?: KernelRuntimeWireAgentRegistry
   taskRegistry?: KernelRuntimeWireTaskRegistry
+  companionRuntime?: KernelRuntimeWireCompanionRuntime
+  kairosRuntime?: KernelRuntimeWireKairosRuntime
+  memoryManager?: KernelRuntimeWireMemoryManager
+  contextManager?: KernelRuntimeWireContextManager
+  sessionManager?: KernelRuntimeWireSessionManager
   permissionBroker?: KernelRuntimeWirePermissionBroker
   runTurnExecutor?: KernelRuntimeWireTurnExecutor
   headlessExecutor?: false | KernelRuntimeHeadlessProcessExecutorOptions
@@ -186,6 +203,17 @@ export function createDefaultKernelRuntimeWireRouter(
     taskRegistry:
       options.taskRegistry ??
       createDefaultKernelRuntimeTaskRegistry(options.workspacePath),
+    companionRuntime:
+      options.companionRuntime ??
+      createDefaultKernelRuntimeCompanionRuntime(),
+    kairosRuntime:
+      options.kairosRuntime ?? createDefaultKernelRuntimeKairosRuntime(),
+    memoryManager:
+      options.memoryManager ?? createDefaultKernelRuntimeMemoryManager(),
+    contextManager:
+      options.contextManager ?? createDefaultKernelRuntimeContextManager(),
+    sessionManager:
+      options.sessionManager ?? createDefaultKernelRuntimeSessionManager(),
     runTurnExecutor,
     permissionBroker,
     createConversation: conversationOptions =>
@@ -199,13 +227,28 @@ export async function runKernelRuntimeWireProtocol(
   const router = createDefaultKernelRuntimeWireRouter(options)
   const input = options.input ?? process.stdin
   const output = options.output ?? process.stdout
+  const bufferedEvents: KernelRuntimeEnvelopeBase[] = []
+  let deliveryBarrierCount = 0
 
   const writeEnvelope = (envelope: KernelRuntimeEnvelopeBase): void => {
     output.write(`${serializeKernelRuntimeEnvelope(envelope)}\n`)
   }
 
+  const flushBufferedEvents = (): void => {
+    if (deliveryBarrierCount > 0 || bufferedEvents.length === 0) {
+      return
+    }
+    for (const envelope of bufferedEvents.splice(0)) {
+      writeEnvelope(envelope)
+    }
+  }
+
   const unsubscribe = router.eventBus.subscribe(envelope => {
     if (envelope.kind === 'event') {
+      if (deliveryBarrierCount > 0) {
+        bufferedEvents.push(envelope)
+        return
+      }
       writeEnvelope(envelope)
     }
   })
@@ -219,9 +262,19 @@ export async function runKernelRuntimeWireProtocol(
       if (line.trim().length === 0) {
         continue
       }
-      const responses = await router.handleCommandLine(line)
-      for (const envelope of responses) {
-        writeEnvelope(envelope)
+      deliveryBarrierCount += 1
+      try {
+        const responses = await router.handleCommandLine(line)
+        for (const envelope of responses) {
+          writeEnvelope(envelope)
+        }
+      } finally {
+        deliveryBarrierCount -= 1
+        if (deliveryBarrierCount === 0) {
+          queueMicrotask(() => {
+            flushBufferedEvents()
+          })
+        }
       }
     }
   } finally {

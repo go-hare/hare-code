@@ -3,10 +3,10 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import { randomUUID } from 'crypto'
 import { CHANNEL_TAG } from '../../../constants/xml.js'
 import { logForDebugging } from '../../../utils/debug.js'
-import { getAllowedChannels } from '../../../bootstrap/state.js'
 import type { BridgePermissionCallbacks } from '../../../bridge/bridgePermissionCallbacks.js'
 import type { ToolUseConfirm } from '../../../components/permissions/PermissionRequest.js'
 import { getTerminalFocused } from '@anthropic/ink'
+import { createRuntimeHeadlessControlStateProvider } from '../../../runtime/core/state/bootstrapProvider.js'
 import {
   CHANNEL_PERMISSION_REQUEST_METHOD,
   type ChannelPermissionRequestParams,
@@ -38,6 +38,9 @@ import { hasPermissionsToUseTool } from '../../../utils/permissions/permissions.
 import type { PermissionContext } from '../PermissionContext.js'
 import { createResolveOnce } from '../PermissionContext.js'
 import type { BridgePermissionResponse } from '../../../bridge/bridgePermissionCallbacks.js'
+
+const runtimeHeadlessControlState =
+  createRuntimeHeadlessControlStateProvider()
 
 type InteractivePermissionParams = {
   ctx: PermissionContext
@@ -553,7 +556,8 @@ function handleInteractivePermission(
     !ctx.tool.requiresUserInteraction?.()
   ) {
     const channelRequestId = shortRequestId(ctx.toolUseID)
-    const allowedChannels = getAllowedChannels()
+    const { allowedChannels } =
+      runtimeHeadlessControlState.getHeadlessControlState()
     const channelClients = filterPermissionRelayClients(
       ctx.toolUseContext.getAppState().mcp.clients,
       name => findChannelEntry(name, allowedChannels) !== undefined,

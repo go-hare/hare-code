@@ -3,10 +3,6 @@
  * This module is imported at startup by main.tsx, so keep imports minimal.
  */
 import { feature } from 'bun:bundle'
-import {
-  clearInvokedSkills,
-  setLastEmittedDate,
-} from '../../bootstrap/state.js'
 import { clearCommandsCache } from '../../commands.js'
 import { getSessionStartDate } from '../../constants/common.js'
 import {
@@ -17,6 +13,10 @@ import {
 } from '../../context.js'
 import { clearFileSuggestionCaches } from '../../hooks/fileSuggestions.js'
 import { clearAllPendingCallbacks } from '../../hooks/useSwarmPermissionPoller.js'
+import {
+  createRuntimePromptStateProvider,
+  createRuntimeSessionCacheStateWriter,
+} from '../../runtime/core/state/bootstrapProvider.js'
 import { clearAllDumpState } from '../../services/api/dumpPrompts.js'
 import { resetPromptCacheBreakDetection } from '../../services/api/promptCacheBreakDetection.js'
 import { clearAllSessions } from '../../services/api/sessionIngress.js'
@@ -31,6 +31,9 @@ import { clearRepositoryCaches } from '../../utils/detectRepository.js'
 import { clearResolveGitDirCache } from '../../utils/git/gitFilesystem.js'
 import { clearStoredImagePaths } from '../../utils/imageStore.js'
 import { clearSessionEnvVars } from '../../utils/sessionEnvVars.js'
+
+const runtimePromptState = createRuntimePromptStateProvider()
+const runtimeSessionCacheState = createRuntimeSessionCacheStateWriter()
 
 /**
  * Clear all session-related caches.
@@ -66,7 +69,7 @@ export function clearSessionCaches(
   setSystemPromptInjection(null)
 
   // Clear last emitted date so it's re-detected on next turn
-  setLastEmittedDate(null)
+  runtimePromptState.patchPromptState({ lastEmittedDate: null })
 
   // Run post-compaction cleanup (clears system prompt sections, microcompact tracking,
   // classifier approvals, speculative checks, and — for main-thread compacts — memory
@@ -114,7 +117,7 @@ export function clearSessionCaches(
   // Clear dump prompts state
   if (!hasPreserved) clearAllDumpState()
   // Clear invoked skills cache (each entry holds full skill file content)
-  clearInvokedSkills(preservedAgentIds)
+  runtimeSessionCacheState.clearInvokedSkills(preservedAgentIds)
   // Clear git dir resolution cache
   clearResolveGitDirCache()
   // Clear dynamic skills (loaded from skill directories)

@@ -18,7 +18,7 @@ describe('SessionRuntime import discipline', () => {
 
   test('accepts bootstrap state through the runtime provider seam', () => {
     expect(content).toContain(
-      'bootstrapStateProvider?: RuntimeBootstrapStateProvider',
+      'bootstrapStateProvider: RuntimeExecutionSessionStateProvider',
     )
   })
 

@@ -1,7 +1,7 @@
 import {
-  BasicTracerProvider,
-  LangfuseSpanProcessor,
-  setLangfuseTracerProvider,
+  getLangfuseSdkDeps,
+  type BasicTracerProvider,
+  type LangfuseSpanProcessor,
   type MaskFunction,
 } from './sdkDeps.js'
 import { sanitizeGlobal } from './sanitize.js'
@@ -28,6 +28,11 @@ export function initLangfuse(): boolean {
   }
 
   try {
+    const {
+      BasicTracerProvider,
+      LangfuseSpanProcessor,
+      setLangfuseTracerProvider,
+    } = getLangfuseSdkDeps()
     const maskFn: MaskFunction = ({ data }) => sanitizeGlobal(data)
 
     processor = new LangfuseSpanProcessor({

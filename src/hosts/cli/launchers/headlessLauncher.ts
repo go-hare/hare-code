@@ -13,6 +13,10 @@ import {
   materializeRuntimeHeadlessEnvironment,
   type RuntimeHeadlessEnvironmentInput,
 } from '../../../runtime/capabilities/execution/headlessCapabilityMaterializer.js'
+import {
+  createBootstrapStateProvider,
+  createRuntimeHeadlessStartupStateWriter,
+} from '../../../runtime/core/state/bootstrapProvider.js'
 
 export type HeadlessLaunchOptions = {
   inputPrompt: KernelHeadlessInput
@@ -25,17 +29,35 @@ export type HeadlessLaunchOptions = {
   profileCheckpoint(checkpoint: string): void
 }
 
+export type HeadlessLaunchDeps = {
+  materializeRuntimeHeadlessEnvironment: typeof materializeRuntimeHeadlessEnvironment
+  createDefaultKernelHeadlessEnvironment: typeof createDefaultKernelHeadlessEnvironment
+  connectDefaultKernelHeadlessMcp: typeof connectDefaultKernelHeadlessMcp
+  prepareKernelHeadlessStartup: typeof prepareKernelHeadlessStartup
+  runKernelHeadless: typeof runKernelHeadless
+}
+
+const defaultDeps: HeadlessLaunchDeps = {
+  materializeRuntimeHeadlessEnvironment,
+  createDefaultKernelHeadlessEnvironment,
+  connectDefaultKernelHeadlessMcp,
+  prepareKernelHeadlessStartup,
+  runKernelHeadless,
+}
+
 export async function runHeadlessLaunch(
   options: HeadlessLaunchOptions,
+  deps: HeadlessLaunchDeps = defaultDeps,
 ): Promise<void> {
-  const environment = await materializeRuntimeHeadlessEnvironment(
+  const bootstrapStateProvider = createBootstrapStateProvider()
+  const environment = await deps.materializeRuntimeHeadlessEnvironment(
     options.environment,
   )
   const headlessEnvironment =
-    createDefaultKernelHeadlessEnvironment(environment)
+    deps.createDefaultKernelHeadlessEnvironment(environment)
 
   options.profileCheckpoint('before_connectMcp')
-  await connectDefaultKernelHeadlessMcp({
+  await deps.connectDefaultKernelHeadlessMcp({
     store: headlessEnvironment.store,
     regularMcpConfigs: options.regularMcpConfigs,
     claudeaiConfigPromise: options.claudeaiConfigPromise,
@@ -43,11 +65,19 @@ export async function runHeadlessLaunch(
   options.profileCheckpoint('after_connectMcp')
   options.profileCheckpoint('after_connectMcp_claudeai')
 
-  await prepareKernelHeadlessStartup(options.startup, options.startupDeps)
+  await deps.prepareKernelHeadlessStartup(options.startup, {
+    ...options.startupDeps,
+    stateWriter: createRuntimeHeadlessStartupStateWriter(
+      bootstrapStateProvider.runWithState,
+    ),
+  })
 
-  void runKernelHeadless(
+  await deps.runKernelHeadless(
     options.inputPrompt,
     headlessEnvironment,
-    options.runOptions,
+    {
+      ...options.runOptions,
+      bootstrapStateProvider,
+    },
   )
 }

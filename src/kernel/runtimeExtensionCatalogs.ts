@@ -1,6 +1,11 @@
 import type {
   RuntimeHookDescriptor,
+  RuntimeHookMutationResult,
   RuntimeHookSource,
+  RuntimeHookRunError,
+  RuntimeHookRunRequest,
+  RuntimeHookRunResult,
+  RuntimeHookRegisterRequest,
   RuntimeHookType,
 } from '../runtime/contracts/hook.js'
 import type {
@@ -36,25 +41,46 @@ import type {
 import type { Message } from '../types/message.js'
 import type { PermissionMode } from '../types/permissions.js'
 import type { LoadedPlugin, PluginError } from '../types/plugin.js'
+import type { AppState } from '../state/AppState.js'
+import type { HookInput } from 'src/entrypoints/agentSdkTypes.js'
 
 export function createDefaultKernelRuntimeHookCatalog(
   _workspacePath: string | undefined,
 ): KernelRuntimeWireHookCatalog {
   let cachedHooks: readonly RuntimeHookDescriptor[] | undefined
+  let appStateCache: AppState | undefined
+  const registeredHooks: RuntimeHookRegisterRequest[] = []
+
+  async function ensureAppState(): Promise<AppState> {
+    if (!appStateCache) {
+      const { getDefaultAppState } = await import('../state/AppStateStore.js')
+      appStateCache = getDefaultAppState()
+    }
+    return appStateCache
+  }
+
+  function getRegisteredHookDescriptors(): readonly RuntimeHookDescriptor[] {
+    return registeredHooks.map(request => ({
+      ...request.hook,
+      displayName:
+        request.hook.displayName ?? request.handlerRef ?? request.hook.event,
+    }))
+  }
 
   async function listHooks(): Promise<readonly RuntimeHookDescriptor[]> {
     if (!cachedHooks) {
       const [
-        { getDefaultAppState },
+        hooksModule,
         hooksSettings,
         { loadAllPluginsCacheOnly },
       ] = await Promise.all([
-        import('../state/AppStateStore.js'),
+        import('../utils/hooks.js'),
         import('../utils/hooks/hooksSettings.js'),
         import('../utils/plugins/pluginLoader.js'),
       ])
+      const appState = await ensureAppState()
       const appStateHooks = hooksSettings
-        .getAllHooks(getDefaultAppState())
+        .getAllHooks(appState)
         .map(hook =>
           toRuntimeHookDescriptor({
             event: hook.event,
@@ -69,7 +95,9 @@ export function createDefaultKernelRuntimeHookCatalog(
       cachedHooks = [
         ...appStateHooks,
         ...enabled.flatMap(plugin => toRuntimePluginHookDescriptors(plugin)),
+        ...getRegisteredHookDescriptors(),
       ]
+      void hooksModule
     }
     return cachedHooks
   }
@@ -79,6 +107,76 @@ export function createDefaultKernelRuntimeHookCatalog(
     async reload() {
       cachedHooks = undefined
       await listHooks()
+    },
+    async runHook(
+      request: RuntimeHookRunRequest,
+    ): Promise<RuntimeHookRunResult> {
+      const [{ createBaseHookInput, executeHooksOutsideREPL }, { isHookEvent }] =
+        await Promise.all([
+          import('../utils/hooks.js'),
+          import('../types/hooks.js'),
+        ])
+      if (!isHookEvent(request.event)) {
+        return {
+          event: request.event,
+          handled: false,
+          errors: [
+            {
+              message: `Unknown hook event: ${request.event}`,
+              code: 'unknown_event',
+            },
+          ],
+          metadata: request.metadata,
+        }
+      }
+
+      const hookInput = toRuntimeHookInput(
+        request,
+        createBaseHookInput(undefined),
+      )
+      const appState = await ensureAppState()
+      const results = await executeHooksOutsideREPL({
+        getAppState: () => appState,
+        hookInput,
+        timeoutMs: 10_000,
+      })
+      const errors = toRuntimeHookRunErrors(results)
+
+      return {
+        event: request.event,
+        handled: results.length > 0,
+        outputs:
+          results.length > 0
+            ? results.map(result => stripUndefinedFields({
+                command: result.command,
+                succeeded: result.succeeded,
+                output: result.output,
+                blocked: result.blocked,
+                watchPaths: result.watchPaths,
+                systemMessage: result.systemMessage,
+              }))
+            : undefined,
+        errors: errors.length > 0 ? errors : undefined,
+        metadata: request.metadata,
+      }
+    },
+    async registerHook(
+      request: RuntimeHookRegisterRequest,
+    ): Promise<RuntimeHookMutationResult> {
+      registeredHooks.push(request)
+      cachedHooks = undefined
+      return {
+        hook: {
+          ...request.hook,
+          displayName:
+            request.hook.displayName ??
+            request.handlerRef ??
+            request.hook.event,
+        },
+        registered: true,
+        handlerRef: request.handlerRef,
+        metadata: request.metadata,
+      }
     },
   }
 }
@@ -340,6 +438,74 @@ function toRuntimeHookDescriptor(input: {
     async: booleanOrUndefined(input.config.async),
     once: booleanOrUndefined(input.config.once),
   }
+}
+
+function toRuntimeHookRunErrors(
+  results: ReadonlyArray<{
+    succeeded: boolean
+    blocked: boolean
+    output: string
+  }>,
+): RuntimeHookRunError[] {
+  return results
+    .filter(result => !result.succeeded || result.blocked)
+    .map(result => ({
+      message:
+        result.output ||
+        (result.blocked ? 'Hook blocked continuation' : 'Hook execution failed'),
+      code: result.blocked ? 'blocked' : 'execution_failed',
+    }))
+}
+
+function toRuntimeHookInput(
+  request: RuntimeHookRunRequest,
+  baseInput: Record<string, unknown>,
+): HookInput {
+  const inputObject =
+    request.input && typeof request.input === 'object'
+      ? { ...(request.input as Record<string, unknown>) }
+      : request.input === undefined
+        ? {}
+        : { input: request.input }
+
+  const hookInput = {
+    ...baseInput,
+    ...inputObject,
+    hook_event_name: request.event,
+  } as Record<string, unknown>
+
+  switch (request.event) {
+    case 'PreToolUse':
+    case 'PostToolUse':
+    case 'PostToolUseFailure':
+    case 'PermissionRequest':
+    case 'PermissionDenied':
+      hookInput.tool_name ??= request.matcher ?? 'runtime_hook'
+      break
+    case 'Notification':
+      hookInput.notification_type ??= request.matcher ?? 'runtime_hook'
+      break
+    case 'SessionStart':
+      hookInput.source ??= request.matcher ?? 'kernel-runtime'
+      break
+    case 'SessionEnd':
+      hookInput.reason ??= request.matcher ?? 'kernel-runtime'
+      break
+    case 'Setup':
+    case 'PreCompact':
+    case 'PostCompact':
+      hookInput.trigger ??= request.matcher ?? 'kernel-runtime'
+      break
+    case 'SubagentStart':
+      hookInput.agent_type ??= request.matcher ?? 'kernel-runtime'
+      break
+    case 'TaskCreated':
+    case 'TaskCompleted':
+      hookInput.task_id ??= request.matcher ?? 'runtime-task'
+      break
+  }
+
+  return hookInput as HookInput
 }
 
 function toRuntimeSkillDescriptor(
@@ -683,4 +849,10 @@ function numberOrUndefined(value: unknown): number | undefined {
 
 function booleanOrUndefined(value: unknown): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined
+}
+
+function stripUndefinedFields<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined),
+  ) as T
 }

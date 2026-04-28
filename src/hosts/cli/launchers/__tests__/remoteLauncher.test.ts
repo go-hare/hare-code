@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type { RemoteLaunchOptions } from '../remoteLauncher.js'
 
 const callOrder: string[] = []
@@ -85,6 +85,9 @@ const mockStatsStore = {
   },
 } as never
 
+const actualMessages = await import('../../../../utils/messages.js')
+const actualCommands = await import('../../../../commands.js')
+
 mock.module('../remoteGitDeps.js', () => ({
   getBranch: mockGetBranch,
 }))
@@ -115,11 +118,13 @@ mock.module('../../../../remote/RemoteSessionManager.js', () => ({
 }))
 
 mock.module('../../../../utils/messages.js', () => ({
+  ...actualMessages,
   createSystemMessage: mockCreateSystemMessage,
   createUserMessage: mockCreateUserMessage,
 }))
 
 mock.module('../../../../commands.js', () => ({
+  ...actualCommands,
   filterCommandsForRemoteMode: mockFilterCommandsForRemoteMode,
 }))
 
@@ -128,6 +133,10 @@ mock.module('../../../../replLauncher.js', () => ({
 }))
 
 const { runRemoteLaunch } = await import('../remoteLauncher.js')
+
+afterAll(() => {
+  mock.restore()
+})
 
 function createLaunchOptions(): RemoteLaunchOptions {
   return {

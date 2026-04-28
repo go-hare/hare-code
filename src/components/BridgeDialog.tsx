@@ -2,7 +2,7 @@ import { basename } from 'path'
 import { toString as qrToString } from 'qrcode'
 import * as React from 'react'
 import { useEffect, useState } from 'react'
-import { getOriginalCwd } from '../bootstrap/state.js'
+import { createRuntimeSessionIdentityStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import {
   buildActiveFooterText,
   buildIdleFooterText,
@@ -21,6 +21,11 @@ import { useAppState, useSetAppState } from '../state/AppState.js'
 import { saveGlobalConfig } from '../utils/config.js'
 import { getBranch } from '../utils/git.js'
 import { Dialog } from '@anthropic/ink'
+
+const runtimeSessionIdentityState = createRuntimeSessionIdentityStateProvider()
+
+const getOriginalCwd = () =>
+  runtimeSessionIdentityState.getSessionIdentity().originalCwd
 
 type Props = {
   onDone: () => void

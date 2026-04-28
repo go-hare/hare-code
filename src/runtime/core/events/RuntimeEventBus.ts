@@ -426,7 +426,12 @@ export class RuntimeEventBus {
     this.replayBuffer.push(envelope)
     const overflow = this.replayBuffer.length - this.maxReplayEvents
     if (overflow > 0) {
-      this.replayBuffer.splice(0, overflow)
+      const evicted = this.replayBuffer.splice(0, overflow)
+      for (const entry of evicted) {
+        if (entry.eventId) {
+          this.replayableScopesByEventId.delete(entry.eventId)
+        }
+      }
     }
   }
 

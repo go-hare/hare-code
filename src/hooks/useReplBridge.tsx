@@ -1,7 +1,6 @@
 import { feature } from 'bun:bundle'
 import { type FSWatcher, watch } from 'fs'
 import React, { useCallback, useEffect, useRef } from 'react'
-import { setMainLoopModelOverride } from '../bootstrap/state.js'
 import {
   type BridgePermissionCallbacks,
   type BridgePermissionResponse,
@@ -34,6 +33,7 @@ import {
   useSetAppState,
 } from '../state/AppState.js'
 import type { Message } from '../types/message.js'
+import { createRuntimePromptStateProvider } from '../runtime/core/state/bootstrapProvider.js'
 import { getCwd } from '../utils/cwd.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
@@ -62,6 +62,8 @@ import {
   onTasksUpdated,
 } from '../utils/tasks.js'
 import { ContentBlockParam } from '@anthropic-ai/sdk/resources'
+
+const runtimePromptState = createRuntimePromptStateProvider()
 
 const TASK_STATE_DEBOUNCE_MS = 50
 const TASK_STATE_POLL_MS = 5000
@@ -503,7 +505,9 @@ export function useReplBridge(
             },
             onSetModel(model) {
               const resolved = model === 'default' ? null : (model ?? null)
-              setMainLoopModelOverride(resolved)
+              runtimePromptState.patchPromptState({
+                mainLoopModelOverride: resolved ?? undefined,
+              })
               setAppState(prev => {
                 if (prev.mainLoopModelForSession === resolved) return prev
                 return { ...prev, mainLoopModelForSession: resolved }
