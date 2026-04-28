@@ -11,6 +11,13 @@ describe('kernel public capability modules', () => {
   test('companion runtime manages state and emits events', async () => {
     const snapshot = { ...getGlobalConfig() }
     try {
+      saveGlobalConfig(current => ({
+        ...current,
+        userID: 'kernel-public-capability-test',
+        oauthAccount: undefined,
+        companion: undefined,
+        companionMuted: false,
+      }))
       const events: string[] = []
       const runtime = createKernelCompanionRuntime({
         generateStoredCompanion: async () => ({
@@ -29,12 +36,11 @@ describe('kernel public capability modules', () => {
 
       const hatched = await runtime.dispatch({
         type: 'hatch',
-        seed: 'local:test',
+        seed: 'local:kernel-public-capability-test',
       })
       expect(hatched?.companion?.name).toBe('Miso')
 
-      await runtime.dispatch({ type: 'mute' })
-      const muted = await runtime.getState()
+      const muted = await runtime.dispatch({ type: 'mute' })
       expect(muted?.muted).toBe(true)
 
       await runtime.dispatch({ type: 'unmute' })
@@ -49,24 +55,69 @@ describe('kernel public capability modules', () => {
   })
 
   test('kairos runtime exposes observable queue and suspension state', async () => {
+    const proactive = {
+      active: true,
+      paused: false,
+      contextBlocked: false,
+      shouldTick: true,
+      nextTickAt: 177,
+      activationSource: 'test',
+    }
     const runtime = createKernelKairosRuntime({
       isEnabled: () => true,
       isRuntimeEnabled: async () => true,
+      getProactiveState: () => proactive,
+      pauseProactive: () => {
+        proactive.paused = true
+        proactive.shouldTick = false
+      },
+      resumeProactive: () => {
+        proactive.paused = false
+        proactive.shouldTick = true
+      },
+      createAutonomyCommands: async request => [
+        {
+          value: request.basePrompt ?? 'tick',
+          mode: 'prompt',
+          priority: request.priority,
+          workload: request.workload,
+          isMeta: true,
+        },
+      ],
       now: () => '2026-04-28T00:00:00.000Z',
     })
 
     await runtime.enqueueEvent({ type: 'webhook.received' })
-    expect((await runtime.getStatus()).pendingEvents).toBe(1)
+    const enqueuedStatus = await runtime.getStatus()
+    expect(enqueuedStatus.pendingEvents).toBe(1)
+    expect(enqueuedStatus.proactive?.active).toBe(true)
 
     await runtime.suspend('tests')
     expect((await runtime.getStatus()).suspended).toBe(true)
+    expect((await runtime.getStatus()).proactive?.paused).toBe(true)
 
     await runtime.resume('tests')
-    await runtime.tick()
+    const events: string[] = []
+    const stop = runtime.onEvent(event => {
+      events.push(event.type)
+      if (event.type === 'tick') {
+        expect(event.autonomyCommands).toHaveLength(1)
+        expect(event.autonomyCommands?.[0]?.value).toBe('heartbeat')
+      }
+    })
+    await runtime.tick({
+      createAutonomyCommands: true,
+      basePrompt: 'heartbeat',
+      priority: 'next',
+      workload: 'kairos-test',
+    })
+    stop()
 
     const status = await runtime.getStatus()
     expect(status.pendingEvents).toBe(0)
+    expect(status.proactive?.paused).toBe(false)
     expect(status.lastTickAt).toBe('2026-04-28T00:00:00.000Z')
+    expect(events).toContain('tick')
   })
 
   test('memory manager reads and updates via injected seam', async () => {

@@ -184,6 +184,14 @@ describe('createKernelRuntime', () => {
           return {
             enabled: true,
             runtimeEnabled: true,
+            proactive: {
+              active: true,
+              paused: false,
+              contextBlocked: false,
+              shouldTick: true,
+              nextTickAt: null,
+              activationSource: 'test',
+            },
             suspended: kairosSuspendedReason !== undefined,
             pendingEvents: kairosQueue.length,
             lastTickAt: kairosLastTickAt,

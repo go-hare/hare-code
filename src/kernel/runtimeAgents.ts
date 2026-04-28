@@ -12,7 +12,10 @@ import type {
   RuntimeAgentSpawnResult,
 } from '../runtime/contracts/agent.js'
 import type { KernelRuntimeWireClient } from './wireProtocol.js'
-import { expectPayload } from './runtimeEnvelope.js'
+import {
+  expectPayload,
+  waitForRuntimeEventDelivery,
+} from './runtimeEnvelope.js'
 
 export type KernelAgentSource = RuntimeAgentSource
 export type KernelAgentMcpServerRef = RuntimeAgentMcpServerRef
@@ -117,6 +120,7 @@ export function createKernelRuntimeAgentsFacade(
       const payload = expectPayload<RuntimeAgentSpawnResult>(
         await client.spawnAgent(request),
       )
+      await waitForRuntimeEventDelivery()
       return toAgentSpawnResult(payload)
     },
     runs: async filter => {
@@ -155,6 +159,7 @@ export function createKernelRuntimeAgentsFacade(
       const payload = expectPayload<RuntimeAgentRunCancelResult>(
         await client.cancelAgentRun({ runId, reason: options.reason }),
       )
+      await waitForRuntimeEventDelivery()
       return toAgentCancelResult(payload)
     },
   }

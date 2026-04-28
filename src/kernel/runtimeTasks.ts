@@ -9,7 +9,10 @@ import type {
   RuntimeTaskUpdateRequest,
 } from '../runtime/contracts/task.js'
 import type { KernelRuntimeWireClient } from './wireProtocol.js'
-import { expectPayload } from './runtimeEnvelope.js'
+import {
+  expectPayload,
+  waitForRuntimeEventDelivery,
+} from './runtimeEnvelope.js'
 
 export type KernelCoordinatorTaskStatus = RuntimeCoordinatorTaskStatus
 export type KernelTaskExecutionMetadata = RuntimeTaskExecutionMetadata
@@ -82,18 +85,21 @@ export function createKernelRuntimeTasksFacade(
       const payload = expectPayload<RuntimeTaskMutationResult>(
         await client.createTask(request),
       )
+      await waitForRuntimeEventDelivery()
       return toTaskMutationResult(payload)
     },
     update: async request => {
       const payload = expectPayload<RuntimeTaskMutationResult>(
         await client.updateTask(request),
       )
+      await waitForRuntimeEventDelivery()
       return toTaskMutationResult(payload)
     },
     assign: async request => {
       const payload = expectPayload<RuntimeTaskMutationResult>(
         await client.assignTask(request),
       )
+      await waitForRuntimeEventDelivery()
       return toTaskMutationResult(payload)
     },
   }

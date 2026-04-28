@@ -1058,7 +1058,11 @@ class KernelRuntimeStdioWireTransport implements KernelRuntimeWireTransport {
 
   private handleEnvelope(envelope: KernelRuntimeEnvelopeBase): void {
     if (shouldDeliverEvent(this.liveSubscriptions, envelope)) {
-      notifyListeners(this.listeners, envelope)
+      queueMicrotask(() => {
+        if (!this.closed) {
+          notifyListeners(this.listeners, envelope)
+        }
+      })
     }
 
     if (!envelope.requestId || !isControlEnvelope(envelope)) {

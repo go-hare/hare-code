@@ -104,8 +104,10 @@ export type {
   KernelContextSnapshot,
 } from './context.js'
 export type {
+  KernelKairosAutonomyCommand,
   KernelKairosEvent,
   KernelKairosExternalEvent,
+  KernelKairosProactiveState,
   KernelKairosRuntime,
   KernelKairosRuntimeOptions,
   KernelKairosStatus,

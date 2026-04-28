@@ -36,6 +36,7 @@ import {
   isTranscriptPersistenceDisabled,
 } from '../../utils/sessionStorage.js'
 import {
+  type ActiveTaskExecutionContext,
   getTaskExecutionMetadata,
   getTaskListId,
   listTasks,
@@ -185,6 +186,7 @@ export type LocalAgentTaskState = TaskStateBase & {
   type: 'local_agent'
   agentId: string
   notificationTargetAgentId?: AgentId
+  activeTaskExecutionContext?: ActiveTaskExecutionContext
   prompt: string
   selectedAgent?: AgentDefinition
   agentType: string
@@ -300,31 +302,44 @@ export function drainPendingMessages(
 async function getLinkedTaskCompletionHint(
   taskId: string,
   status: 'completed' | 'failed' | 'killed',
+  linkedTaskListId?: string,
 ): Promise<string | undefined> {
   if (status !== 'completed') {
     return undefined
   }
 
-  const taskListId = getTaskListId()
-  const taskList = await listTasks(taskListId)
-  const linkedTask = taskList.find(task => {
-    const metadata = getTaskExecutionMetadata(task)
-    return metadata?.linkedBackgroundTaskId === taskId
-  })
-  if (!linkedTask || linkedTask.status !== 'in_progress') {
-    return undefined
+  for (const taskListId of getCompletionHintTaskListIds(linkedTaskListId)) {
+    const taskList = await listTasks(taskListId)
+    const linkedTask = taskList.find(task => {
+      const metadata = getTaskExecutionMetadata(task)
+      return metadata?.linkedBackgroundTaskId === taskId
+    })
+    if (!linkedTask || linkedTask.status !== 'in_progress') {
+      continue
+    }
+
+    const shouldSuggest = await markTaskCompletionSuggested(
+      taskListId,
+      linkedTask.id,
+      taskId,
+    )
+    if (!shouldSuggest) {
+      return undefined
+    }
+
+    return `Background task for task #${linkedTask.id} has completed. If the work is done, call TaskUpdate with status: "completed" before proceeding.`
   }
 
-  const shouldSuggest = await markTaskCompletionSuggested(
-    taskListId,
-    linkedTask.id,
-    taskId,
-  )
-  if (!shouldSuggest) {
-    return undefined
-  }
+  return undefined
+}
 
-  return `Background task for task #${linkedTask.id} has completed. If the work is done, call TaskUpdate with status: "completed" before proceeding.`
+function getCompletionHintTaskListIds(
+  linkedTaskListId: string | undefined,
+): string[] {
+  const currentTaskListId = getTaskListId()
+  return linkedTaskListId && linkedTaskListId !== currentTaskListId
+    ? [linkedTaskListId, currentTaskListId]
+    : [currentTaskListId]
 }
 
 export async function enqueueAgentNotification({
@@ -360,6 +375,7 @@ export async function enqueueAgentNotification({
   let shouldEnqueue = false
   let shouldCompletePlanVerification = false
   let notificationTargetAgentId: AgentId | undefined
+  let linkedTaskListId: string | undefined
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     if (task.notified) {
       return task
@@ -367,6 +383,7 @@ export async function enqueueAgentNotification({
     shouldEnqueue = true
     shouldCompletePlanVerification = task.agentType === VERIFICATION_AGENT_TYPE
     notificationTargetAgentId = task.notificationTargetAgentId
+    linkedTaskListId = task.activeTaskExecutionContext?.taskListId
     return {
       ...task,
       notified: true,
@@ -414,7 +431,11 @@ export async function enqueueAgentNotification({
   const toolUseIdLine = toolUseId
     ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>`
     : ''
-  const completionHint = await getLinkedTaskCompletionHint(taskId, status)
+  const completionHint = await getLinkedTaskCompletionHint(
+    taskId,
+    status,
+    linkedTaskListId,
+  )
   const resultWithHint = completionHint
     ? [finalMessage, completionHint].filter(Boolean).join('\n\n')
     : finalMessage
@@ -679,6 +700,7 @@ export function registerAsyncAgent({
   setAppState,
   parentAbortController,
   notificationTargetAgentId,
+  activeTaskExecutionContext,
   toolUseId,
 }: {
   agentId: string
@@ -688,6 +710,7 @@ export function registerAsyncAgent({
   setAppState: SetAppState
   parentAbortController?: AbortController
   notificationTargetAgentId?: AgentId
+  activeTaskExecutionContext?: ActiveTaskExecutionContext
   toolUseId?: string
 }): LocalAgentTaskState {
   initAgentTaskOutput(agentId)
@@ -703,6 +726,7 @@ export function registerAsyncAgent({
     status: 'running',
     agentId,
     notificationTargetAgentId,
+    activeTaskExecutionContext,
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
@@ -746,6 +770,7 @@ export function registerAgentForeground({
   setAppState,
   autoBackgroundMs,
   notificationTargetAgentId,
+  activeTaskExecutionContext,
   toolUseId,
 }: {
   agentId: string
@@ -755,6 +780,7 @@ export function registerAgentForeground({
   setAppState: SetAppState
   autoBackgroundMs?: number
   notificationTargetAgentId?: AgentId
+  activeTaskExecutionContext?: ActiveTaskExecutionContext
   toolUseId?: string
 }): {
   taskId: string
@@ -775,6 +801,7 @@ export function registerAgentForeground({
     status: 'running',
     agentId,
     notificationTargetAgentId,
+    activeTaskExecutionContext,
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',

@@ -209,6 +209,8 @@ export async function resumeAgentBackground({
     prompt,
     selectedAgent,
     setAppState: rootSetAppState,
+    notificationTargetAgentId: toolUseContext.agentId,
+    activeTaskExecutionContext: resumedTaskExecutionContext,
     toolUseId: toolUseContext.toolUseId,
   })
 

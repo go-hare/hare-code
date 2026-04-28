@@ -3120,9 +3120,29 @@ export declare function createKernelCompanionRuntime(
   options?: KernelCompanionRuntimeOptions,
 ): KernelCompanionRuntime
 
+export type KernelKairosProactiveState = {
+  active: boolean
+  paused: boolean
+  contextBlocked: boolean
+  shouldTick: boolean
+  nextTickAt: number | null
+  activationSource?: string
+}
+
+export type KernelKairosAutonomyCommand = {
+  value: unknown
+  mode: string
+  priority?: 'now' | 'next' | 'later'
+  workload?: string
+  isMeta?: boolean
+  origin?: unknown
+  autonomy?: unknown
+}
+
 export type KernelKairosStatus = {
   enabled: boolean
   runtimeEnabled: boolean
+  proactive?: KernelKairosProactiveState
   suspended: boolean
   pendingEvents: number
   lastTickAt?: string
@@ -3138,6 +3158,12 @@ export type KernelKairosExternalEvent = {
 export type KernelKairosTickRequest = {
   reason?: string
   drain?: boolean
+  createAutonomyCommands?: boolean
+  basePrompt?: string
+  rootDir?: string
+  currentDir?: string
+  workload?: string
+  priority?: 'now' | 'next' | 'later'
 }
 
 export type KernelKairosEvent =
@@ -3150,6 +3176,7 @@ export type KernelKairosEvent =
       type: 'tick'
       request?: KernelKairosTickRequest
       drainedEvents: readonly KernelKairosExternalEvent[]
+      autonomyCommands?: readonly KernelKairosAutonomyCommand[]
       status: KernelKairosStatus
     }
   | { type: 'suspended'; reason?: string; status: KernelKairosStatus }
@@ -3167,6 +3194,12 @@ export type KernelKairosRuntime = {
 export type KernelKairosRuntimeOptions = {
   isEnabled?: () => boolean
   isRuntimeEnabled?: () => Promise<boolean>
+  getProactiveState?: () => KernelKairosProactiveState
+  pauseProactive?: () => void
+  resumeProactive?: () => void
+  createAutonomyCommands?: (
+    request: KernelKairosTickRequest,
+  ) => Promise<readonly KernelKairosAutonomyCommand[]>
   now?: () => string
 }
 

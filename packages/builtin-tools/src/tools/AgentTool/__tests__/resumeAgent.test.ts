@@ -102,6 +102,7 @@ describe('resumeAgentBackground', () => {
       setResponseLength: () => {},
       updateFileHistoryState: () => ({} as never),
       updateAttributionState: () => ({} as never),
+      agentId: 'parent-agent',
       contentReplacementState: {} as any,
     } as any
 
@@ -116,6 +117,16 @@ describe('resumeAgentBackground', () => {
     expect(runAgentMock.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         ownedFiles: ['src/coordinator/writeGuard.ts'],
+        activeTaskExecutionContext: {
+          taskListId: 'alpha-team',
+          taskId: '42',
+          ownedFiles: ['src/coordinator/writeGuard.ts'],
+        },
+      }),
+    )
+    expect(registerAsyncAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationTargetAgentId: 'parent-agent',
         activeTaskExecutionContext: {
           taskListId: 'alpha-team',
           taskId: '42',

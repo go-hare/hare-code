@@ -39,6 +39,7 @@ export async function collectReplayEvents(
         filters: options.filters,
       }),
     )
+    await waitForRuntimeEventDelivery()
     return events
   } finally {
     unsubscribe()
@@ -95,4 +96,8 @@ function matchesReplayOptions(
     return false
   }
   return true
+}
+
+export function waitForRuntimeEventDelivery(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0))
 }

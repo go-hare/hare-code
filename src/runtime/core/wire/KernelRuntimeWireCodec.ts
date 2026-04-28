@@ -1176,6 +1176,16 @@ function parseTickKairosCommand(
   }
   assignOptional(command, 'reason', optionalString(record, 'reason'))
   assignOptional(command, 'drain', optionalBoolean(record, 'drain'))
+  assignOptional(
+    command,
+    'createAutonomyCommands',
+    optionalBoolean(record, 'createAutonomyCommands'),
+  )
+  assignOptional(command, 'basePrompt', optionalString(record, 'basePrompt'))
+  assignOptional(command, 'rootDir', optionalString(record, 'rootDir'))
+  assignOptional(command, 'currentDir', optionalString(record, 'currentDir'))
+  assignOptional(command, 'workload', optionalString(record, 'workload'))
+  assignOptional(command, 'priority', optionalQueuePriority(record, 'priority'))
   return withMetadata(command, metadata)
 }
 
@@ -1653,6 +1663,22 @@ function optionalTaskStatus(
   }
   throw new KernelRuntimeWireCommandParseError(
     `${key} must be pending, in_progress, or completed`,
+  )
+}
+
+function optionalQueuePriority(
+  record: JsonRecord,
+  key: string,
+): KernelRuntimeTickKairosCommand['priority'] {
+  const value = optionalString(record, key)
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === 'now' || value === 'next' || value === 'later') {
+    return value
+  }
+  throw new KernelRuntimeWireCommandParseError(
+    `${key} must be now, next, or later`,
   )
 }
 

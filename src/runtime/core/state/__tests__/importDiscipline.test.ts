@@ -47,22 +47,22 @@ describe('runtime core state import discipline', () => {
 
   test('assembles bootstrapProvider from explicit runtime-owned state slices', () => {
     expect(bootstrapProviderContent).toContain(
-      'createRuntimeSessionIdentityStateProvider()',
+      'createRuntimeSessionIdentityStateProvider(runWithState)',
     )
     expect(bootstrapProviderContent).toContain(
-      'createRuntimeUsageStateProvider()',
+      'createRuntimeUsageStateProvider(runWithState)',
     )
     expect(bootstrapProviderContent).toContain(
-      'createRuntimePromptStateProvider()',
+      'createRuntimePromptStateProvider(runWithState)',
     )
     expect(bootstrapProviderContent).toContain(
-      'createRuntimeRequestDebugStateProvider()',
+      'createRuntimeRequestDebugStateProvider(runWithState)',
     )
     expect(bootstrapProviderContent).toContain(
-      'createRuntimeHeadlessControlStateProvider()',
+      'createRuntimeHeadlessControlStateProvider(runWithState)',
     )
     expect(bootstrapProviderContent).toContain(
-      'createRuntimeCompactionStateProvider()',
+      'createRuntimeCompactionStateProvider(runWithState)',
     )
   })
 

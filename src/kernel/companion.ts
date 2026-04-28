@@ -5,6 +5,7 @@ import {
   getCompanionSeed,
   getStoredCompanion,
   hasAnyStoredCompanion,
+  rollWithSeed,
   withStoredCompanionProfile,
   withoutStoredCompanionProfile,
 } from '../buddy/companion.js'
@@ -89,6 +90,9 @@ export function createKernelCompanionRuntime(
   const generateProfile =
     options.generateStoredCompanion ?? generateStoredCompanion
   const triggerReaction = options.triggerReaction ?? triggerCompanionReaction
+  let currentSeed: string | undefined
+  let currentProfile: StoredCompanion | null | undefined
+  let currentMuted: boolean | undefined
 
   function emit(event: KernelCompanionEvent): void {
     for (const listener of listeners) {
@@ -96,11 +100,19 @@ export function createKernelCompanionRuntime(
     }
   }
 
-  function getStateSnapshot(): KernelCompanionState | null {
-    const seed = getCompanionSeed()
-    const muted = Boolean(getGlobalConfig().companionMuted)
-    const profile = getStoredCompanion(seed) ?? null
-    const companion = getCompanion() ?? null
+  function getStateSnapshot(
+    seedOverride = currentSeed,
+    profileOverride = currentProfile,
+  ): KernelCompanionState | null {
+    const seed = seedOverride ?? getCompanionSeed()
+    const muted = currentMuted ?? Boolean(getGlobalConfig().companionMuted)
+    const profile =
+      profileOverride !== undefined
+        ? profileOverride
+        : (getStoredCompanion(seed) ?? null)
+    const companion = profile
+      ? ({ ...profile, ...rollWithSeed(profile.seed ?? seed).bones } satisfies Companion)
+      : (getCompanion() ?? null)
     const hasStoredCompanion = hasAnyStoredCompanion()
     if (!profile && !companion && !hasStoredCompanion) {
       return null
@@ -119,8 +131,10 @@ export function createKernelCompanionRuntime(
   ): Promise<KernelCompanionState | null> {
     const seed = action.seed?.trim() || generateSeed()
     const profile = await generateProfile(seed, signal)
+    currentSeed = seed
+    currentProfile = profile
     saveGlobalConfig(current => withStoredCompanionProfile(current, seed, profile))
-    const state = getStateSnapshot()
+    const state = getStateSnapshot(seed, profile)
     emit({ type: 'state_changed', action: action.type, state })
     return state
   }
@@ -136,9 +150,10 @@ export function createKernelCompanionRuntime(
           return saveProfile(action)
         case 'mute':
         case 'unmute': {
+          currentMuted = action.type === 'mute'
           saveGlobalConfig(current => ({
             ...current,
-            companionMuted: action.type === 'mute',
+            companionMuted: currentMuted,
           }))
           const state = getStateSnapshot()
           emit({ type: 'state_changed', action: action.type, state })
@@ -146,8 +161,11 @@ export function createKernelCompanionRuntime(
         }
         case 'clear': {
           const seed = action.seed?.trim() || getCompanionSeed()
+          if (currentSeed === seed) {
+            currentProfile = null
+          }
           saveGlobalConfig(current => withoutStoredCompanionProfile(current, seed))
-          const state = getStateSnapshot()
+          const state = getStateSnapshot(seed, currentSeed === seed ? null : undefined)
           emit({ type: 'state_changed', action: action.type, state })
           return state
         }

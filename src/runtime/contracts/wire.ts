@@ -469,9 +469,29 @@ export type KernelRuntimeReactCompanionCommand =
   KernelRuntimeCommandBase<'react_companion'> &
     KernelRuntimeCompanionReactionRequest
 
+export type KernelRuntimeKairosProactiveState = {
+  active: boolean
+  paused: boolean
+  contextBlocked: boolean
+  shouldTick: boolean
+  nextTickAt: number | null
+  activationSource?: string
+}
+
+export type KernelRuntimeKairosAutonomyCommand = {
+  value: unknown
+  mode: string
+  priority?: 'now' | 'next' | 'later'
+  workload?: string
+  isMeta?: boolean
+  origin?: unknown
+  autonomy?: unknown
+}
+
 export type KernelRuntimeKairosStatus = {
   enabled: boolean
   runtimeEnabled: boolean
+  proactive?: KernelRuntimeKairosProactiveState
   suspended: boolean
   pendingEvents: number
   lastTickAt?: string
@@ -487,6 +507,12 @@ export type KernelRuntimeKairosExternalEvent = {
 export type KernelRuntimeKairosTickRequest = {
   reason?: string
   drain?: boolean
+  createAutonomyCommands?: boolean
+  basePrompt?: string
+  rootDir?: string
+  currentDir?: string
+  workload?: string
+  priority?: 'now' | 'next' | 'later'
 }
 
 export type KernelRuntimeGetKairosStatusCommand =

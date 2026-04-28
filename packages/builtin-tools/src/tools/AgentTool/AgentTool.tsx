@@ -1035,6 +1035,7 @@ export const AgentTool = buildTool({
         selectedAgent,
         setAppState: rootSetAppState,
         notificationTargetAgentId: toolUseContext.agentId,
+        activeTaskExecutionContext: taskExecutionContext,
         // Don't link to parent's abort controller -- background agents should
         // survive when the user presses ESC to cancel the main thread.
         // They are killed explicitly via chat:killAgents.
@@ -1202,6 +1203,7 @@ export const AgentTool = buildTool({
               selectedAgent,
               setAppState: rootSetAppState,
               notificationTargetAgentId: toolUseContext.agentId,
+              activeTaskExecutionContext: taskExecutionContext,
               toolUseId: toolUseContext.toolUseId,
               autoBackgroundMs: getAutoBackgroundMs() || undefined,
             })

@@ -2,10 +2,41 @@ import {
   isKairosEnabledCachedOrEnv,
   isKairosRuntimeEnabled,
 } from '../assistant/gate.js'
+import { TICK_TAG } from '../constants/xml.js'
+import {
+  getActivationSource,
+  getNextTickAt,
+  isContextBlocked,
+  isProactiveActive,
+  isProactivePaused,
+  pauseProactive as pauseProactiveMode,
+  resumeProactive as resumeProactiveMode,
+  shouldTick as shouldProactiveTick,
+} from '../proactive/index.js'
+
+export type KernelKairosProactiveState = {
+  active: boolean
+  paused: boolean
+  contextBlocked: boolean
+  shouldTick: boolean
+  nextTickAt: number | null
+  activationSource?: string
+}
+
+export type KernelKairosAutonomyCommand = {
+  value: unknown
+  mode: string
+  priority?: 'now' | 'next' | 'later'
+  workload?: string
+  isMeta?: boolean
+  origin?: unknown
+  autonomy?: unknown
+}
 
 export type KernelKairosStatus = {
   enabled: boolean
   runtimeEnabled: boolean
+  proactive?: KernelKairosProactiveState
   suspended: boolean
   pendingEvents: number
   lastTickAt?: string
@@ -21,6 +52,12 @@ export type KernelKairosExternalEvent = {
 export type KernelKairosTickRequest = {
   reason?: string
   drain?: boolean
+  createAutonomyCommands?: boolean
+  basePrompt?: string
+  rootDir?: string
+  currentDir?: string
+  workload?: string
+  priority?: 'now' | 'next' | 'later'
 }
 
 export type KernelKairosEvent =
@@ -33,6 +70,7 @@ export type KernelKairosEvent =
       type: 'tick'
       request?: KernelKairosTickRequest
       drainedEvents: readonly KernelKairosExternalEvent[]
+      autonomyCommands?: readonly KernelKairosAutonomyCommand[]
       status: KernelKairosStatus
     }
   | { type: 'suspended'; reason?: string; status: KernelKairosStatus }
@@ -50,6 +88,12 @@ export type KernelKairosRuntime = {
 export type KernelKairosRuntimeOptions = {
   isEnabled?: () => boolean
   isRuntimeEnabled?: () => Promise<boolean>
+  getProactiveState?: () => KernelKairosProactiveState
+  pauseProactive?: () => void
+  resumeProactive?: () => void
+  createAutonomyCommands?: (
+    request: KernelKairosTickRequest,
+  ) => Promise<readonly KernelKairosAutonomyCommand[]>
   now?: () => string
 }
 
@@ -62,6 +106,7 @@ type KernelKairosEventInput =
       type: 'tick'
       request?: KernelKairosTickRequest
       drainedEvents: readonly KernelKairosExternalEvent[]
+      autonomyCommands?: readonly KernelKairosAutonomyCommand[]
     }
   | { type: 'suspended'; reason?: string }
   | { type: 'resumed'; reason?: string }
@@ -73,6 +118,12 @@ export function createKernelKairosRuntime(
   const queue: KernelKairosExternalEvent[] = []
   const isEnabled = options.isEnabled ?? isKairosEnabledCachedOrEnv
   const getRuntimeEnabled = options.isRuntimeEnabled ?? isKairosRuntimeEnabled
+  const getProactiveState =
+    options.getProactiveState ?? getDefaultProactiveState
+  const pauseProactive = options.pauseProactive ?? pauseProactiveMode
+  const resumeProactive = options.resumeProactive ?? resumeProactiveMode
+  const createAutonomyCommands =
+    options.createAutonomyCommands ?? createDefaultAutonomyCommands
   const now = options.now ?? (() => new Date().toISOString())
   let suspendedReason: string | undefined
   let lastTickAt: string | undefined
@@ -81,6 +132,7 @@ export function createKernelKairosRuntime(
     return {
       enabled: isEnabled(),
       runtimeEnabled: await getRuntimeEnabled(),
+      proactive: getProactiveState(),
       suspended: suspendedReason !== undefined,
       suspendedReason,
       pendingEvents: queue.length,
@@ -110,14 +162,20 @@ export function createKernelKairosRuntime(
       }
       lastTickAt = now()
       const drainedEvents = request?.drain === false ? [] : queue.splice(0)
-      await emit({ type: 'tick', request, drainedEvents })
+      const autonomyCommands =
+        request?.createAutonomyCommands === true
+          ? await createAutonomyCommands(request)
+          : undefined
+      await emit({ type: 'tick', request, drainedEvents, autonomyCommands })
     },
     async suspend(reason) {
       suspendedReason = reason || 'manual'
+      pauseProactive()
       await emit({ type: 'suspended', reason })
     },
     async resume(reason) {
       suspendedReason = undefined
+      resumeProactive()
       await emit({ type: 'resumed', reason })
     },
     onEvent(handler) {
@@ -127,4 +185,32 @@ export function createKernelKairosRuntime(
       }
     },
   }
+}
+
+function getDefaultProactiveState(): KernelKairosProactiveState {
+  return {
+    active: isProactiveActive(),
+    paused: isProactivePaused(),
+    contextBlocked: isContextBlocked(),
+    shouldTick: shouldProactiveTick(),
+    nextTickAt: getNextTickAt(),
+    activationSource: getActivationSource(),
+  }
+}
+
+async function createDefaultAutonomyCommands(
+  request: KernelKairosTickRequest,
+): Promise<readonly KernelKairosAutonomyCommand[]> {
+  const { createProactiveAutonomyCommands } = await import(
+    '../utils/autonomyRuns.js'
+  )
+  return createProactiveAutonomyCommands({
+    basePrompt:
+      request.basePrompt ??
+      `<${TICK_TAG}>${new Date().toLocaleTimeString()}</${TICK_TAG}>`,
+    rootDir: request.rootDir,
+    currentDir: request.currentDir,
+    workload: request.workload,
+    priority: request.priority,
+  })
 }

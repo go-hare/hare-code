@@ -2368,6 +2368,12 @@ export class KernelRuntimeWireRouter {
       {
         reason: command.reason,
         drain: command.drain,
+        createAutonomyCommands: command.createAutonomyCommands,
+        basePrompt: command.basePrompt,
+        rootDir: command.rootDir,
+        currentDir: command.currentDir,
+        workload: command.workload,
+        priority: command.priority,
       },
       {
         cwd: this.runtimeWorkspacePath,

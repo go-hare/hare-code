@@ -74,6 +74,60 @@ test('enqueueAgentNotification includes linked task completion hint', async () =
   expect(message).toContain('call TaskUpdate with status: "completed"')
 })
 
+test('enqueueAgentNotification uses captured task list for linked task hint', async () => {
+  const linkedTaskListId = `${taskListId}-linked`
+  process.env.CLAUDE_CODE_TASK_LIST_ID = linkedTaskListId
+  const linkedTaskId = await createTask(linkedTaskListId, {
+    subject: 'Finish original worker task',
+    description: 'Wait for background worker after context switch',
+    status: 'in_progress',
+    owner: undefined,
+    blocks: [],
+    blockedBy: [],
+  })
+
+  await linkTaskToBackgroundTask(linkedTaskListId, linkedTaskId, {
+    backgroundTaskId: 'a456',
+    backgroundTaskType: 'local_agent',
+  })
+
+  process.env.CLAUDE_CODE_TASK_LIST_ID = `${taskListId}-switched`
+
+  let state = {
+    speculation: { status: 'idle' as const },
+    tasks: {
+      a456: {
+        id: 'a456',
+        type: 'local_agent',
+        status: 'completed',
+        description: 'worker',
+        outputFile: '/tmp/out.txt',
+        outputOffset: 0,
+        notified: false,
+        activeTaskExecutionContext: {
+          taskListId: linkedTaskListId,
+          taskId: linkedTaskId,
+        },
+      },
+    },
+  } as any
+  const setAppState = (updater: (prev: typeof state) => typeof state) => {
+    state = updater(state)
+  }
+
+  await enqueueAgentNotification({
+    taskId: 'a456',
+    description: 'worker',
+    status: 'completed',
+    setAppState,
+    finalMessage: 'done',
+  })
+
+  const message = getPendingNotificationsSnapshot()[0]?.value as string
+  expect(message).toContain('Background task for task #')
+  expect(message).toContain('call TaskUpdate with status: "completed"')
+})
+
 test('enqueueAgentNotification scopes notifications to the parent agent when provided', async () => {
   let state = {
     speculation: { status: 'idle' as const },
