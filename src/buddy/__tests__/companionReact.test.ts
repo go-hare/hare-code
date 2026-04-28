@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
+  BUDDY_REACTION_MAX_OUTPUT_TOKENS,
   getBuddyReactionModel,
   installCompanionObserver,
   parseBuddyReactionResponse,
@@ -34,6 +35,10 @@ afterEach(() => {
 })
 
 describe('companionReact', () => {
+  test('uses a reaction output budget large enough for reasoning providers', () => {
+    expect(BUDDY_REACTION_MAX_OUTPUT_TOKENS).toBeGreaterThanOrEqual(512)
+  })
+
   test('registers global companion observer', () => {
     installCompanionObserver()
 

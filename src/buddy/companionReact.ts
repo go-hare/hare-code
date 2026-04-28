@@ -27,6 +27,7 @@ const MIN_INTERVAL_MS = 45_000 // official is roughly 30-60s
 
 const recentReactions: string[] = []
 const MAX_RECENT = 8
+export const BUDDY_REACTION_MAX_OUTPUT_TOKENS = 1_024
 
 // ─── Public API ─────────────────────────────────────
 
@@ -225,7 +226,7 @@ async function generateBuddyReaction(
         isNonInteractiveSession: false,
         hasAppendSystemPrompt: false,
         mcpTools: [],
-        maxOutputTokensOverride: 120,
+        maxOutputTokensOverride: BUDDY_REACTION_MAX_OUTPUT_TOKENS,
       },
     })
 
