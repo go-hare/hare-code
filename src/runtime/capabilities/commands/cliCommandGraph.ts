@@ -57,6 +57,16 @@ export const cliCommandGraph = [
     },
   ),
   command(
+    'mcp.add',
+    ['mcp', 'add'],
+    'Add an MCP server to Claude Code.',
+    {
+      ownership: 'runtime-capability',
+      reuse: 'reuse-with-isolation',
+      capability: 'mcp',
+    },
+  ),
+  command(
     'mcp.remove',
     ['mcp', 'remove'],
     'Remove an MCP server',
