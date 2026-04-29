@@ -161,6 +161,7 @@ class KernelRuntimeFacade implements KernelRuntime {
         sessionId: options.sessionId,
         sessionMeta: options.sessionMeta,
         capabilityIntent: options.capabilityIntent,
+        provider: options.provider,
         metadata: options.metadata,
       }),
     )

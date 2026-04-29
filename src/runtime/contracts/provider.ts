@@ -6,6 +6,36 @@ export type RuntimeProviderScope =
   | 'openai-compatible'
   | 'custom'
 
+export type RuntimeProviderAuthRef =
+  | string
+  | {
+      type: 'env' | 'secret' | 'desktop' | 'keychain'
+      id?: string
+      name?: string
+      service?: string
+      account?: string
+    }
+
+export type RuntimeProviderHeaderRef =
+  | string
+  | {
+      type: 'env' | 'secret' | 'desktop'
+      id?: string
+      name?: string
+    }
+
+export type RuntimeProviderSelection = {
+  providerId: string
+  kind?: RuntimeProviderScope
+  model?: string
+  baseURL?: string
+  authRef?: RuntimeProviderAuthRef
+  headers?: Readonly<Record<string, string>>
+  secretHeadersRef?: RuntimeProviderHeaderRef
+  options?: Readonly<Record<string, unknown>>
+  metadata?: Readonly<Record<string, unknown>>
+}
+
 export interface RuntimeModelRef {
   id: string
   provider: string

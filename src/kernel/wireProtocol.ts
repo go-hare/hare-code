@@ -426,8 +426,15 @@ export type {
 } from '../runtime/contracts/events.js'
 export type {
   KernelCapabilityDescriptor,
+  KernelRuntimeCapabilityIntent,
   KernelCapabilityReloadScope,
 } from '../runtime/contracts/capability.js'
+export type {
+  RuntimeProviderAuthRef,
+  RuntimeProviderHeaderRef,
+  RuntimeProviderScope,
+  RuntimeProviderSelection,
+} from '../runtime/contracts/provider.js'
 export type {
   KernelRuntimeHostIdentity,
   KernelRuntimeHostKind,

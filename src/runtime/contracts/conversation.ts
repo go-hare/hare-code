@@ -1,3 +1,5 @@
+import type { KernelRuntimeCapabilityIntent } from './capability.js'
+import type { RuntimeProviderSelection } from './provider.js'
 import type { KernelRuntimeId } from './runtime.js'
 
 export type KernelConversationId = string
@@ -16,6 +18,8 @@ export type KernelConversationScope = {
   conversationId: KernelConversationId
   workspacePath: string
   sessionId?: string
+  capabilityIntent?: KernelRuntimeCapabilityIntent
+  provider?: RuntimeProviderSelection
   metadata?: Record<string, unknown>
 }
 

@@ -1,3 +1,5 @@
+import type { RuntimeProviderSelection } from './provider.js'
+
 export type KernelCapabilityName = string
 
 export type KernelCapabilityStatus =
@@ -39,6 +41,16 @@ export type KernelCapabilityReloadScope =
 
 export type KernelRuntimeCapabilityReloadRequest = {
   scope: KernelCapabilityReloadScope
+}
+
+export type KernelRuntimeCapabilityIntent = {
+  capabilities?: readonly KernelCapabilityName[]
+  requiredCapabilities?: readonly KernelCapabilityName[]
+  require?: readonly KernelCapabilityName[] | KernelCapabilityName
+  requires?: readonly KernelCapabilityName[] | KernelCapabilityName
+  load?: readonly KernelCapabilityName[] | KernelCapabilityName
+  provider?: RuntimeProviderSelection
+  [key: string]: unknown
 }
 
 export type KernelResolvedRuntimeCapabilities = {

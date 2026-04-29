@@ -370,6 +370,54 @@ export type KernelCapabilityDescriptor = {
   metadata?: Record<string, unknown>
 }
 
+export type RuntimeProviderScope =
+  | 'anthropic'
+  | 'bedrock'
+  | 'vertex'
+  | 'foundry'
+  | 'openai-compatible'
+  | 'custom'
+
+export type RuntimeProviderAuthRef =
+  | string
+  | {
+      type: 'env' | 'secret' | 'desktop' | 'keychain'
+      id?: string
+      name?: string
+      service?: string
+      account?: string
+    }
+
+export type RuntimeProviderHeaderRef =
+  | string
+  | {
+      type: 'env' | 'secret' | 'desktop'
+      id?: string
+      name?: string
+    }
+
+export type RuntimeProviderSelection = {
+  providerId: string
+  kind?: RuntimeProviderScope
+  model?: string
+  baseURL?: string
+  authRef?: RuntimeProviderAuthRef
+  headers?: Readonly<Record<string, string>>
+  secretHeadersRef?: RuntimeProviderHeaderRef
+  options?: Readonly<Record<string, unknown>>
+  metadata?: Readonly<Record<string, unknown>>
+}
+
+export type KernelRuntimeCapabilityIntent = {
+  capabilities?: readonly KernelCapabilityName[]
+  requiredCapabilities?: readonly KernelCapabilityName[]
+  require?: readonly KernelCapabilityName[] | KernelCapabilityName
+  requires?: readonly KernelCapabilityName[] | KernelCapabilityName
+  load?: readonly KernelCapabilityName[] | KernelCapabilityName
+  provider?: RuntimeProviderSelection
+  [key: string]: unknown
+}
+
 export type KernelCapabilityFamily =
   | 'core'
   | 'execution'
@@ -1241,7 +1289,8 @@ export type KernelRuntimeInitCommand =
   KernelRuntimeCommandBase<'init_runtime'> & {
     host?: KernelRuntimeHostIdentity
     workspacePath?: string
-    provider?: Record<string, unknown>
+    provider?: RuntimeProviderSelection
+    defaultProvider?: RuntimeProviderSelection
     auth?: Record<string, unknown>
     model?: string
     capabilities?: Record<string, unknown>
@@ -1271,7 +1320,8 @@ export type KernelRuntimeCreateConversationCommand =
     workspacePath: string
     sessionId?: string
     sessionMeta?: Record<string, unknown>
-    capabilityIntent?: Record<string, unknown>
+    capabilityIntent?: KernelRuntimeCapabilityIntent
+    provider?: RuntimeProviderSelection
   }
 
 export type KernelRuntimeRunTurnCommand =
@@ -1280,6 +1330,7 @@ export type KernelRuntimeRunTurnCommand =
     turnId: string
     prompt: string | readonly unknown[]
     attachments?: readonly unknown[]
+    providerOverride?: RuntimeProviderSelection
   }
 
 export type KernelRuntimeAbortTurnCommand =
@@ -1717,6 +1768,8 @@ export type KernelConversationSnapshot = {
   conversationId: string
   workspacePath: string
   sessionId?: string
+  capabilityIntent?: KernelRuntimeCapabilityIntent
+  provider?: RuntimeProviderSelection
   metadata?: Record<string, unknown>
   state:
     | 'created'
@@ -2166,6 +2219,7 @@ export type KernelRuntimeWireTurnExecutionContext = {
   conversation: KernelRuntimeWireConversation
   eventBus: KernelRuntimeWireRouter['eventBus']
   permissionBroker?: KernelRuntimeWirePermissionBroker
+  providerSelection?: RuntimeProviderSelection
   signal: KernelRuntimeWireAbortSignal
 }
 
@@ -2521,13 +2575,15 @@ export type KernelConversationOptions = {
   workspacePath?: string
   sessionId?: string
   sessionMeta?: Record<string, unknown>
-  capabilityIntent?: Record<string, unknown>
+  capabilityIntent?: KernelRuntimeCapabilityIntent
+  provider?: RuntimeProviderSelection
   metadata?: Record<string, unknown>
 }
 
 export type KernelRunTurnOptions = {
   turnId?: string
   attachments?: readonly unknown[]
+  providerOverride?: RuntimeProviderSelection
   metadata?: Record<string, unknown>
 }
 

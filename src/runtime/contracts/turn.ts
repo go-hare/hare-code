@@ -1,4 +1,5 @@
 import type { KernelConversationId } from './conversation.js'
+import type { RuntimeProviderSelection } from './provider.js'
 
 export type KernelTurnId = string
 
@@ -19,6 +20,7 @@ export type KernelTurnScope = {
 export type KernelTurnRunRequest = KernelTurnScope & {
   prompt: string | readonly unknown[]
   attachments?: readonly unknown[]
+  providerOverride?: RuntimeProviderSelection
   metadata?: Record<string, unknown>
 }
 

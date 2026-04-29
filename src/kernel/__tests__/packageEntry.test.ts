@@ -121,6 +121,10 @@ describe('kernel package entry', () => {
     )
     expect(declaration).toContain('eventJournalPath?: string | false')
     expect(declaration).toContain('conversationJournalPath?: string | false')
+    expect(declaration).toContain('export type RuntimeProviderSelection = {')
+    expect(declaration).toContain('provider?: RuntimeProviderSelection')
+    expect(declaration).toContain('providerOverride?: RuntimeProviderSelection')
+    expect(declaration).toContain('providerSelection?: RuntimeProviderSelection')
     expect(declaration).toContain(
       'capabilityResolver?: KernelRuntimeWireCapabilityResolver',
     )

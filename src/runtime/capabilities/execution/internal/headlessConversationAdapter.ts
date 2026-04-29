@@ -2,10 +2,12 @@ import type {
   KernelConversationId,
   KernelConversationSnapshot,
 } from '../../../contracts/conversation.js'
+import type { KernelRuntimeCapabilityIntent } from '../../../contracts/capability.js'
 import type {
   KernelRuntimeEnvelopeBase,
   KernelRuntimeEventSink,
 } from '../../../contracts/events.js'
+import type { RuntimeProviderSelection } from '../../../contracts/provider.js'
 import type { KernelRuntimeId } from '../../../contracts/runtime.js'
 import type {
   KernelTurnId,
@@ -20,6 +22,9 @@ export type HeadlessConversationAdapterOptions = {
   conversationId: KernelConversationId
   workspacePath: string
   sessionId?: string
+  capabilityIntent?: KernelRuntimeCapabilityIntent
+  provider?: RuntimeProviderSelection
+  metadata?: Record<string, unknown>
   initialSnapshot?: KernelConversationSnapshot
   initialActiveTurnSnapshot?: KernelTurnSnapshot
   eventBus?: RuntimeEventBus
@@ -70,6 +75,9 @@ export class HeadlessConversationAdapter implements HeadlessConversation {
       conversationId: options.conversationId,
       workspacePath: options.workspacePath,
       sessionId: options.sessionId,
+      capabilityIntent: options.capabilityIntent,
+      provider: options.provider,
+      metadata: options.metadata,
       initialSnapshot: options.initialSnapshot,
       initialActiveTurnSnapshot: options.initialActiveTurnSnapshot,
     })
@@ -230,10 +238,20 @@ function sanitizeConversationSnapshot(
   return dropUndefined(snapshot)
 }
 
-function dropUndefined<T extends Record<string, unknown>>(value: T): T {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, item]) => item !== undefined),
-  ) as T
+function dropUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter(item => item !== undefined)
+      .map(item => dropUndefined(item)) as T
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, dropUndefined(item)]),
+    ) as T
+  }
+  return value
 }
 
 export function createHeadlessConversationAdapter(

@@ -3742,6 +3742,306 @@ describe('KernelRuntimeWireRouter', () => {
     })
   })
 
+  test('resolves provider selection from turn, conversation, then runtime default', async () => {
+    const seen: Array<{
+      conversationId: string
+      providerSelection?: { providerId: string; kind?: string; model?: string }
+      conversationProvider?: { providerId: string; kind?: string; model?: string }
+    }> = []
+    const runTurnExecutor: KernelRuntimeWireTurnExecutor = async function* (
+      context,
+    ) {
+      seen.push({
+        conversationId: context.command.conversationId,
+        providerSelection: context.providerSelection,
+        conversationProvider: context.conversation.snapshot().provider,
+      })
+      yield { type: 'completed', stopReason: 'end_turn' }
+    }
+    const { router } = createRouter({ runTurnExecutor })
+
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'init_runtime',
+      requestId: 'init-provider',
+      defaultProvider: {
+        providerId: 'default-openai',
+        kind: 'openai-compatible',
+        model: 'default-model',
+      },
+    })
+    const [conversationAck] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-provider',
+      conversationId: 'conversation-provider',
+      workspacePath: '/tmp/workspace',
+      capabilityIntent: {
+        provider: {
+          providerId: 'conversation-openai',
+          kind: 'openai-compatible',
+          model: 'conversation-model',
+        },
+      },
+    })
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_turn',
+      requestId: 'turn-provider',
+      conversationId: 'conversation-provider',
+      turnId: 'turn-provider',
+      prompt: 'hello',
+      providerOverride: {
+        providerId: 'turn-anthropic',
+        kind: 'anthropic',
+        model: 'turn-model',
+      },
+    })
+
+    await waitForObserved(
+      seen,
+      item => item.conversationId === 'conversation-provider',
+    )
+
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-default-provider',
+      conversationId: 'conversation-default-provider',
+      workspacePath: '/tmp/workspace',
+    })
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_turn',
+      requestId: 'turn-default-provider',
+      conversationId: 'conversation-default-provider',
+      turnId: 'turn-default-provider',
+      prompt: 'hello',
+    })
+    await waitForObserved(
+      seen,
+      item => item.conversationId === 'conversation-default-provider',
+    )
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'init_runtime',
+      requestId: 'init-provider-next-default',
+      defaultProvider: {
+        providerId: 'next-default-openai',
+        kind: 'openai-compatible',
+        model: 'next-default-model',
+      },
+    })
+    const [reusedDefaultConversationAck] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'reuse-default-provider',
+      conversationId: 'conversation-default-provider',
+      workspacePath: '/tmp/workspace',
+    })
+
+    expect(conversationAck).toMatchObject({
+      payload: {
+        provider: {
+          providerId: 'conversation-openai',
+          model: 'conversation-model',
+        },
+      },
+    })
+    expect(reusedDefaultConversationAck).toMatchObject({
+      kind: 'ack',
+      payload: {
+        provider: {
+          providerId: 'default-openai',
+          kind: 'openai-compatible',
+          model: 'default-model',
+        },
+      },
+    })
+    expect(seen).toEqual([
+      {
+        conversationId: 'conversation-provider',
+        providerSelection: {
+          providerId: 'turn-anthropic',
+          kind: 'anthropic',
+          model: 'turn-model',
+        },
+        conversationProvider: {
+          providerId: 'conversation-openai',
+          kind: 'openai-compatible',
+          model: 'conversation-model',
+        },
+      },
+      {
+        conversationId: 'conversation-default-provider',
+        providerSelection: {
+          providerId: 'default-openai',
+          kind: 'openai-compatible',
+          model: 'default-model',
+        },
+        conversationProvider: {
+          providerId: 'default-openai',
+          kind: 'openai-compatible',
+          model: 'default-model',
+        },
+      },
+    ])
+  })
+
+  test('rejects explicit provider changes when reusing a conversation', async () => {
+    const { router } = createRouter()
+
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-provider-a',
+      conversationId: 'conversation-provider',
+      workspacePath: '/tmp/workspace',
+      provider: {
+        model: 'model-a',
+        kind: 'openai-compatible',
+        providerId: 'provider-a',
+      },
+    })
+    const [sameProviderAck] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-provider-same',
+      conversationId: 'conversation-provider',
+      workspacePath: '/tmp/workspace',
+      provider: {
+        providerId: 'provider-a',
+        kind: 'openai-compatible',
+        model: 'model-a',
+      },
+    })
+    const [conflict] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-provider-b',
+      conversationId: 'conversation-provider',
+      workspacePath: '/tmp/workspace',
+      provider: {
+        providerId: 'provider-b',
+        kind: 'openai-compatible',
+        model: 'model-b',
+      },
+    })
+
+    expect(sameProviderAck).toMatchObject({
+      kind: 'ack',
+      requestId: 'create-provider-same',
+      payload: {
+        provider: {
+          providerId: 'provider-a',
+          kind: 'openai-compatible',
+          model: 'model-a',
+        },
+      },
+    })
+    expect(conflict).toMatchObject({
+      kind: 'error',
+      requestId: 'create-provider-b',
+      conversationId: 'conversation-provider',
+      error: {
+        code: 'invalid_request',
+        retryable: false,
+        details: {
+          requestedProvider: {
+            providerId: 'provider-b',
+            kind: 'openai-compatible',
+            model: 'model-b',
+          },
+        },
+      },
+    })
+  })
+
+  test('parses provider selection through wire commands', () => {
+    const create = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'create_conversation',
+        requestId: 'create-provider-wire',
+        conversationId: 'conversation-provider',
+        workspacePath: '/tmp/workspace',
+        provider: {
+          providerId: 'desktop-openai',
+          kind: 'openai-compatible',
+          model: 'gpt-5.4',
+          baseURL: 'http://127.0.0.1:8317/v1',
+          authRef: { type: 'desktop', id: 'provider-secret' },
+        },
+      }),
+    )
+    const runTurn = parseKernelRuntimeCommandLine(
+      JSON.stringify({
+        schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+        type: 'run_turn',
+        requestId: 'turn-provider-wire',
+        conversationId: 'conversation-provider',
+        turnId: 'turn-provider',
+        prompt: 'hello',
+        providerOverride: {
+          providerId: 'turn-openai',
+          kind: 'openai-compatible',
+          model: 'gpt-5.4-mini',
+        },
+      }),
+    )
+
+    expect(create).toMatchObject({
+      type: 'create_conversation',
+      provider: {
+        providerId: 'desktop-openai',
+        kind: 'openai-compatible',
+        model: 'gpt-5.4',
+        baseURL: 'http://127.0.0.1:8317/v1',
+        authRef: { type: 'desktop', id: 'provider-secret' },
+      },
+    })
+    expect(runTurn).toMatchObject({
+      type: 'run_turn',
+      providerOverride: {
+        providerId: 'turn-openai',
+        kind: 'openai-compatible',
+        model: 'gpt-5.4-mini',
+      },
+    })
+    expect(() =>
+      parseKernelRuntimeCommandLine(
+        JSON.stringify({
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type: 'create_conversation',
+          requestId: 'create-provider-invalid',
+          conversationId: 'conversation-provider',
+          workspacePath: '/tmp/workspace',
+          provider: {
+            providerId: 'desktop-openai',
+            kind: 'openai-compatible',
+            authRef: { type: 'plain-text' },
+          },
+        }),
+      ),
+    ).toThrow('authRef.type must be env, secret, desktop, or keychain')
+    expect(() =>
+      parseKernelRuntimeCommandLine(
+        JSON.stringify({
+          schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+          type: 'create_conversation',
+          requestId: 'create-provider-invalid-headers',
+          conversationId: 'conversation-provider',
+          workspacePath: '/tmp/workspace',
+          provider: {
+            providerId: 'desktop-openai',
+            kind: 'openai-compatible',
+            headers: { Authorization: 1 },
+          },
+        }),
+      ),
+    ).toThrow('headers.Authorization must be a string')
+  })
+
   test('publishes host events onto the runtime event bus', async () => {
     const { router } = createRouter()
 

@@ -3,6 +3,7 @@ import { dirname } from 'path'
 import type {
   KernelCapabilityDescriptor,
   KernelCapabilityName,
+  KernelRuntimeCapabilityIntent,
   KernelRuntimeCapabilityReloadRequest,
 } from '../../contracts/capability.js'
 import type {
@@ -62,6 +63,7 @@ import type {
   RuntimePluginUninstallRequest,
   RuntimePluginUpdateRequest,
 } from '../../contracts/plugin.js'
+import type { RuntimeProviderSelection } from '../../contracts/provider.js'
 import type {
   KernelPermissionDecision,
   KernelPermissionRequest,
@@ -135,6 +137,9 @@ export type KernelRuntimeWireConversationOptions = {
   conversationId: KernelConversationId
   workspacePath: string
   sessionId?: string
+  capabilityIntent?: KernelRuntimeCapabilityIntent
+  provider?: RuntimeProviderSelection
+  metadata?: Record<string, unknown>
   initialSnapshot?: KernelConversationSnapshot
   initialActiveTurnSnapshot?: KernelTurnSnapshot
   eventBus: RuntimeEventBus
@@ -192,6 +197,7 @@ export type KernelRuntimeWireTurnExecutionContext = {
   conversation: KernelRuntimeWireConversation
   eventBus: RuntimeEventBus
   permissionBroker?: KernelRuntimeWirePermissionBroker
+  providerSelection?: RuntimeProviderSelection
   signal: AbortSignal
 }
 
@@ -599,6 +605,7 @@ export class KernelRuntimeWireRouter {
     }
   >()
   private readonly hosts = new Map<string, KernelRuntimeWireHostRecord>()
+  private defaultProviderSelection: RuntimeProviderSelection | undefined
 
   constructor(private readonly options: KernelRuntimeWireRouterOptions) {
     this.runtimeWorkspacePath = options.workspacePath
@@ -822,6 +829,8 @@ export class KernelRuntimeWireRouter {
     command: Extract<KernelRuntimeCommand, { type: 'init_runtime' }>,
   ): KernelRuntimeEnvelopeBase[] {
     this.runtimeWorkspacePath = command.workspacePath ?? this.runtimeWorkspacePath
+    this.defaultProviderSelection =
+      command.defaultProvider ?? command.provider ?? this.defaultProviderSelection
     const ack = this.eventBus.ack({
       requestId: command.requestId,
       payload: {
@@ -931,6 +940,7 @@ export class KernelRuntimeWireRouter {
     const recoveredSnapshot = await this.readRecoveredConversation(command)
     const sessionId =
       command.sessionId ?? recoveredSnapshot?.conversation.sessionId
+    const provider = this.resolveConversationProvider(command, recoveredSnapshot)
 
     const conversation = this.options.createConversation(
       {
@@ -938,6 +948,11 @@ export class KernelRuntimeWireRouter {
         conversationId: command.conversationId,
         workspacePath: command.workspacePath,
         sessionId,
+        capabilityIntent:
+          command.capabilityIntent ??
+          recoveredSnapshot?.conversation.capabilityIntent,
+        provider,
+        metadata: command.metadata ?? recoveredSnapshot?.conversation.metadata,
         initialSnapshot: recoveredSnapshot?.conversation,
         initialActiveTurnSnapshot: recoveredSnapshot?.activeTurn,
         eventBus: this.eventBus,
@@ -1113,6 +1128,7 @@ export class KernelRuntimeWireRouter {
           metadata: sanitizeWirePayload({
             conversationId: command.conversationId,
             sessionId: command.sessionId,
+            provider: command.provider,
             capabilityIntent: command.capabilityIntent,
             commandMetadata: command.metadata,
           }),
@@ -1162,6 +1178,50 @@ export class KernelRuntimeWireRouter {
         },
       )
     }
+    const requestedProvider = this.resolveExplicitConversationProvider(command)
+    if (
+      requestedProvider !== undefined &&
+      !providerSelectionsEqual(requestedProvider, snapshot.provider)
+    ) {
+      throw new KernelRuntimeWireConversationConflictError(
+        command.requestId,
+        command.conversationId,
+        'provider',
+        {
+          existingProvider: sanitizeWirePayload(snapshot.provider),
+          requestedProvider: sanitizeWirePayload(requestedProvider),
+        },
+      )
+    }
+  }
+
+  private resolveExplicitConversationProvider(
+    command: KernelRuntimeCreateConversationCommand,
+  ): RuntimeProviderSelection | undefined {
+    return command.provider ?? command.capabilityIntent?.provider
+  }
+
+  private resolveConversationProvider(
+    command: KernelRuntimeCreateConversationCommand,
+    recoveredSnapshot?: KernelRuntimeWireConversationRecoverySnapshot,
+  ): RuntimeProviderSelection | undefined {
+    return (
+      command.provider ??
+      command.capabilityIntent?.provider ??
+      recoveredSnapshot?.conversation.provider ??
+      this.defaultProviderSelection
+    )
+  }
+
+  private resolveTurnProvider(
+    command: KernelRuntimeRunTurnCommand,
+    conversation: KernelRuntimeWireConversation,
+  ): RuntimeProviderSelection | undefined {
+    return (
+      command.providerOverride ??
+      conversation.snapshot().provider ??
+      this.defaultProviderSelection
+    )
   }
 
   private async handleReloadCapabilities(
@@ -2995,6 +3055,7 @@ export class KernelRuntimeWireRouter {
       conversation,
       eventBus: this.eventBus,
       permissionBroker: this.options.permissionBroker,
+      providerSelection: this.resolveTurnProvider(command, conversation),
       signal: controller.signal,
     }).finally(() => {
       this.activeExecutions.delete(executionKey)
@@ -3482,6 +3543,34 @@ function sanitizeWirePayload<T>(value: T): T {
   ) as T
 }
 
+function providerSelectionsEqual(
+  left: RuntimeProviderSelection,
+  right: RuntimeProviderSelection | undefined,
+): boolean {
+  if (!right) {
+    return false
+  }
+  return stableSerializeWirePayload(left) === stableSerializeWirePayload(right)
+}
+
+function stableSerializeWirePayload(value: unknown): string {
+  return JSON.stringify(toStableWirePayload(sanitizeWirePayload(value)))
+}
+
+function toStableWirePayload(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => toStableWirePayload(item))
+  }
+  if (value === null || typeof value !== 'object') {
+    return value
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, toStableWirePayload(item)]),
+  )
+}
+
 function stripWireCommandFields<
   TCommand extends {
     schemaVersion: string
@@ -3594,7 +3683,7 @@ function filterMcpToolBindings(
 }
 
 function getCapabilityIntentNames(
-  capabilityIntent: Record<string, unknown> | undefined,
+  capabilityIntent: KernelRuntimeCapabilityIntent | undefined,
 ): readonly KernelCapabilityName[] {
   if (!capabilityIntent) {
     return []

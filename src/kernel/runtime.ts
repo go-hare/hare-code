@@ -1,6 +1,7 @@
 import type {
   KernelCapabilityDescriptor,
   KernelCapabilityName,
+  KernelRuntimeCapabilityIntent,
   KernelCapabilityReloadScope,
 } from '../runtime/contracts/capability.js'
 import type {
@@ -18,6 +19,12 @@ import type {
   KernelRuntimeEventSink,
 } from '../runtime/contracts/events.js'
 import type { KernelPermissionDecision } from '../runtime/contracts/permissions.js'
+import type {
+  RuntimeProviderAuthRef,
+  RuntimeProviderHeaderRef,
+  RuntimeProviderScope,
+  RuntimeProviderSelection,
+} from '../runtime/contracts/provider.js'
 import type {
   KernelRuntimeHostIdentity,
   KernelRuntimeId,
@@ -321,6 +328,13 @@ export type {
   KernelTeamMessageResult,
   KernelTeamSnapshot,
 } from './runtimeTeams.js'
+export type { KernelRuntimeCapabilityIntent } from '../runtime/contracts/capability.js'
+export type {
+  RuntimeProviderAuthRef,
+  RuntimeProviderHeaderRef,
+  RuntimeProviderScope,
+  RuntimeProviderSelection,
+} from '../runtime/contracts/provider.js'
 export type {
   KernelEventType,
   KernelKnownEvent,
@@ -356,13 +370,15 @@ export type KernelConversationOptions = {
   workspacePath?: string
   sessionId?: string
   sessionMeta?: Record<string, unknown>
-  capabilityIntent?: Record<string, unknown>
+  capabilityIntent?: KernelRuntimeCapabilityIntent
+  provider?: RuntimeProviderSelection
   metadata?: Record<string, unknown>
 }
 
 export type KernelRunTurnOptions = {
   turnId?: KernelTurnId
   attachments?: KernelTurnRunRequest['attachments']
+  providerOverride?: RuntimeProviderSelection
   metadata?: Record<string, unknown>
 }
 

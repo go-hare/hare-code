@@ -4,6 +4,8 @@ import type {
   KernelConversationState,
   KernelConversationScope,
 } from '../../contracts/conversation.js'
+import type { KernelRuntimeCapabilityIntent } from '../../contracts/capability.js'
+import type { RuntimeProviderSelection } from '../../contracts/provider.js'
 import type {
   KernelTurnAbortRequest,
   KernelTurnId,
@@ -62,6 +64,8 @@ export class RuntimeConversationScopeError extends Error {
 export class RuntimeConversation {
   private readonly now: RuntimeConversationClock
   private readonly createdAt: string
+  private readonly capabilityIntent: KernelRuntimeCapabilityIntent | undefined
+  private readonly provider: RuntimeProviderSelection | undefined
   private readonly turns = new Map<KernelTurnId, RuntimeTurnController>()
   private currentState: KernelConversationState = 'ready'
   private updatedAt: string
@@ -69,6 +73,9 @@ export class RuntimeConversation {
 
   constructor(private readonly options: RuntimeConversationOptions) {
     this.now = options.now ?? nowIso
+    this.capabilityIntent =
+      options.capabilityIntent ?? options.initialSnapshot?.capabilityIntent
+    this.provider = options.provider ?? options.initialSnapshot?.provider
     if (options.initialSnapshot) {
       this.assertSnapshotScope(options.initialSnapshot)
       this.createdAt = options.initialSnapshot.createdAt
@@ -177,6 +184,8 @@ export class RuntimeConversation {
       conversationId: this.options.conversationId,
       workspacePath: this.options.workspacePath,
       sessionId: this.options.sessionId,
+      capabilityIntent: this.capabilityIntent,
+      provider: this.provider,
       metadata: this.options.metadata,
       state: this.currentState,
       activeTurnId: this.activeTurnId,

@@ -8,6 +8,12 @@ import type {
 } from '../../contracts/events.js'
 import type { KernelRuntimeHostIdentity } from '../../contracts/runtime.js'
 import type {
+  RuntimeProviderAuthRef,
+  RuntimeProviderHeaderRef,
+  RuntimeProviderScope,
+  RuntimeProviderSelection,
+} from '../../contracts/provider.js'
+import type {
   KernelRuntimeAbortTurnCommand,
   KernelRuntimeAssignTaskCommand,
   KernelRuntimeAuthenticateMcpCommand,
@@ -529,7 +535,12 @@ function parseInitRuntimeCommand(
     'workspacePath',
     optionalString(record, 'workspacePath'),
   )
-  assignOptional(command, 'provider', optionalRecord(record, 'provider'))
+  assignOptional(command, 'provider', optionalProviderSelection(record, 'provider'))
+  assignOptional(
+    command,
+    'defaultProvider',
+    optionalProviderSelection(record, 'defaultProvider'),
+  )
   assignOptional(command, 'auth', optionalRecord(record, 'auth'))
   assignOptional(command, 'model', optionalString(record, 'model'))
   assignOptional(
@@ -593,11 +604,8 @@ function parseCreateConversationCommand(
   }
   assignOptional(command, 'sessionId', optionalString(record, 'sessionId'))
   assignOptional(command, 'sessionMeta', optionalRecord(record, 'sessionMeta'))
-  assignOptional(
-    command,
-    'capabilityIntent',
-    optionalRecord(record, 'capabilityIntent'),
-  )
+  assignOptional(command, 'provider', optionalProviderSelection(record, 'provider'))
+  assignOptional(command, 'capabilityIntent', optionalCapabilityIntent(record))
   return withMetadata(command, metadata)
 }
 
@@ -615,6 +623,11 @@ function parseRunTurnCommand(
     prompt: requirePrompt(record, 'prompt'),
   }
   assignOptional(command, 'attachments', optionalArray(record, 'attachments'))
+  assignOptional(
+    command,
+    'providerOverride',
+    optionalProviderSelection(record, 'providerOverride'),
+  )
   return withMetadata(command, metadata)
 }
 
@@ -1525,6 +1538,160 @@ function optionalRecord(
     return undefined
   }
   return requireRecord(value, key)
+}
+
+function optionalCapabilityIntent(
+  record: JsonRecord,
+): (JsonRecord & { provider?: RuntimeProviderSelection }) | undefined {
+  const capabilityIntent = optionalRecord(record, 'capabilityIntent')
+  if (!capabilityIntent) {
+    return undefined
+  }
+  const provider = optionalProviderSelection(capabilityIntent, 'provider')
+  return provider ? { ...capabilityIntent, provider } : capabilityIntent
+}
+
+function optionalProviderSelection(
+  record: JsonRecord,
+  key: string,
+): RuntimeProviderSelection | undefined {
+  const value = optionalRecord(record, key)
+  if (!value) {
+    return undefined
+  }
+  const providerId = requireString(value, 'providerId')
+  const selection: RuntimeProviderSelection = { providerId }
+  assignOptional(selection, 'kind', optionalProviderScope(value, 'kind'))
+  assignOptional(selection, 'model', optionalString(value, 'model'))
+  assignOptional(selection, 'baseURL', optionalString(value, 'baseURL'))
+  assignOptional(selection, 'authRef', optionalProviderAuthRef(value, 'authRef'))
+  assignOptional(selection, 'headers', optionalStringRecord(value, 'headers'))
+  assignOptional(
+    selection,
+    'secretHeadersRef',
+    optionalProviderHeaderRef(value, 'secretHeadersRef'),
+  )
+  assignOptional(selection, 'options', optionalRecord(value, 'options'))
+  assignOptional(selection, 'metadata', optionalRecord(value, 'metadata'))
+  return selection
+}
+
+function optionalProviderScope(
+  record: JsonRecord,
+  key: string,
+): RuntimeProviderScope | undefined {
+  const value = optionalString(record, key)
+  switch (value) {
+    case undefined:
+    case 'anthropic':
+    case 'bedrock':
+    case 'vertex':
+    case 'foundry':
+    case 'openai-compatible':
+    case 'custom':
+      return value
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `${key} must be a supported provider scope`,
+      )
+  }
+}
+
+function optionalProviderAuthRef(
+  record: JsonRecord,
+  key: string,
+): RuntimeProviderAuthRef | undefined {
+  const value = record[key]
+  if (value === undefined || typeof value === 'string') {
+    return value
+  }
+  const ref = requireRecord(value, key)
+  const type = requireProviderAuthRefType(ref, key)
+  const authRef: {
+    type: 'env' | 'secret' | 'desktop' | 'keychain'
+    id?: string
+    name?: string
+    service?: string
+    account?: string
+  } = { type }
+  assignOptional(authRef, 'id', optionalString(ref, 'id'))
+  assignOptional(authRef, 'name', optionalString(ref, 'name'))
+  assignOptional(authRef, 'service', optionalString(ref, 'service'))
+  assignOptional(authRef, 'account', optionalString(ref, 'account'))
+  return authRef
+}
+
+function optionalProviderHeaderRef(
+  record: JsonRecord,
+  key: string,
+): RuntimeProviderHeaderRef | undefined {
+  const value = record[key]
+  if (value === undefined || typeof value === 'string') {
+    return value
+  }
+  const ref = requireRecord(value, key)
+  const type = requireProviderHeaderRefType(ref, key)
+  const headerRef: {
+    type: 'env' | 'secret' | 'desktop'
+    id?: string
+    name?: string
+  } = { type }
+  assignOptional(headerRef, 'id', optionalString(ref, 'id'))
+  assignOptional(headerRef, 'name', optionalString(ref, 'name'))
+  return headerRef
+}
+
+function optionalStringRecord(
+  record: JsonRecord,
+  key: string,
+): Readonly<Record<string, string>> | undefined {
+  const value = optionalRecord(record, key)
+  if (!value) {
+    return undefined
+  }
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    if (typeof entryValue !== 'string') {
+      throw new KernelRuntimeWireCommandParseError(
+        `${key}.${entryKey} must be a string`,
+      )
+    }
+  }
+  return value as Readonly<Record<string, string>>
+}
+
+function requireProviderAuthRefType(
+  record: JsonRecord,
+  key: string,
+): 'env' | 'secret' | 'desktop' | 'keychain' {
+  const type = requireString(record, 'type')
+  switch (type) {
+    case 'env':
+    case 'secret':
+    case 'desktop':
+    case 'keychain':
+      return type
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `${key}.type must be env, secret, desktop, or keychain`,
+      )
+  }
+}
+
+function requireProviderHeaderRefType(
+  record: JsonRecord,
+  key: string,
+): 'env' | 'secret' | 'desktop' {
+  const type = requireString(record, 'type')
+  switch (type) {
+    case 'env':
+    case 'secret':
+    case 'desktop':
+      return type
+    default:
+      throw new KernelRuntimeWireCommandParseError(
+        `${key}.type must be env, secret, or desktop`,
+      )
+  }
 }
 
 function optionalArray(

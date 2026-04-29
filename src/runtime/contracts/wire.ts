@@ -1,5 +1,6 @@
 import type {
   KernelCapabilityReloadScope,
+  KernelRuntimeCapabilityIntent,
   KernelRuntimeCapabilityReloadRequest,
 } from './capability.js'
 import type {
@@ -54,6 +55,7 @@ import type {
   RuntimePluginUninstallRequest,
   RuntimePluginUpdateRequest,
 } from './plugin.js'
+import type { RuntimeProviderSelection } from './provider.js'
 import type { KernelRuntimeHostIdentity } from './runtime.js'
 import type {
   RuntimeSkillCatalogSnapshot,
@@ -172,7 +174,8 @@ export type KernelRuntimeInitCommand =
   KernelRuntimeCommandBase<'init_runtime'> & {
     host?: KernelRuntimeHostIdentity
     workspacePath?: string
-    provider?: Record<string, unknown>
+    provider?: RuntimeProviderSelection
+    defaultProvider?: RuntimeProviderSelection
     auth?: Record<string, unknown>
     model?: string
     capabilities?: Record<string, unknown>
@@ -202,7 +205,8 @@ export type KernelRuntimeCreateConversationCommand =
     workspacePath: string
     sessionId?: string
     sessionMeta?: Record<string, unknown>
-    capabilityIntent?: Record<string, unknown>
+    capabilityIntent?: KernelRuntimeCapabilityIntent
+    provider?: RuntimeProviderSelection
   }
 
 export type KernelRuntimeRunTurnCommand =
@@ -211,6 +215,7 @@ export type KernelRuntimeRunTurnCommand =
     turnId: KernelTurnId
     prompt: KernelTurnRunRequest['prompt']
     attachments?: KernelTurnRunRequest['attachments']
+    providerOverride?: RuntimeProviderSelection
   }
 
 export type KernelRuntimeAbortTurnCommand =

@@ -92,6 +92,7 @@ class KernelConversationFacade implements KernelConversation {
         turnId: options.turnId ?? randomUUID(),
         prompt,
         attachments: options.attachments,
+        providerOverride: options.providerOverride,
         metadata: options.metadata,
       }),
     )
