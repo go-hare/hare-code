@@ -6,7 +6,7 @@ import { DEFAULT_BUILD_FEATURES } from './scripts/defines.ts'
 const outdir = 'dist'
 
 // Step 1: Clean output directory
-const { rmSync } = await import('fs')
+const { existsSync, rmSync } = await import('fs')
 rmSync(outdir, { recursive: true, force: true })
 
 // Collect FEATURE_* env vars → Bun.build features
@@ -90,6 +90,16 @@ for (const nativeVendor of [
   const vendorDir = join(outdir, 'vendor', nativeVendor)
   await cp(join('vendor', nativeVendor), vendorDir, { recursive: true })
   console.log(`Copied vendor/${nativeVendor}/ → ${vendorDir}/`)
+}
+
+// Step 4.1: Copy the bundled ripgrep binary for published Node installs
+const ripgrepVendorSrc = join('src', 'utils', 'vendor', 'ripgrep')
+if (existsSync(ripgrepVendorSrc)) {
+  const ripgrepVendorDir = join(outdir, 'vendor', 'ripgrep')
+  await cp(ripgrepVendorSrc, ripgrepVendorDir, { recursive: true })
+  console.log(`Copied ${ripgrepVendorSrc}/ → ${ripgrepVendorDir}/`)
+} else {
+  console.warn(`Skipped copying ${ripgrepVendorSrc}/ because it does not exist`)
 }
 
 // Step 5: Generate executable entry points

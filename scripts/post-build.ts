@@ -7,7 +7,7 @@
  * 3. Generate dual entry points (cli-bun.js, cli-node.js)
  */
 import { readdir, readFile, writeFile, cp } from "node:fs/promises";
-import { chmodSync } from "node:fs";
+import { chmodSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -48,6 +48,19 @@ async function postBuild() {
       recursive: true,
     } as never);
     console.log(`Copied vendor/${nativeVendor}/ → ${vendorDir}/`);
+  }
+
+  const ripgrepVendorSrc = join("src", "utils", "vendor", "ripgrep");
+  if (existsSync(ripgrepVendorSrc)) {
+    const ripgrepVendorDir = join(outdir, "vendor", "ripgrep");
+    await cp(ripgrepVendorSrc, ripgrepVendorDir, {
+      recursive: true,
+    } as never);
+    console.log(`Copied ${ripgrepVendorSrc}/ → ${ripgrepVendorDir}/`);
+  } else {
+    console.warn(
+      `Skipped copying ${ripgrepVendorSrc}/ because it does not exist`,
+    );
   }
 
   // Step 3: Generate dual entry points
