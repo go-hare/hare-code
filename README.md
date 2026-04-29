@@ -281,9 +281,15 @@ git clone https://github.com/go-hare/hare-code.git
 cd hare-code
 bun install
 bun run build
-npm install -g .
+npm pack
+npm install -g .\go-hare-hare-code-<version>.tgz
 hare
 ```
+
+说明：
+
+- Windows 上使用 `npm install -g .` 重复安装当前源码目录时，可能触发 npm/Arborist 的内部错误；使用 `npm pack` 后安装生成的 `.tgz` 更稳定。
+- 如果只是想直接运行当前工作区代码进行开发，优先使用 `bun run dev` 或 `node dist/cli-node.js`，不必全局安装。
 
 ### 环境要求
 

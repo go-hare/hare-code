@@ -281,9 +281,15 @@ git clone https://github.com/go-hare/hare-code.git
 cd hare-code
 bun install
 bun run build
-npm install -g .
+npm pack
+npm install -g .\go-hare-hare-code-<version>.tgz
 hare
 ```
+
+Notes:
+
+- On Windows, repeating `npm install -g .` against the current source directory can hit an internal npm/Arborist error. Installing the generated `.tgz` from `npm pack` is more reliable.
+- If you only want to run the current checkout during development, prefer `bun run dev` or `node dist/cli-node.js` instead of a global install.
 
 ### Requirements
 
