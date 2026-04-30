@@ -38,9 +38,13 @@ export function createKernelRuntimeHeadlessProcessExecutor(
   options: KernelRuntimeHeadlessProcessExecutorOptions = {},
 ): KernelRuntimeWireTurnExecutor {
   return async function* runHeadlessProcessTurn(context) {
-    const resolved = resolveHeadlessProcessCommand(options)
+    const conversationSnapshot = context.conversation.snapshot()
+    const resolved = resolveHeadlessProcessCommand(
+      options,
+      conversationSnapshot.sessionId,
+    )
     const child = spawn(resolved.command, resolved.args, {
-      cwd: options.cwd ?? context.conversation.snapshot().workspacePath,
+      cwd: options.cwd ?? conversationSnapshot.workspacePath,
       env: {
         ...process.env,
         ...options.env,
@@ -147,18 +151,22 @@ export function readHeadlessProcessExecutorOptionsFromEnv():
 
 function resolveHeadlessProcessCommand(
   options: KernelRuntimeHeadlessProcessExecutorOptions,
+  sessionId?: string,
 ): HeadlessProcessCommand {
   if (options.command) {
     return {
       command: options.command,
-      args: options.args ?? [],
+      args: withSessionResumeArgs(options.args ?? [], sessionId),
     }
   }
 
   const defaultCommand = resolveDefaultCliCommand()
   return {
     command: defaultCommand.command,
-    args: options.args ?? defaultCommand.args,
+    args: withSessionResumeArgs(
+      options.args ?? defaultCommand.args,
+      sessionId,
+    ),
   }
 }
 
@@ -214,6 +222,26 @@ function parseArgsEnv(value: string | undefined): readonly string[] | undefined 
     throw new Error('HARE_KERNEL_RUNTIME_HEADLESS_ARGS_JSON must be a string array')
   }
   return parsed
+}
+
+function withSessionResumeArgs(
+  args: readonly string[],
+  sessionId: string | undefined,
+): readonly string[] {
+  if (
+    !sessionId ||
+    hasCliOption(args, '--resume') ||
+    hasCliOption(args, '-r') ||
+    hasCliOption(args, '--continue') ||
+    hasCliOption(args, '-c')
+  ) {
+    return args
+  }
+  return [...args, '--resume', sessionId]
+}
+
+function hasCliOption(args: readonly string[], name: string): boolean {
+  return args.some(arg => arg === name || arg.startsWith(`${name}=`))
 }
 
 function serializePromptForHeadlessStdin(prompt: string | readonly unknown[]): string {

@@ -474,6 +474,18 @@ export declare function groupKernelCapabilities(
   descriptors: readonly KernelCapabilityDescriptor[],
 ): KernelCapabilityGroups
 
+export declare function resolveKernelRuntimeCapabilities(
+  source:
+    | KernelRuntime
+    | KernelRuntimeCapabilities
+    | readonly KernelCapabilityDescriptor[],
+): readonly KernelCapabilityView[]
+
+export declare function reloadKernelRuntimeCapabilities(
+  source: KernelRuntime | KernelRuntimeCapabilities,
+  scope?: KernelCapabilityReloadScope,
+): Promise<readonly KernelCapabilityView[]>
+
 export declare function isKernelCapabilityReady(
   descriptor: KernelCapabilityDescriptor,
 ): boolean
@@ -3079,6 +3091,139 @@ export type KernelHeadlessSession = {
   setState(updater: (prev: KernelHeadlessState) => KernelHeadlessState): void
 }
 
+export type KernelHeadlessQueuedUserTurn = {
+  prompt: string
+  turnId?: string
+  attachments?: readonly unknown[]
+  metadata?: Record<string, unknown>
+}
+
+export type KernelHeadlessQueuedInterrupt = {
+  turnId?: string
+  reason?: string
+}
+
+export type KernelHeadlessInputQueue = AsyncIterable<string> & {
+  pushUserTurn(turn: KernelHeadlessQueuedUserTurn): void
+  pushInterrupt(request: KernelHeadlessQueuedInterrupt): void
+  close(reason?: string): void
+}
+
+export type KernelHeadlessControllerStatus =
+  | 'idle'
+  | 'starting'
+  | 'ready'
+  | 'running'
+  | 'aborting'
+  | 'disposed'
+
+export type KernelHeadlessControllerState = {
+  status: KernelHeadlessControllerStatus
+  conversationId?: string
+  activeTurnId?: string
+}
+
+export type KernelHeadlessRunTurnRequest = {
+  prompt: string | readonly unknown[]
+  turnId?: string
+  attachments?: readonly unknown[]
+  providerOverride?: RuntimeProviderSelection
+  metadata?: Record<string, unknown>
+}
+
+export type KernelHeadlessTurnStarted = {
+  sessionId: string
+  conversationId: string
+  turnId: string
+}
+
+export type KernelHeadlessAbortRequest = KernelAbortTurnOptions & {
+  turnId?: string
+}
+
+export type KernelHeadlessEvent =
+  | {
+      type: 'controller.state_changed'
+      state: KernelHeadlessControllerState
+    }
+  | {
+      type: 'runtime.event'
+      envelope: KernelRuntimeEventEnvelope
+    }
+  | {
+      type: 'turn.output'
+      envelope: KernelRuntimeEventEnvelope
+      text?: string
+      payload?: unknown
+    }
+  | {
+      type: 'turn.completed'
+      envelope: KernelRuntimeEventEnvelope
+      stopReason?: string | null
+    }
+  | {
+      type: 'turn.failed'
+      envelope: KernelRuntimeEventEnvelope
+      error?: unknown
+    }
+  | {
+      type: 'sdk.message'
+      envelope: KernelRuntimeEventEnvelope
+      message: unknown
+    }
+
+export type KernelHeadlessControllerOptions = {
+  runtime?: KernelRuntime
+  runtimeOptions?: KernelRuntimeOptions
+  workspacePath?: string
+  conversationId?: string
+  sessionId?: string
+  sessionMeta?: Record<string, unknown>
+  capabilityIntent?: KernelRuntimeCapabilityIntent
+  provider?: RuntimeProviderSelection
+  metadata?: Record<string, unknown>
+  inputQueue?: KernelHeadlessInputQueue
+  resume?: boolean
+  autoStart?: boolean
+  disposeRuntime?: boolean
+}
+
+export type KernelHeadlessController = {
+  readonly sessionId: string
+  readonly state: KernelHeadlessControllerState
+  start(): Promise<void>
+  runTurn(request: KernelHeadlessRunTurnRequest): Promise<KernelHeadlessTurnStarted>
+  abortTurn(request?: KernelHeadlessAbortRequest): Promise<void>
+  dispose(reason?: string): Promise<void>
+  onEvent(handler: (event: KernelHeadlessEvent) => void): () => void
+}
+
+export type KernelHeadlessProviderName =
+  | 'firstParty'
+  | 'bedrock'
+  | 'vertex'
+  | 'foundry'
+  | 'openai'
+  | 'gemini'
+  | 'grok'
+
+export type KernelHeadlessProviderEnvOptions = {
+  provider?: KernelHeadlessProviderName
+  apiKey?: string
+  baseUrl?: string
+  model?: string
+  fallbackModel?: string
+  extraEnv?: Record<string, string | undefined>
+}
+
+export type KernelHeadlessProviderEnvResult = {
+  env: Record<string, string>
+  runOptions: Pick<
+    KernelHeadlessRunOptions,
+    'userSpecifiedModel' | 'fallbackModel'
+  >
+}
+
 export type KernelHeadlessMcpConnectOptions = {
   store: KernelHeadlessStore
   regularMcpConfigs: Record<string, KernelMcpServerConfig>
@@ -3216,6 +3361,20 @@ export declare function createKernelHeadlessSession(
 export declare function createKernelHeadlessStore(
   initialState: KernelHeadlessState,
 ): KernelHeadlessStore
+
+export declare function createKernelHeadlessController(
+  options?: KernelHeadlessControllerOptions,
+): Promise<KernelHeadlessController>
+
+export declare function createKernelHeadlessInputQueue(): KernelHeadlessInputQueue
+
+export declare function createKernelHeadlessProviderEnv(
+  options?: KernelHeadlessProviderEnvOptions,
+): KernelHeadlessProviderEnvResult
+
+export declare function normalizeKernelHeadlessEvent(
+  input: KernelRuntimeEnvelopeBase<KernelEvent> | KernelRuntimeEnvelopeBase,
+): KernelHeadlessEvent | null
 
 export declare function runKernelHeadless(
   inputPrompt: KernelHeadlessInput,

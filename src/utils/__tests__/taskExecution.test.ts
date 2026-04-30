@@ -7,6 +7,7 @@ import {
   getTaskOwnedFiles,
   linkTaskToBackgroundTask,
   markTaskCompletionSuggested,
+  resolveOpenTaskExecutionContext,
   runWithActiveTaskExecutionContext,
   updateTask,
 } from '../tasks.js'
@@ -91,6 +92,55 @@ describe('task execution metadata', () => {
 })
 
 describe('active task execution context', () => {
+  test('restores the sole open owned task from task storage', async () => {
+    const ownedTaskListId = `task-execution-owned-${Date.now()}`
+    const ownedTaskId = await createTask(ownedTaskListId, {
+      subject: 'Owned task',
+      description: 'Restore the claimed task execution context',
+      status: 'in_progress',
+      owner: 'worker-1',
+      blocks: [],
+      blockedBy: [],
+      metadata: {
+        ownedFiles: ['src/a.ts', 'src/a.ts', 'src/b.ts'],
+      },
+    })
+
+    expect(
+      await resolveOpenTaskExecutionContext(ownedTaskListId, 'worker-1'),
+    ).toEqual({
+      taskListId: ownedTaskListId,
+      taskId: ownedTaskId,
+      ownedFiles: ['src/a.ts', 'src/b.ts'],
+    })
+  })
+
+  test('returns undefined when multiple open tasks are owned by the same worker', async () => {
+    const ownedTaskListId = `task-execution-ambiguous-${Date.now()}`
+    await createTask(ownedTaskListId, {
+      subject: 'Owned task A',
+      description: 'First owned task',
+      status: 'in_progress',
+      owner: 'worker-2',
+      blocks: [],
+      blockedBy: [],
+      metadata: undefined,
+    })
+    await createTask(ownedTaskListId, {
+      subject: 'Owned task B',
+      description: 'Second owned task',
+      status: 'pending',
+      owner: 'worker-2',
+      blocks: [],
+      blockedBy: [],
+      metadata: undefined,
+    })
+
+    expect(
+      await resolveOpenTaskExecutionContext(ownedTaskListId, 'worker-2'),
+    ).toBeUndefined()
+  })
+
   test('isolates active task execution context per async chain', async () => {
     const result = await Promise.all([
       runWithActiveTaskExecutionContext(

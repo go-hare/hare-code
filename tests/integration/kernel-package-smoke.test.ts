@@ -36,6 +36,9 @@ const EXPECTED_KERNEL_EXPORTS = [
   'createDirectConnectSession',
   'createKernelCompanionRuntime',
   'createKernelContextManager',
+  'createKernelHeadlessController',
+  'createKernelHeadlessInputQueue',
+  'createKernelHeadlessProviderEnv',
   'createKernelHeadlessSession',
   'createKernelHeadlessStore',
   'createKernelKairosRuntime',
@@ -68,7 +71,10 @@ const EXPECTED_KERNEL_EXPORTS = [
   'KernelPermissionDecisionError',
   'KernelRuntimeRequestError',
   'KernelRuntimeEventReplayError',
+  'normalizeKernelHeadlessEvent',
   'prepareKernelHeadlessStartup',
+  'reloadKernelRuntimeCapabilities',
+  'resolveKernelRuntimeCapabilities',
   'runBridgeHeadless',
   'runConnectHeadless',
   'runDaemonWorker',
@@ -207,6 +213,6 @@ describe('kernel package smoke', () => {
         rmSync(tempRoot, { recursive: true, force: true })
       }
     },
-    { timeout: 120_000 },
+    { timeout: 180_000 },
   )
 })

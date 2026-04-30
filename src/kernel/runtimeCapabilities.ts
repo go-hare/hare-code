@@ -3,7 +3,10 @@ import type {
   KernelCapabilityName,
   KernelCapabilityReloadScope,
 } from '../runtime/contracts/capability.js'
-import type { KernelRuntimeCapabilities } from './runtime.js'
+import type {
+  KernelRuntime,
+  KernelRuntimeCapabilities,
+} from './runtime.js'
 import {
   filterKernelCapabilities,
   groupKernelCapabilities,
@@ -11,6 +14,7 @@ import {
   toKernelCapabilityViews,
   type KernelCapabilityFamily,
   type KernelCapabilityFilter,
+  type KernelCapabilityView,
 } from './capabilities.js'
 
 type KernelRuntimeCapabilitySource = {
@@ -41,4 +45,45 @@ export function createKernelRuntimeCapabilitiesFacade(
       filterKernelCapabilities(runtime.listCapabilities(), { family }),
     reload: scope => runtime.reloadCapabilities(scope),
   }
+}
+
+export function resolveKernelRuntimeCapabilities(
+  source:
+    | KernelRuntime
+    | KernelRuntimeCapabilities
+    | readonly KernelCapabilityDescriptor[],
+): readonly KernelCapabilityView[] {
+  if (isKernelCapabilityDescriptorList(source)) {
+    return toKernelCapabilityViews(source)
+  }
+  return getKernelRuntimeCapabilities(source).views()
+}
+
+export async function reloadKernelRuntimeCapabilities(
+  source: KernelRuntime | KernelRuntimeCapabilities,
+  scope?: KernelCapabilityReloadScope,
+): Promise<readonly KernelCapabilityView[]> {
+  const descriptors = await getKernelRuntimeCapabilities(source).reload(scope)
+  return toKernelCapabilityViews(descriptors)
+}
+
+function getKernelRuntimeCapabilities(
+  source: KernelRuntime | KernelRuntimeCapabilities,
+): KernelRuntimeCapabilities {
+  return hasKernelRuntime(source) ? source.capabilities : source
+}
+
+function hasKernelRuntime(
+  source: KernelRuntime | KernelRuntimeCapabilities,
+): source is KernelRuntime {
+  return 'capabilities' in source
+}
+
+function isKernelCapabilityDescriptorList(
+  source:
+    | KernelRuntime
+    | KernelRuntimeCapabilities
+    | readonly KernelCapabilityDescriptor[],
+): source is readonly KernelCapabilityDescriptor[] {
+  return Array.isArray(source)
 }

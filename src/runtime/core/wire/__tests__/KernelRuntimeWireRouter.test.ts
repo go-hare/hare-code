@@ -18,6 +18,7 @@ import {
   type KernelRuntimeWireMcpRegistry,
   type KernelRuntimeWirePermissionBroker,
   type KernelRuntimeWirePluginCatalog,
+  type KernelRuntimeWireSessionManager,
   type KernelRuntimeWireSkillCatalog,
   type KernelRuntimeWireTaskRegistry,
   type KernelRuntimeWireToolCatalog,
@@ -54,6 +55,7 @@ function createRouter(
     pluginCatalog?: KernelRuntimeWirePluginCatalog
     agentRegistry?: KernelRuntimeWireAgentRegistry
     taskRegistry?: KernelRuntimeWireTaskRegistry
+    sessionManager?: KernelRuntimeWireSessionManager
     permissionBroker?: KernelRuntimeWirePermissionBroker
     toolCatalog?: KernelRuntimeWireToolCatalog
     runTurnExecutor?: KernelRuntimeWireTurnExecutor
@@ -83,6 +85,7 @@ function createRouter(
     pluginCatalog: options.pluginCatalog,
     agentRegistry: options.agentRegistry,
     taskRegistry: options.taskRegistry,
+    sessionManager: options.sessionManager,
     permissionBroker: options.permissionBroker,
     runTurnExecutor: options.runTurnExecutor,
     createConversation: options => createHeadlessConversation(options),
@@ -447,6 +450,371 @@ describe('KernelRuntimeWireRouter', () => {
     })
   })
 
+  test('hydrates resumed transcript messages and file history into conversation replay events', async () => {
+    const transcriptMessages = [
+      {
+        type: 'user',
+        uuid: 'resume-user-1',
+        message: {
+          content: 'Hello from transcript',
+        },
+      },
+      {
+        type: 'assistant',
+        uuid: 'resume-assistant-1',
+        message: {
+          content: 'Hi from transcript',
+        },
+      },
+    ] as const
+    const contentReplacements = [
+      {
+        kind: 'tool-result',
+        toolUseId: 'tool-use-1',
+        replacement: '<tool result omitted>',
+      },
+    ] as const
+    const contextCollapseCommits = [
+      {
+        type: 'marble-origami-commit',
+        sessionId: 'session-1',
+        collapseId: '0000000000000001',
+        summaryUuid: 'collapse-summary-1',
+        summaryContent:
+          '<collapsed id="0000000000000001">summary</collapsed>',
+        summary: 'summary',
+        firstArchivedUuid: 'resume-user-1',
+        lastArchivedUuid: 'resume-assistant-1',
+      },
+    ] as const
+    const contextCollapseSnapshot = {
+      type: 'marble-origami-snapshot',
+      sessionId: 'session-1',
+      staged: [
+        {
+          startUuid: 'resume-user-1',
+          endUuid: 'resume-assistant-1',
+          summary: 'summary',
+          risk: 1,
+          stagedAt: 1714521600000,
+        },
+      ],
+      armed: true,
+      lastSpawnTokens: 2048,
+    } as const
+    const fileHistorySnapshots = [
+      {
+        messageId: 'resume-user-1',
+        trackedFileBackups: {
+          'src/example.ts': {
+            backupFileName: 'resume-user-1@v1',
+            version: 1,
+            backupTime: '2026-05-01T00:00:00.000Z',
+          },
+        },
+        timestamp: '2026-05-01T00:00:01.000Z',
+      },
+    ] as const
+    const todoSnapshot = {
+      sourceMessageUuid: 'resume-assistant-1',
+      todos: [
+        {
+          content: 'Ship runtime resume hydration',
+          status: 'in_progress',
+          activeForm: 'Shipping runtime resume hydration',
+        },
+      ],
+    } as const
+    const nestedMemorySnapshot = {
+      paths: ['/tmp/workspace/CLAUDE.md'],
+    } as const
+    const taskSnapshot = {
+      taskListId: 'session-1',
+      tasks: [
+        {
+          id: '1',
+          subject: 'Ship runtime resume hydration',
+          description: 'Resume file-backed task state',
+          status: 'in_progress',
+          taskListId: 'session-1',
+          owner: 'session-1',
+          blocks: [],
+          blockedBy: [],
+          ownedFiles: ['src/example.ts'],
+          execution: {
+            linkedBackgroundTaskId: 'background-task-1',
+          },
+        },
+      ],
+    } as const
+    const attributionSnapshots = [
+      {
+        type: 'attribution-snapshot',
+        messageId: 'resume-assistant-1',
+        surface: 'cli',
+        fileStates: {
+          'src/example.ts': {
+            lineAttribution: [{ start: 0, end: 4, source: 'claude' }],
+            mtime: 1714521600000,
+          },
+        },
+        promptCount: 2,
+      },
+    ] as const
+    const { router } = createRouter({
+      sessionManager: {
+        async listSessions() {
+          return [
+            {
+              sessionId: 'session-1',
+              cwd: '/tmp/workspace',
+              summary: 'Resume fixture',
+              lastModified: 1,
+            },
+          ]
+        },
+        async resumeSession() {
+          return {
+            sessionId: 'session-1',
+            fullPath: '/tmp/workspace/session-1.jsonl',
+            messages: transcriptMessages,
+            turnInterruptionState: 'none' as const,
+            taskSnapshot,
+            todoSnapshot,
+            nestedMemorySnapshot,
+            attributionSnapshots,
+            fileHistorySnapshots,
+            contentReplacements,
+            contextCollapseCommits,
+            contextCollapseSnapshot,
+          }
+        },
+        async getSessionTranscript() {
+          return {
+            sessionId: 'session-1',
+            fullPath: '/tmp/workspace/session-1.jsonl',
+            messages: transcriptMessages,
+            turnInterruptionState: 'none' as const,
+            taskSnapshot,
+            todoSnapshot,
+            nestedMemorySnapshot,
+            attributionSnapshots,
+            fileHistorySnapshots,
+            contentReplacements,
+            contextCollapseCommits,
+            contextCollapseSnapshot,
+          }
+        },
+      },
+    })
+
+    const [resumed] = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'resume_session',
+      requestId: 'resume-1',
+      sessionId: 'session-1',
+      conversationId: 'conversation-resume-1',
+    })
+    const replay = await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'subscribe_events',
+      requestId: 'subscribe-1',
+      conversationId: 'conversation-resume-1',
+    })
+    const transcriptReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.transcript_message'
+      )
+    })
+    const fileHistoryReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.file_history_snapshot'
+      )
+    })
+    const todoReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.todo_snapshot'
+      )
+    })
+    const nestedMemoryReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.nested_memory_snapshot'
+      )
+    })
+    const taskReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.task_snapshot'
+      )
+    })
+    const attributionReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.attribution_snapshot'
+      )
+    })
+    const contentReplacementReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.content_replacement'
+      )
+    })
+    const contextCollapseCommitReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.context_collapse_commit'
+      )
+    })
+    const contextCollapseSnapshotReplay = replay.slice(1).filter(envelope => {
+      return (
+        (envelope.payload as { type?: string } | undefined)?.type ===
+        'conversation.context_collapse_snapshot'
+      )
+    })
+
+    expect(resumed).toMatchObject({
+      kind: 'ack',
+      requestId: 'resume-1',
+      conversationId: 'conversation-resume-1',
+      payload: {
+        conversation: {
+          conversationId: 'conversation-resume-1',
+          sessionId: 'session-1',
+          workspacePath: '/tmp/workspace',
+        },
+      },
+    })
+    expect(transcriptReplay).toHaveLength(2)
+    expect(fileHistoryReplay).toHaveLength(1)
+    expect(todoReplay).toHaveLength(1)
+    expect(nestedMemoryReplay).toHaveLength(1)
+    expect(taskReplay).toHaveLength(1)
+    expect(attributionReplay).toHaveLength(1)
+    expect(contentReplacementReplay).toHaveLength(1)
+    expect(contextCollapseCommitReplay).toHaveLength(1)
+    expect(contextCollapseSnapshotReplay).toHaveLength(1)
+    expect(transcriptReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.transcript_message',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          index: 0,
+          message: transcriptMessages[0],
+        },
+      },
+    })
+    expect(transcriptReplay[1]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.transcript_message',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          index: 1,
+          message: transcriptMessages[1],
+        },
+      },
+    })
+    expect(fileHistoryReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.file_history_snapshot',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          index: 0,
+          snapshot: fileHistorySnapshots[0],
+        },
+      },
+    })
+    expect(todoReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.todo_snapshot',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          snapshot: todoSnapshot,
+        },
+      },
+    })
+    expect(nestedMemoryReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.nested_memory_snapshot',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          snapshot: nestedMemorySnapshot,
+        },
+      },
+    })
+    expect(taskReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.task_snapshot',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          snapshot: taskSnapshot,
+        },
+      },
+    })
+    expect(attributionReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.attribution_snapshot',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          index: 0,
+          snapshot: attributionSnapshots[0],
+        },
+      },
+    })
+    expect(contentReplacementReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.content_replacement',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          index: 0,
+          replacement: contentReplacements[0],
+        },
+      },
+    })
+    expect(contextCollapseCommitReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.context_collapse_commit',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          index: 0,
+          commit: contextCollapseCommits[0],
+        },
+      },
+    })
+    expect(contextCollapseSnapshotReplay[0]).toMatchObject({
+      conversationId: 'conversation-resume-1',
+      payload: {
+        type: 'conversation.context_collapse_snapshot',
+        payload: {
+          sessionId: 'session-1',
+          fullPath: '/tmp/workspace/session-1.jsonl',
+          snapshot: contextCollapseSnapshot,
+        },
+      },
+    })
+  })
+
   test('aborts active turns when host disconnect policy requests it', async () => {
     let executionSignal: AbortSignal | undefined
     const { router, observed } = createRouter({
@@ -778,6 +1146,68 @@ describe('KernelRuntimeWireRouter', () => {
         payload: {
           state: 'completed',
           stopReason: 'success',
+        },
+      },
+    })
+  })
+
+  test('passes resumed session identifiers through the process-backed executor', async () => {
+    const fakeHeadlessScript = `
+      const resumeIndex = process.argv.findIndex(arg => arg === "--resume");
+      const resumed = resumeIndex >= 0 ? process.argv[resumeIndex + 1] : "missing";
+      console.log(JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: resumed,
+        session_id: resumed,
+      }));
+    `
+    const nodeCommand = existsSync('/usr/local/bin/node')
+      ? '/usr/local/bin/node'
+      : 'node'
+    const { router, observed } = createRouter({
+      runTurnExecutor: createKernelRuntimeHeadlessProcessExecutor({
+        command: nodeCommand,
+        args: ['-e', fakeHeadlessScript, '--'],
+        cwd: process.cwd(),
+        killTimeoutMs: 1000,
+      }),
+    })
+    const resumedSessionId = '550e8400-e29b-41d4-a716-446655440000'
+
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'create_conversation',
+      requestId: 'create-1',
+      conversationId: 'conversation-1',
+      workspacePath: '/tmp/workspace',
+      sessionId: resumedSessionId,
+    })
+    await router.handleCommand({
+      schemaVersion: KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION,
+      type: 'run_turn',
+      requestId: 'run-1',
+      conversationId: 'conversation-1',
+      turnId: 'turn-1',
+      prompt: 'hello process',
+    })
+
+    const output = await waitForObserved(observed, envelope => {
+      return (
+        (envelope as { payload?: { type?: string } }).payload?.type ===
+          'turn.output_delta' &&
+        (envelope as { payload?: { payload?: { text?: string } } }).payload
+          ?.payload?.text === resumedSessionId
+      )
+    })
+
+    expect(output).toMatchObject({
+      kind: 'event',
+      payload: {
+        type: 'turn.output_delta',
+        payload: {
+          text: resumedSessionId,
         },
       },
     })

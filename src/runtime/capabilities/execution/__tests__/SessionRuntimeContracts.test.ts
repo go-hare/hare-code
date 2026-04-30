@@ -24,6 +24,18 @@ const queryEngineEntryContent = readFileSync(
   join(repoRoot, 'src/QueryEngine.ts'),
   'utf8',
 )
+const queryContent = readFileSync(join(repoRoot, 'src/query.ts'), 'utf8')
+const headlessRuntimeLoopContent = readFileSync(
+  join(
+    repoRoot,
+    'src/runtime/capabilities/execution/internal/headlessRuntimeLoop.ts',
+  ),
+  'utf8',
+)
+const queryHelpersContent = readFileSync(
+  join(repoRoot, 'src/utils/queryHelpers.ts'),
+  'utf8',
+)
 const acpAgentContent = readFileSync(
   join(repoRoot, 'src/services/acp/agent.ts'),
   'utf8',
@@ -78,6 +90,77 @@ describe('SessionRuntime contracts', () => {
       /runtimePermission: this\.config\.runtimePermission/g,
     )
     expect(runtimePermissionMounts).toHaveLength(2)
+  })
+
+  test('threads content replacement state across runtime session boundaries', () => {
+    const contentReplacementMounts = content.match(
+      /contentReplacementState: this\.contentReplacementState/g,
+    )
+    expect(contentReplacementMounts).toHaveLength(2)
+    expect(content).toContain('initialContentReplacements?: ContentReplacementRecord[]')
+    expect(content).toContain('contentReplacementState?: ContentReplacementState')
+    expect(content).toContain('provisionContentReplacementState(')
+    expect(content).toContain('initialContentReplacements,')
+    expect(content).toContain('contentReplacementState,')
+  })
+
+  test('allows callers to inject active task execution context into runtime turns', () => {
+    const activeTaskMounts = content.match(
+      /activeTaskExecutionContext:\s*this\.config\.activeTaskExecutionContext\s*\?\?\s*getActiveTaskExecutionContext\(\)/g,
+    )
+    expect(activeTaskMounts).toHaveLength(2)
+    expect(content).toContain(
+      "activeTaskExecutionContext?: ToolUseContext['activeTaskExecutionContext']",
+    )
+    expect(content).toContain('activeTaskExecutionContext,')
+  })
+
+  test('headless runtime provisions resumed content replacement state once per session', () => {
+    expect(headlessRuntimeLoopContent).toContain(
+      'const contentReplacementState = provisionContentReplacementState(',
+    )
+    expect(headlessRuntimeLoopContent).toContain(
+      'loadedConversation?.contentReplacements',
+    )
+    expect(headlessRuntimeLoopContent).toContain(
+      'contentReplacementState,',
+    )
+  })
+
+  test('headless runtime reloads open owned task context before each runtime turn', () => {
+    expect(headlessRuntimeLoopContent).toContain(
+      'const activeTaskExecutionContext = options.forkSession',
+    )
+    expect(headlessRuntimeLoopContent).toContain(
+      ': await resolveOpenTaskExecutionContext()',
+    )
+    expect(headlessRuntimeLoopContent).toContain(
+      'activeTaskExecutionContext,',
+    )
+  })
+
+  test('runtime resume restores nested memory dedupe state from transcript messages', () => {
+    expect(queryHelpersContent).toContain(
+      'export function extractLoadedNestedMemoryPathsFromMessages(',
+    )
+    expect(content).toContain(
+      'initialLoadedNestedMemoryPaths?: readonly string[]',
+    )
+    expect(content).toContain(
+      'extractLoadedNestedMemoryPathsFromMessages(this.mutableMessages)',
+    )
+    expect(headlessRuntimeLoopContent).toContain(
+      'let loadedNestedMemoryPaths = extractLoadedNestedMemoryPathsFromMessages(',
+    )
+    expect(headlessRuntimeLoopContent).toContain(
+      'initialLoadedNestedMemoryPaths: Array.from(',
+    )
+  })
+
+  test('query persists content replacements for sdk runtime sessions', () => {
+    expect(queryContent).toContain("querySource.startsWith('agent:')")
+    expect(queryContent).toContain("querySource.startsWith('repl_main_thread')")
+    expect(queryContent).toContain("querySource === 'sdk'")
   })
 
   test('headless managed session shares the runtime session lifecycle contract', () => {
@@ -177,6 +260,14 @@ describe('SessionRuntime contracts', () => {
     const createSessionRuntime = mock((config: Record<string, unknown>) => {
       expect(config.readFileCache).not.toBe(initialCache)
       expect(config.initialMessages).toEqual([])
+      expect(config.initialLoadedNestedMemoryPaths).toEqual([
+        '/tmp/.claude/CLAUDE.md',
+      ])
+      expect(config.activeTaskExecutionContext).toEqual({
+        taskListId: 'team-alpha',
+        taskId: '7',
+        ownedFiles: ['src/runtime.ts'],
+      })
       return {
         id: 'session-1',
         workDir: process.cwd(),
@@ -202,6 +293,12 @@ describe('SessionRuntime contracts', () => {
       setAppState: () => ({}) as any,
       getReadFileCache: () => initialCache,
       setReadFileCache,
+      initialLoadedNestedMemoryPaths: ['/tmp/.claude/CLAUDE.md'],
+      activeTaskExecutionContext: {
+        taskListId: 'team-alpha',
+        taskId: '7',
+        ownedFiles: ['src/runtime.ts'],
+      },
       createSessionRuntime: createSessionRuntime as any,
     })) {
       yieldedMessages.push(message)

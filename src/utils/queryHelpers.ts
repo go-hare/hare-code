@@ -529,6 +529,34 @@ export function extractReadFilesFromMessages(
   return cache
 }
 
+export function extractLoadedNestedMemoryPathsFromMessages(
+  messages: Message[],
+): Set<string> {
+  const paths = new Set<string>()
+
+  for (const message of messages) {
+    if (message.type !== 'attachment') {
+      continue
+    }
+
+    const attachment = message.attachment as
+      | { type?: string; path?: unknown }
+      | undefined
+    if (attachment?.type !== 'nested_memory') {
+      continue
+    }
+
+    if (
+      typeof attachment.path === 'string' &&
+      attachment.path.trim().length > 0
+    ) {
+      paths.add(attachment.path)
+    }
+  }
+
+  return paths
+}
+
 /**
  * Extract the top-level CLI tools used in BashTool calls from message history.
  * Returns a deduplicated set of command names (e.g. 'vercel', 'aws', 'git').

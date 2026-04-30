@@ -4,8 +4,11 @@ import * as bridge from '../bridge.js'
 import * as companion from '../companion.js'
 import * as daemon from '../daemon.js'
 import * as context from '../context.js'
+import * as headlessController from '../headlessController.js'
+import * as headlessInputQueue from '../headlessInputQueue.js'
 import * as headless from '../headless.js'
 import * as headlessMcp from '../headlessMcp.js'
+import * as headlessProvider from '../headlessProvider.js'
 import * as headlessStartup from '../headlessStartup.js'
 import * as events from '../events.js'
 import * as kernel from '../index.js'
@@ -36,6 +39,9 @@ const EXPECTED_KERNEL_EXPORTS = [
   'createDirectConnectSession',
   'createKernelCompanionRuntime',
   'createKernelContextManager',
+  'createKernelHeadlessController',
+  'createKernelHeadlessInputQueue',
+  'createKernelHeadlessProviderEnv',
   'createKernelHeadlessSession',
   'createKernelHeadlessStore',
   'createKernelKairosRuntime',
@@ -68,7 +74,10 @@ const EXPECTED_KERNEL_EXPORTS = [
   'KernelPermissionDecisionError',
   'KernelRuntimeRequestError',
   'KernelRuntimeEventReplayError',
+  'normalizeKernelHeadlessEvent',
   'prepareKernelHeadlessStartup',
+  'reloadKernelRuntimeCapabilities',
+  'resolveKernelRuntimeCapabilities',
   'runBridgeHeadless',
   'runConnectHeadless',
   'runDaemonWorker',
@@ -110,6 +119,30 @@ describe('kernel index surface', () => {
     ).toBe(true)
     expect(
       Object.is(kernel.runKernelHeadless, headless.runKernelHeadless),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.createKernelHeadlessController,
+        headlessController.createKernelHeadlessController,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.normalizeKernelHeadlessEvent,
+        headlessController.normalizeKernelHeadlessEvent,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.createKernelHeadlessInputQueue,
+        headlessInputQueue.createKernelHeadlessInputQueue,
+      ),
+    ).toBe(true)
+    expect(
+      Object.is(
+        kernel.createKernelHeadlessProviderEnv,
+        headlessProvider.createKernelHeadlessProviderEnv,
+      ),
     ).toBe(true)
     expect(
       Object.is(
@@ -316,6 +349,8 @@ describe('kernel index surface', () => {
       'groupKernelCapabilities',
       'isKernelCapabilityReady',
       'isKernelCapabilityUnavailable',
+      'reloadKernelRuntimeCapabilities',
+      'resolveKernelRuntimeCapabilities',
       'toKernelCapabilityView',
       'toKernelCapabilityViews',
     ]) {

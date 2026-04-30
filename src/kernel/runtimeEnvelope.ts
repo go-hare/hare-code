@@ -59,8 +59,13 @@ function createReplayCollector(
   events: KernelRuntimeEnvelopeBase[],
   options: KernelRuntimeEventReplayOptions,
 ): KernelRuntimeEventSink {
+  const seenReplayEvents = new Set<string>()
   return envelope => {
-    if (envelope.kind === 'event' && matchesReplayOptions(envelope, options)) {
+    if (
+      envelope.kind === 'event' &&
+      matchesReplayOptions(envelope, options) &&
+      markReplayEnvelopeSeen(seenReplayEvents, envelope)
+    ) {
       events.push(envelope)
     }
   }
@@ -95,6 +100,21 @@ function matchesReplayOptions(
   if (options.turnId !== undefined && envelope.turnId !== options.turnId) {
     return false
   }
+  return true
+}
+
+function markReplayEnvelopeSeen(
+  seen: Set<string>,
+  envelope: KernelRuntimeEnvelopeBase,
+): boolean {
+  const key = envelope.eventId ?? envelope.messageId
+  if (!key) {
+    return true
+  }
+  if (seen.has(key)) {
+    return false
+  }
+  seen.add(key)
   return true
 }
 

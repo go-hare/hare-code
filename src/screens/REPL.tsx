@@ -338,7 +338,11 @@ import {
   getAgentTranscript,
 } from '../utils/sessionStorage.js';
 import { deserializeMessages } from '../utils/conversationRecovery.js';
-import { extractReadFilesFromMessages, extractBashToolsFromMessages } from '../utils/queryHelpers.js';
+import {
+  extractReadFilesFromMessages,
+  extractBashToolsFromMessages,
+  extractLoadedNestedMemoryPathsFromMessages,
+} from '../utils/queryHelpers.js';
 import { resetMicrocompactState } from '../services/compact/microCompact.js';
 import { runPostCompactCleanup } from '../services/compact/postCompactCleanup.js';
 import {
@@ -2187,6 +2191,7 @@ export function REPL({
           messages,
           log.projectPath ?? getReplSessionIdentity().originalCwd,
         );
+        restoreResumeToolContextState(messages);
 
         // Clear any active loading state (no queryId since we're not in a query)
         resetLoadingState();
@@ -2344,12 +2349,20 @@ export function REPL({
     }
   }, []);
 
+  const restoreResumeToolContextState = useCallback((messages: MessageType[]) => {
+    loadedNestedMemoryPathsRef.current.clear();
+    for (const path of extractLoadedNestedMemoryPathsFromMessages(messages)) {
+      loadedNestedMemoryPathsRef.current.add(path);
+    }
+  }, []);
+
   // Extract read file state from initialMessages on mount
   // This handles CLI flag resume (--resume-session) and ResumeConversation screen
   // where messages are passed as props rather than through the resume callback
   useEffect(() => {
     if (initialMessages && initialMessages.length > 0) {
       restoreReadFileState(initialMessages, getReplSessionIdentity().originalCwd);
+      restoreResumeToolContextState(initialMessages);
       void restoreRemoteAgentTasks({
         abortController: new AbortController(),
         getAppState: () => store.getState(),

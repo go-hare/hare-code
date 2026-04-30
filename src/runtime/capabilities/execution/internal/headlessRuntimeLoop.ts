@@ -219,6 +219,11 @@ import {
   checkGroveForNonInteractive,
 } from 'src/services/api/grove.js'
 import {
+  provisionContentReplacementState,
+  type ContentReplacementRecord,
+} from 'src/utils/toolResultStorage.js'
+import { extractLoadedNestedMemoryPathsFromMessages } from 'src/utils/queryHelpers.js'
+import {
   toInternalMessages,
   toSDKRateLimitInfo,
 } from 'src/utils/messages/mappers.js'
@@ -371,7 +376,10 @@ import {
   isShutdownApproved,
 } from '../../../../utils/teammateMailbox.js'
 import { removeTeammateFromTeamFile } from '../../../../utils/swarm/teamHelpers.js'
-import { unassignTeammateTasks } from '../../../../utils/tasks.js'
+import {
+  resolveOpenTaskExecutionContext,
+  unassignTeammateTasks,
+} from '../../../../utils/tasks.js'
 import { getRunningTasks } from '../../../../utils/task/framework.js'
 import { isBackgroundTask } from '../../../../tasks/types.js'
 import { stopTask } from '../../../../tasks/stopTask.js'
@@ -920,6 +928,7 @@ export async function runHeadlessRuntimeLoop(
       options,
       session,
       headlessConversation,
+      loadedConversation?.contentReplacements,
       turnInterruptionState,
     )) {
       await streamCollector.handleMessage(structuredIO, message)
@@ -977,9 +986,11 @@ function runHeadlessStreaming(
     setSDKStatus?: (status: SDKStatus) => void
     promptSuggestions?: boolean | undefined
     workload?: string | undefined
+    forkSession?: boolean | undefined
   },
   session: HeadlessSessionContext,
   headlessConversation: HeadlessConversation,
+  initialContentReplacements?: ContentReplacementRecord[],
   turnInterruptionState?: TurnInterruptionState,
 ): AsyncIterable<StdoutMessage> {
   let running = false
@@ -1013,6 +1024,13 @@ function runHeadlessStreaming(
   })
   void session.registerIndexedSession(managedSession)
   const mutableMessages = managedSession.messages
+  const contentReplacementState = provisionContentReplacementState(
+    initialMessages,
+    initialContentReplacements,
+  )
+  let loadedNestedMemoryPaths = extractLoadedNestedMemoryPathsFromMessages(
+    initialMessages,
+  )
   const emitOutput = (message: StdoutMessage) => {
     if (
       terminalResultEmitted &&
@@ -1973,6 +1991,9 @@ function runHeadlessStreaming(
             await runWithWorkload(
               cmd.workload ?? options.workload,
               async () => {
+                const activeTaskExecutionContext = options.forkSession
+                  ? undefined
+                  : await resolveOpenTaskExecutionContext()
                 for await (const envelope of askRuntime({
                   commands: uniqBy(
                     [
@@ -1999,6 +2020,10 @@ function runHeadlessStreaming(
                     session.bootstrapStateProvider.getHeadlessControlState()
                       .initJsonSchema ?? options.jsonSchema,
                   mutableMessages,
+                  contentReplacementState,
+                  initialLoadedNestedMemoryPaths: Array.from(
+                    loadedNestedMemoryPaths,
+                  ),
                   getReadFileCache: () => managedSession.getReadFileCache(),
                   setReadFileCache: cache =>
                     managedSession.commitReadFileCache(cache),
@@ -2034,9 +2059,10 @@ function runHeadlessStreaming(
                       session_id:
                         session.bootstrapStateProvider.getSessionIdentity()
                           .sessionId,
-                      uuid: randomUUID(),
+                        uuid: randomUUID(),
                     })
                   },
+                  activeTaskExecutionContext,
                 })) {
                   const sdkMessage =
                     projectRuntimeEnvelopeToLegacySDKMessage(envelope)
@@ -2119,6 +2145,8 @@ function runHeadlessStreaming(
             }
             throw error
           } finally {
+            loadedNestedMemoryPaths =
+              extractLoadedNestedMemoryPathsFromMessages(mutableMessages)
             turnAbortController.signal.removeEventListener(
               'abort',
               abortRuntimeTurn,

@@ -2,7 +2,7 @@
 
 日期：2026-04-28
 
-2026-04-28 复核：本文保留 public runtime API 的审查历史与分层分析，但封板结论已经更新。本轮“内核 + 开发接口”收口已完成：root surface、runtime/wire contract、capability lifecycle 与 developer-facing manager 均已打通，`companion` / `Kairos` / `memory` / `context` / `sessions` 已进入 package root 且连通 in-process / stdio runtime。剩余工作不再属于 blocker，而是 deeper parity，例如把 transcript 历史消息在 `sessions.resume()` 时自动 hydrate 进 live conversation state、以及未来非 NDJSON transport 扩展。
+2026-04-28 复核：本文保留 public runtime API 的审查历史与分层分析，但封板结论已经更新。本轮“内核 + 开发接口”收口已完成：root surface、runtime/wire contract、capability lifecycle 与 developer-facing manager 均已打通，`companion` / `Kairos` / `memory` / `context` / `sessions` 已进入 package root 且连通 in-process / stdio runtime。剩余工作不再属于 blocker，而是 deeper parity，例如继续追平 tool context 等 richer runtime-owned resume state、以及未来非 NDJSON transport 扩展。
 
 2026-04-27 复核：本文保留 public runtime API 的审查结论，但内部 kernel
 主链已经继续前进一轮。`SessionRuntime.submitRuntimeTurn(...)` 已成为
@@ -125,7 +125,7 @@ interactive executor、默认 hook runner、plugin marketplace discovery/options
   正式化为可导入 facade。剩余是替换更多 legacy UI callback，而不是继续扩
   legacy callback。
 - runtime state provider 仍大量代理 `bootstrap/state` singleton。
-- `sessions.resume()` 当前已返回 live `KernelConversation`，但 transcript 历史消息仍通过 `getTranscript()` 单独读取，尚未在 resume 时自动 hydrate 进 live conversation state。
+- `sessions.resume()` 当前已返回 live `KernelConversation`，并已把 transcript 历史消息、todo snapshot、nested memory snapshot、task snapshot、attribution snapshot、file history snapshot、content replacement 记录，以及 context collapse commit / snapshot hydrate 进 replayable live conversation state；headless/runtime turn 也会在每轮执行前恢复 nested memory dedupe state，并从 task storage 恢复唯一 open owned task context 重新挂回 `activeTaskExecutionContext`。剩余是更深的 richer tool context / execution context 级别 resume state。
 
 ## 2. 现有分层
 

@@ -59,6 +59,11 @@ import {
   cloneFileStateCache,
   type FileStateCache,
 } from '../../../utils/fileStateCache.js'
+import type {
+  ContentReplacementRecord,
+  ContentReplacementState,
+} from '../../../utils/toolResultStorage.js'
+import { provisionContentReplacementState } from '../../../utils/toolResultStorage.js'
 import { getActiveTaskExecutionContext } from '../../../utils/tasks.js'
 import { headlessProfilerCheckpoint } from '../../../utils/headlessProfiler.js'
 import { registerStructuredOutputEnforcement } from '../../../utils/hooks/hookHelpers.js'
@@ -76,6 +81,7 @@ import {
   type ProcessUserInputContext,
   processUserInput,
 } from '../../../utils/processUserInput/processUserInput.js'
+import { extractLoadedNestedMemoryPathsFromMessages } from '../../../utils/queryHelpers.js'
 import { fetchSystemPromptParts } from '../../../utils/queryContext.js'
 import { setCwd } from '../../../utils/Shell.js'
 import {
@@ -169,6 +175,9 @@ export type QueryEngineConfig = {
   setAppState: (f: (prev: AppState) => AppState) => void
   bootstrapStateProvider: RuntimeExecutionSessionStateProvider
   initialMessages?: Message[]
+  initialContentReplacements?: ContentReplacementRecord[]
+  contentReplacementState?: ContentReplacementState
+  initialLoadedNestedMemoryPaths?: readonly string[]
   readFileCache: FileStateCache
   customSystemPrompt?: string
   appendSystemPrompt?: string
@@ -187,6 +196,7 @@ export type QueryEngineConfig = {
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
   orphanedPermission?: OrphanedPermission
+  activeTaskExecutionContext?: ToolUseContext['activeTaskExecutionContext']
   runtimePermission?: ToolPermissionRuntimeContext
   /**
    * Snip-boundary handler: receives each yielded system message plus the
@@ -236,6 +246,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
   private hasHandledOrphanedPermission = false
   private readFileState: FileStateCache
   private live = true
+  private readonly contentReplacementState: ContentReplacementState | undefined
   private readonly runtimeEventBus: RuntimeEventBus
   private readonly stateProviders: ReturnType<
     typeof createExecutionStateProviders
@@ -246,7 +257,7 @@ export class SessionRuntime implements RuntimeExecutionSession {
   // at the start of each submitMessage to avoid unbounded growth across
   // many turns in SDK mode.
   private discoveredSkillNames = new Set<string>()
-  private loadedNestedMemoryPaths = new Set<string>()
+  private loadedNestedMemoryPaths: Set<string>
 
   constructor(config: QueryEngineConfig) {
     this.config = config
@@ -254,6 +265,16 @@ export class SessionRuntime implements RuntimeExecutionSession {
     this.abortController = config.abortController ?? createAbortController()
     this.permissionDenials = []
     this.readFileState = config.readFileCache
+    this.loadedNestedMemoryPaths =
+      config.initialLoadedNestedMemoryPaths !== undefined
+        ? new Set(config.initialLoadedNestedMemoryPaths)
+        : extractLoadedNestedMemoryPathsFromMessages(this.mutableMessages)
+    this.contentReplacementState =
+      config.contentReplacementState ??
+      provisionContentReplacementState(
+        config.initialMessages,
+        config.initialContentReplacements,
+      )
     this.totalUsage = EMPTY_USAGE
     this.stateProviders = createExecutionStateProviders({
       getAppState: config.getAppState,
@@ -579,8 +600,11 @@ export class SessionRuntime implements RuntimeExecutionSession {
       ) => {
         this.stateProviders.app.updateAttribution(updater)
       },
+      contentReplacementState: this.contentReplacementState,
       setSDKStatus,
-      activeTaskExecutionContext: getActiveTaskExecutionContext(),
+      activeTaskExecutionContext:
+        this.config.activeTaskExecutionContext ??
+        getActiveTaskExecutionContext(),
       runtimePermission: this.config.runtimePermission,
     }
 
@@ -710,8 +734,11 @@ export class SessionRuntime implements RuntimeExecutionSession {
       setResponseLength: () => {},
       updateFileHistoryState: processUserInputContext.updateFileHistoryState,
       updateAttributionState: processUserInputContext.updateAttributionState,
+      contentReplacementState: this.contentReplacementState,
       setSDKStatus,
-      activeTaskExecutionContext: getActiveTaskExecutionContext(),
+      activeTaskExecutionContext:
+        this.config.activeTaskExecutionContext ??
+        getActiveTaskExecutionContext(),
       runtimePermission: this.config.runtimePermission,
     }
 
@@ -1447,6 +1474,9 @@ export type AskRuntimeOptions = {
   taskBudget?: { total: number }
   canUseTool: CanUseToolFn
   mutableMessages?: Message[]
+  initialContentReplacements?: ContentReplacementRecord[]
+  contentReplacementState?: ContentReplacementState
+  initialLoadedNestedMemoryPaths?: readonly string[]
   customSystemPrompt?: string
   appendSystemPrompt?: string
   userSpecifiedModel?: string
@@ -1464,6 +1494,7 @@ export type AskRuntimeOptions = {
   agents?: AgentDefinition[]
   setSDKStatus?: (status: SDKStatus) => void
   orphanedPermission?: OrphanedPermission
+  activeTaskExecutionContext?: ToolUseContext['activeTaskExecutionContext']
   createSessionRuntime?: ExecutionSessionFactory
 }
 
@@ -1482,6 +1513,9 @@ export async function* askRuntime({
   taskBudget,
   canUseTool,
   mutableMessages = [],
+  initialContentReplacements,
+  contentReplacementState,
+  initialLoadedNestedMemoryPaths,
   getReadFileCache,
   setReadFileCache,
   customSystemPrompt,
@@ -1499,6 +1533,7 @@ export async function* askRuntime({
   agents = [],
   setSDKStatus,
   orphanedPermission,
+  activeTaskExecutionContext,
   createSessionRuntime,
 }: AskRuntimeOptions): AsyncGenerator<KernelRuntimeEnvelopeBase, void, unknown> {
   const sessionBootstrapStateProvider =
@@ -1514,6 +1549,9 @@ export async function* askRuntime({
     setAppState,
     bootstrapStateProvider: sessionBootstrapStateProvider,
     initialMessages: mutableMessages,
+    initialContentReplacements,
+    contentReplacementState,
+    initialLoadedNestedMemoryPaths,
     readFileCache: cloneFileStateCache(getReadFileCache()),
     customSystemPrompt,
     appendSystemPrompt,
@@ -1531,6 +1569,7 @@ export async function* askRuntime({
     setSDKStatus,
     abortController,
     orphanedPermission,
+    activeTaskExecutionContext,
     ...(feature('HISTORY_SNIP')
       ? {
           snipReplay: (yielded: Message, store: Message[]) => {

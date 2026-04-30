@@ -17,7 +17,6 @@ import {
   type AgentDefinition,
   type AgentDefinitionsResult,
 } from '@go-hare/builtin-tools/tools/AgentTool/loadAgentsDir.js'
-import { TODO_WRITE_TOOL_NAME } from '@go-hare/builtin-tools/tools/TodoWriteTool/constants.js'
 import { asSessionId } from '../types/ids.js'
 import type {
   AttributionSnapshotMessage,
@@ -53,8 +52,7 @@ import {
   saveWorktreeState,
 } from './sessionStorage.js'
 import { isTodoV2Enabled } from './tasks.js'
-import type { TodoList } from './todo/types.js'
-import { TodoListSchema } from './todo/types.js'
+import { extractTodoSnapshotFromMessages } from './todo/sessionTodoState.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
 import {
   getCurrentWorktreeSession,
@@ -67,29 +65,6 @@ type ResumeResult = {
   attributionSnapshots?: AttributionSnapshotMessage[]
   contextCollapseCommits?: ContextCollapseCommitEntry[]
   contextCollapseSnapshot?: ContextCollapseSnapshotEntry
-}
-
-/**
- * Scan the transcript for the last TodoWrite tool_use block and return its todos.
- * Used to hydrate AppState.todos on SDK --resume so the model's todo list
- * survives session restarts without file persistence.
- */
-function extractTodosFromTranscript(messages: Message[]): TodoList {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg?.type !== 'assistant') continue
-    const toolUse = (msg.message!.content as any[]).find(
-      block => block.type === 'tool_use' && block.name === TODO_WRITE_TOOL_NAME,
-    )
-    if (!toolUse || toolUse.type !== 'tool_use') continue
-    const input = toolUse.input
-    if (input === null || typeof input !== 'object') return []
-    const parsed = TodoListSchema().safeParse(
-      (input as Record<string, unknown>).todos,
-    )
-    return parsed.success ? parsed.data : []
-  }
-  return []
 }
 
 /**
@@ -138,12 +113,12 @@ export function restoreSessionStateFromLog(
   // Restore TodoWrite state from transcript (SDK/non-interactive only).
   // Interactive mode uses file-backed v2 tasks, so AppState.todos is unused there.
   if (!isTodoV2Enabled() && result.messages && result.messages.length > 0) {
-    const todos = extractTodosFromTranscript(result.messages)
-    if (todos.length > 0) {
+    const todoSnapshot = extractTodoSnapshotFromMessages(result.messages)
+    if (todoSnapshot && todoSnapshot.todos.length > 0) {
       const agentId = getSessionId()
       setAppState(prev => ({
         ...prev,
-        todos: { ...prev.todos, [agentId]: todos },
+        todos: { ...prev.todos, [agentId]: todoSnapshot.todos },
       }))
     }
   }

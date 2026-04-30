@@ -31,9 +31,9 @@ transport 只作为兼容投影保留，不再作为内部 source of truth。
 
 > `@go-hare/hare-code/kernel` 的 public surface、runtime/wire contract、capability lifecycle 与 developer-facing manager 均已收口到可发布状态。`companion`、`Kairos`、`memory`、`context`、`sessions` 已进入 root surface，并且已经连通 in-process / stdio runtime 与 wire protocol。
 
-当前唯一仍可继续深化、但**不再属于 blocker** 的点是：
+当前仍可继续深化、但**不再属于 blocker** 的点是：
 
-> `runtime.sessions.resume()` 现在已经返回 live `KernelConversation` 并允许继续运行 turn；但 transcript 历史消息仍通过 `getTranscript()` 单独读取，尚未在 `resume()` 时自动 hydrate 进 live conversation state。这属于 deeper resume parity，而不是内核或开发接口缺口。
+> `runtime.sessions.resume()` 现在已经返回 live `KernelConversation`、允许继续运行 turn，并会把 transcript 历史消息、todo snapshot、nested memory snapshot、task snapshot、attribution snapshot、file history snapshot、content replacement 记录，以及 context collapse commit / snapshot 一并 hydrate 进 resumed conversation 的 replayable live event state（当前事件类型为 `conversation.transcript_message` / `conversation.todo_snapshot` / `conversation.nested_memory_snapshot` / `conversation.task_snapshot` / `conversation.attribution_snapshot` / `conversation.file_history_snapshot` / `conversation.content_replacement` / `conversation.context_collapse_commit` / `conversation.context_collapse_snapshot`）；`getTranscript()` 仍保留原始 transcript 读取入口。与此同时，headless/runtime turn 也已开始在每轮执行前恢复 nested memory dedupe state，避免 resumed session 在后续 turn 里重复注入已加载的 `CLAUDE.md` / nested memory 附件；task storage 中唯一 open owned task context 也会重新挂回 `activeTaskExecutionContext`。剩余若继续追平的，是更深的 richer tool context / execution context，而不是这些已持久化历史状态、TodoWrite 连续性、nested memory dedupe、task-list snapshot 与 open-task context 的恢复缺口。
 
 结合 2026-04-23 本轮收口进展，更准确的补充口径是：
 
@@ -54,6 +54,25 @@ transport 只作为兼容投影保留，不再作为内部 source of truth。
 > `REPL.tsx` 这边也继续往前收了一刀：前台 `onQuery` orchestration、background query orchestration、initial message orchestration，以及 startup messages 注入 effect 都已从主文件上提到独立 controller/helper，当前主文件进一步退回到状态接线和视图组装。
 
 > 如果要对外长期承诺 kernel API，当前建议冻结的只有 root surface：`src/kernel/index.ts` 与 package-level `./kernel`。`src/kernel/*` leaf 模块继续视为 host-internal surface，不纳入公开 semver 承诺面。
+
+### 与 `docs/headless-embed-kernel-interfaces.md` 对应的状态快照
+
+下面这组记录用于承接接口文档里不宜展开过长的“当前内部落地点”：
+
+- headless / interactive CLI 的 `commands`、`tools`、`agents` 装配，已由 `src/runtime/capabilities/execution/headlessCapabilityMaterializer.ts` 与相关 refresh bundle 收口；CLI headless launcher 仍保留 host 职责，但缺省装配已不再要求调用方显式传全量对象。
+- `main/commandAssembly.ts` 的 bundled skills / builtin plugins 预热已下沉到 `src/runtime/capabilities/commands/RuntimeCommandSources.ts`；interactive CLI 的 command / agent preload、运行期 refresh 也已收口到同一 materializer family。
+- headless refresh 已进入 `src/runtime/capabilities/execution/internal/headlessRuntimeCapabilityBundle.ts`，统一处理 plugin reload、command / agent materialization、plugin MCP diff 与 hook hot-reload setup。
+- MCP runtime ownership 已分别进入 `RuntimeHeadlessMcpService` 与 `RuntimeInteractiveMcpService`：前者承接 SDK seed、dynamic server、connect / reconnect / status；后者承接 config load、pending reconciliation、stale cleanup、two-phase connect、manual reconnect、enable / disable、automatic reconnect、channel handler 注册 / 卸载与 `tools/prompts/resources list_changed` refresh。React hook 侧只保留 UI adapter callback。
+- hook / plugin 初装配已新增 runtime service adapter：`RuntimeHookService` 负责 plugin hook reload / count / cache lifecycle，`RuntimePluginService` 负责 interactive REPL 初始 plugin commands / agents / hooks / MCP / LSP materialization。`useManagePlugins(...)` 进一步退回 notification / telemetry adapter。
+- startup 期的 MCP prefetch 与 startup hook warmup 已收进 `RuntimeInteractiveStartupService`；`main.tsx` 只保留 host 条件与 warning renderer。相关本地 OpenAI-compatible endpoint deep smoke 也已通过，说明 host startup 装配链路已能复用真实 provider endpoint。
+- `SessionRuntime.submitRuntimeTurn(...)` 已成为 runtime-first 执行出口，统一输出 `turn.started`、`headless.sdk_message`、`turn.completed` / `turn.failed` runtime envelope；`RuntimeExecutionSession` 不再声明 `submitMessage(...)`，`QueryEngine.ts` 不再 re-export `ask`。`submitMessage(...)` 与 `ask(...)` 只保留 deprecated SDK-compatible projection shim。
+- headless stream 输出已改成 runtime-first publisher：`createHeadlessRuntimeStreamPublisher(...)` 先写入 `RuntimeEventBus`，legacy `stream-json` stdout 再作为兼容写出。ACP prompt path 也已直接消费 `QueryEngine.submitRuntimeTurn(...)` 的 runtime envelope，避免 ACP 再回到 SDK-message 投影作为执行主流。
+- public event taxonomy 已按当前代码边界进入 package root：`KernelEvent` 仍是 generic semantic event，`KernelRuntimeEnvelopeBase` 承载 `ack / event / error / pong`；`KERNEL_RUNTIME_EVENT_TAXONOMY`、`KernelRuntimeEventType`、`getKernelRuntimeEventCategory(...)`、`isKernelRuntimeEventOfType(...)` 与 `isKernelTurnTerminalEvent(...)` 已可对外使用。payload-specific discriminated union 仍属于 future。
+- public agents/tasks mutate 第一刀与 agent executor lifecycle 第一层均已进入 runtime contract、wire codec/router/client、in-process / stdio transport client、SDK façade 与 package declaration：`spawn_agent`、`create_task`、`update_task`、`assign_task`、`list_agent_runs`、`get_agent_run`、`get_agent_output`、`cancel_agent_run` 已走同一套 runtime-owned registry。默认 registry 也已接上 process-backed agent executor；仍未开放的是 coordinator 专用 invoke schema 与 in-process `AgentTool` / `ToolUseContext` 级复用。
+
+截至 2026-04-30，这组状态快照对应的对齐判断是：
+
+> desktop / worker / embedding 的后续讨论，应先以 `CLI headless` 为能力基线，再检查 public `kernel` / `wire protocol` 是否已经对齐；不要直接拿 desktop 暴露出来的问题反推共享 runtime contract。
 
 当前已经成立的结构是：
 

@@ -2931,12 +2931,21 @@ export class KernelRuntimeWireRouter {
       workspacePath ??= descriptor.cwd ?? this.runtimeWorkspacePath
     }
 
+    const conversationId =
+      command.conversationId ?? `session-${command.sessionId}`
+    const shouldHydrateTranscript = !this.conversations.has(conversationId)
+    const transcript = this.options.sessionManager
+      ? await this.options.sessionManager.resumeSession(command.sessionId, {
+          cwd: workspacePath ?? this.runtimeWorkspacePath,
+          metadata: command.metadata,
+        })
+      : undefined
+
     const createConversationCommand: KernelRuntimeCreateConversationCommand = {
       schemaVersion: command.schemaVersion,
       type: 'create_conversation',
       requestId: command.requestId,
-      conversationId:
-        command.conversationId ?? `session-${command.sessionId}`,
+      conversationId,
       workspacePath: workspacePath ?? this.runtimeWorkspacePath,
       sessionId: command.sessionId,
       sessionMeta: sanitizeWirePayload({
@@ -2947,6 +2956,48 @@ export class KernelRuntimeWireRouter {
     }
     const ack = await this.handleCreateConversation(createConversationCommand)
     const snapshot = ack.payload as KernelConversationSnapshot
+    if (shouldHydrateTranscript && transcript) {
+      this.hydrateResumedConversationTranscript(
+        snapshot.conversationId,
+        command.sessionId,
+        transcript,
+      )
+      this.hydrateResumedConversationTodo(
+        snapshot.conversationId,
+        command.sessionId,
+        transcript,
+      )
+      this.hydrateResumedConversationNestedMemory(
+        snapshot.conversationId,
+        command.sessionId,
+        transcript,
+      )
+      this.hydrateResumedConversationTasks(
+        snapshot.conversationId,
+        command.sessionId,
+        transcript,
+      )
+      this.hydrateResumedConversationAttribution(
+        snapshot.conversationId,
+        command.sessionId,
+        transcript,
+      )
+      this.hydrateResumedConversationFileHistory(
+        snapshot.conversationId,
+        command.sessionId,
+        transcript,
+      )
+      this.hydrateResumedConversationContentReplacements(
+        snapshot.conversationId,
+        command.sessionId,
+        transcript,
+      )
+      this.hydrateResumedConversationContextCollapse(
+        snapshot.conversationId,
+        command.sessionId,
+        transcript,
+      )
+    }
     return this.eventBus.ack({
       requestId: command.requestId,
       conversationId: snapshot.conversationId,
@@ -3163,6 +3214,222 @@ export class KernelRuntimeWireRouter {
       replayable: true,
       payload: sanitizeWirePayload({ event }),
     })
+  }
+
+  private hydrateResumedConversationTranscript(
+    conversationId: KernelConversationId,
+    resumeSessionId: string,
+    transcript: KernelRuntimeSessionTranscript,
+  ): void {
+    const transcriptSessionId = transcript.sessionId ?? resumeSessionId
+    transcript.messages.forEach((message, index) => {
+      if (!isTranscriptHistoryMessage(message)) {
+        return
+      }
+      this.eventBus.emit({
+        conversationId,
+        type: 'conversation.transcript_message',
+        replayable: true,
+        payload: sanitizeWirePayload({
+          sessionId: transcriptSessionId,
+          fullPath: transcript.fullPath,
+          index,
+          message,
+        }),
+      })
+    })
+  }
+
+  private hydrateResumedConversationFileHistory(
+    conversationId: KernelConversationId,
+    resumeSessionId: string,
+    transcript: KernelRuntimeSessionTranscript,
+  ): void {
+    const fileHistorySnapshots = getResumedFileHistorySnapshots(transcript)
+    if (fileHistorySnapshots.length === 0) {
+      return
+    }
+
+    const transcriptSessionId = transcript.sessionId ?? resumeSessionId
+    fileHistorySnapshots.forEach((snapshot, index) => {
+      this.eventBus.emit({
+        conversationId,
+        type: 'conversation.file_history_snapshot',
+        replayable: true,
+        payload: {
+          sessionId: transcriptSessionId,
+          fullPath: transcript.fullPath,
+          index,
+          snapshot: cloneReplayableResumeState(snapshot),
+        },
+      })
+    })
+  }
+
+  private hydrateResumedConversationTodo(
+    conversationId: KernelConversationId,
+    resumeSessionId: string,
+    transcript: KernelRuntimeSessionTranscript,
+  ): void {
+    const todoSnapshot = getResumedTodoSnapshot(transcript)
+    if (todoSnapshot === undefined) {
+      return
+    }
+
+    const transcriptSessionId = transcript.sessionId ?? resumeSessionId
+    this.eventBus.emit({
+      conversationId,
+      type: 'conversation.todo_snapshot',
+      replayable: true,
+      payload: sanitizeWirePayload({
+        sessionId: transcriptSessionId,
+        fullPath: transcript.fullPath,
+        snapshot: cloneReplayableResumeState(todoSnapshot),
+      }),
+    })
+  }
+
+  private hydrateResumedConversationNestedMemory(
+    conversationId: KernelConversationId,
+    resumeSessionId: string,
+    transcript: KernelRuntimeSessionTranscript,
+  ): void {
+    const nestedMemorySnapshot = getResumedNestedMemorySnapshot(transcript)
+    if (nestedMemorySnapshot === undefined) {
+      return
+    }
+
+    const transcriptSessionId = transcript.sessionId ?? resumeSessionId
+    this.eventBus.emit({
+      conversationId,
+      type: 'conversation.nested_memory_snapshot',
+      replayable: true,
+      payload: sanitizeWirePayload({
+        sessionId: transcriptSessionId,
+        fullPath: transcript.fullPath,
+        snapshot: cloneReplayableResumeState(nestedMemorySnapshot),
+      }),
+    })
+  }
+
+  private hydrateResumedConversationTasks(
+    conversationId: KernelConversationId,
+    resumeSessionId: string,
+    transcript: KernelRuntimeSessionTranscript,
+  ): void {
+    const taskSnapshot = getResumedTaskSnapshot(transcript)
+    if (taskSnapshot === undefined) {
+      return
+    }
+
+    const transcriptSessionId = transcript.sessionId ?? resumeSessionId
+    this.eventBus.emit({
+      conversationId,
+      type: 'conversation.task_snapshot',
+      replayable: true,
+      payload: sanitizeWirePayload({
+        sessionId: transcriptSessionId,
+        fullPath: transcript.fullPath,
+        snapshot: cloneReplayableResumeState(taskSnapshot),
+      }),
+    })
+  }
+
+  private hydrateResumedConversationAttribution(
+    conversationId: KernelConversationId,
+    resumeSessionId: string,
+    transcript: KernelRuntimeSessionTranscript,
+  ): void {
+    const attributionSnapshots =
+      getResumedAttributionSnapshots(transcript)
+    if (attributionSnapshots.length === 0) {
+      return
+    }
+
+    const transcriptSessionId = transcript.sessionId ?? resumeSessionId
+    attributionSnapshots.forEach((snapshot, index) => {
+      this.eventBus.emit({
+        conversationId,
+        type: 'conversation.attribution_snapshot',
+        replayable: true,
+        payload: sanitizeWirePayload({
+          sessionId: transcriptSessionId,
+          fullPath: transcript.fullPath,
+          index,
+          snapshot: cloneReplayableResumeState(snapshot),
+        }),
+      })
+    })
+  }
+
+  private hydrateResumedConversationContentReplacements(
+    conversationId: KernelConversationId,
+    resumeSessionId: string,
+    transcript: KernelRuntimeSessionTranscript,
+  ): void {
+    const contentReplacements = getResumedContentReplacements(transcript)
+    if (contentReplacements.length === 0) {
+      return
+    }
+
+    const transcriptSessionId = transcript.sessionId ?? resumeSessionId
+    contentReplacements.forEach((replacement, index) => {
+      this.eventBus.emit({
+        conversationId,
+        type: 'conversation.content_replacement',
+        replayable: true,
+        payload: sanitizeWirePayload({
+          sessionId: transcriptSessionId,
+          fullPath: transcript.fullPath,
+          index,
+          replacement: cloneReplayableResumeState(replacement),
+        }),
+      })
+    })
+  }
+
+  private hydrateResumedConversationContextCollapse(
+    conversationId: KernelConversationId,
+    resumeSessionId: string,
+    transcript: KernelRuntimeSessionTranscript,
+  ): void {
+    const contextCollapseCommits = getResumedContextCollapseCommits(transcript)
+    const contextCollapseSnapshot =
+      getResumedContextCollapseSnapshot(transcript)
+    if (
+      contextCollapseCommits.length === 0 &&
+      contextCollapseSnapshot === undefined
+    ) {
+      return
+    }
+
+    const transcriptSessionId = transcript.sessionId ?? resumeSessionId
+    contextCollapseCommits.forEach((commit, index) => {
+      this.eventBus.emit({
+        conversationId,
+        type: 'conversation.context_collapse_commit',
+        replayable: true,
+        payload: sanitizeWirePayload({
+          sessionId: transcriptSessionId,
+          fullPath: transcript.fullPath,
+          index,
+          commit: cloneReplayableResumeState(commit),
+        }),
+      })
+    })
+
+    if (contextCollapseSnapshot !== undefined) {
+      this.eventBus.emit({
+        conversationId,
+        type: 'conversation.context_collapse_snapshot',
+        replayable: true,
+        payload: sanitizeWirePayload({
+          sessionId: transcriptSessionId,
+          fullPath: transcript.fullPath,
+          snapshot: cloneReplayableResumeState(contextCollapseSnapshot),
+        }),
+      })
+    }
   }
 
   private shouldAcceptTurnExecutionEvent(
@@ -3541,6 +3808,86 @@ function sanitizeWirePayload<T>(value: T): T {
       .filter(([, item]) => item !== undefined)
       .map(([key, item]) => [key, sanitizeWirePayload(item)]),
   ) as T
+}
+
+function isTranscriptHistoryMessage(
+  value: unknown,
+): value is Record<string, unknown> & { type: string } {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'type' in value &&
+    typeof (value as { type?: unknown }).type === 'string'
+  )
+}
+
+function getResumedFileHistorySnapshots(
+  transcript: KernelRuntimeSessionTranscript,
+): readonly unknown[] {
+  const candidate = transcript as { fileHistorySnapshots?: unknown }
+  return Array.isArray(candidate.fileHistorySnapshots)
+    ? candidate.fileHistorySnapshots
+    : []
+}
+
+function getResumedTodoSnapshot(
+  transcript: KernelRuntimeSessionTranscript,
+): unknown {
+  const candidate = transcript as { todoSnapshot?: unknown }
+  return candidate.todoSnapshot ?? undefined
+}
+
+function getResumedNestedMemorySnapshot(
+  transcript: KernelRuntimeSessionTranscript,
+): unknown {
+  const candidate = transcript as { nestedMemorySnapshot?: unknown }
+  return candidate.nestedMemorySnapshot ?? undefined
+}
+
+function getResumedTaskSnapshot(
+  transcript: KernelRuntimeSessionTranscript,
+): unknown {
+  const candidate = transcript as { taskSnapshot?: unknown }
+  return candidate.taskSnapshot ?? undefined
+}
+
+function getResumedAttributionSnapshots(
+  transcript: KernelRuntimeSessionTranscript,
+): readonly unknown[] {
+  const candidate = transcript as { attributionSnapshots?: unknown }
+  return Array.isArray(candidate.attributionSnapshots)
+    ? candidate.attributionSnapshots
+    : []
+}
+
+function getResumedContentReplacements(
+  transcript: KernelRuntimeSessionTranscript,
+): readonly unknown[] {
+  const candidate = transcript as { contentReplacements?: unknown }
+  return Array.isArray(candidate.contentReplacements)
+    ? candidate.contentReplacements
+    : []
+}
+
+function getResumedContextCollapseCommits(
+  transcript: KernelRuntimeSessionTranscript,
+): readonly unknown[] {
+  const candidate = transcript as { contextCollapseCommits?: unknown }
+  return Array.isArray(candidate.contextCollapseCommits)
+    ? candidate.contextCollapseCommits
+    : []
+}
+
+function getResumedContextCollapseSnapshot(
+  transcript: KernelRuntimeSessionTranscript,
+): unknown {
+  const candidate = transcript as { contextCollapseSnapshot?: unknown }
+  return candidate.contextCollapseSnapshot ?? undefined
+}
+
+function cloneReplayableResumeState<T>(value: T): T {
+  const serialized = JSON.stringify(value)
+  return serialized === undefined ? value : (JSON.parse(serialized) as T)
 }
 
 function providerSelectionsEqual(

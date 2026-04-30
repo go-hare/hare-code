@@ -8,6 +8,7 @@ import type { SessionExternalMetadata } from 'src/utils/sessionState.js'
 import { notifySessionMetadataChanged } from 'src/utils/sessionState.js'
 import { restoreSessionStateFromLog } from 'src/utils/sessionRestore.js'
 import { asSessionId } from 'src/types/ids.js'
+import type { ContentReplacementRecord } from 'src/utils/toolResultStorage.js'
 import {
   resetSessionFilePointer,
   resetSessionMetadataForResume,
@@ -33,6 +34,7 @@ type HeadlessConversationMode = RestorableSessionMetadata['mode']
 export type HeadlessLoadedConversation = RestorableSessionMetadata & {
   sessionId?: string
   fullPath?: string | null
+  contentReplacements?: ContentReplacementRecord[]
 }
 
 export type HeadlessLoadedConversationResult = Parameters<

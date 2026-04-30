@@ -24,6 +24,8 @@ const CAPABILITY_API_EXPORTS = [
   'groupKernelCapabilities',
   'isKernelCapabilityReady',
   'isKernelCapabilityUnavailable',
+  'reloadKernelRuntimeCapabilities',
+  'resolveKernelRuntimeCapabilities',
   'toKernelCapabilityView',
   'toKernelCapabilityViews',
 ] as const
@@ -43,6 +45,9 @@ const EXPECTED_KERNEL_EXPORTS = [
   'createDirectConnectSession',
   'createKernelCompanionRuntime',
   'createKernelContextManager',
+  'createKernelHeadlessController',
+  'createKernelHeadlessInputQueue',
+  'createKernelHeadlessProviderEnv',
   'createKernelHeadlessSession',
   'createKernelHeadlessStore',
   'createKernelKairosRuntime',
@@ -63,6 +68,7 @@ const EXPECTED_KERNEL_EXPORTS = [
   'KernelPermissionDecisionError',
   'KernelRuntimeRequestError',
   'KernelRuntimeEventReplayError',
+  'normalizeKernelHeadlessEvent',
   'prepareKernelHeadlessStartup',
   'runBridgeHeadless',
   'runConnectHeadless',
@@ -106,6 +112,11 @@ describe('kernel package entry', () => {
     )
 
     expect(declaration).toContain('export type KernelHeadlessEnvironment = {')
+    expect(declaration).toContain('export type KernelHeadlessController = {')
+    expect(declaration).toContain('createKernelHeadlessController(')
+    expect(declaration).toContain('createKernelHeadlessInputQueue(')
+    expect(declaration).toContain('createKernelHeadlessProviderEnv(')
+    expect(declaration).toContain('normalizeKernelHeadlessEvent(')
     expect(declaration).toContain('runtimeEventSink?: KernelRuntimeEventSink')
     expect(declaration).toContain("schemaVersion: 'kernel.runtime.v1'")
     expect(declaration).toContain('KERNEL_RUNTIME_COMMAND_SCHEMA_VERSION:')
@@ -208,6 +219,8 @@ describe('kernel package entry', () => {
     expect(declaration).toContain('groupKernelCapabilities(')
     expect(declaration).toContain('isKernelCapabilityReady(')
     expect(declaration).toContain('isKernelCapabilityUnavailable(')
+    expect(declaration).toContain('reloadKernelRuntimeCapabilities(')
+    expect(declaration).toContain('resolveKernelRuntimeCapabilities(')
     expect(declaration).toContain('toKernelCapabilityView(')
     expect(declaration).toContain('toKernelCapabilityViews(')
     expect(declaration).toContain('export type KernelCommandDescriptor =')

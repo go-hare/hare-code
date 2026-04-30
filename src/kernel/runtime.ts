@@ -195,6 +195,10 @@ export {
   toKernelCapabilityView,
   toKernelCapabilityViews,
 } from './capabilities.js'
+export {
+  reloadKernelRuntimeCapabilities,
+  resolveKernelRuntimeCapabilities,
+} from './runtimeCapabilities.js'
 export type {
   KernelCapabilityFamily,
   KernelCapabilityFilter,

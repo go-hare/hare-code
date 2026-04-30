@@ -131,6 +131,24 @@ export function getTaskOwnedFiles(task: Task): string[] | undefined {
   return ownedFiles.length > 0 ? uniq(ownedFiles) : undefined
 }
 
+export async function resolveOpenTaskExecutionContext(
+  taskListId = getTaskListId(),
+  owner = taskListId,
+): Promise<ActiveTaskExecutionContext | undefined> {
+  const openOwnedTasks = (await listTasks(taskListId)).filter(
+    task => task.status !== 'completed' && task.owner === owner,
+  )
+  if (openOwnedTasks.length !== 1) {
+    return undefined
+  }
+  const [task] = openOwnedTasks
+  return {
+    taskListId,
+    taskId: task.id,
+    ownedFiles: getTaskOwnedFiles(task),
+  }
+}
+
 export function getTaskExecutionMetadata(
   task: Task,
 ): TaskExecutionMetadata | undefined {

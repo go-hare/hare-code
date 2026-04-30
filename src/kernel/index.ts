@@ -18,6 +18,31 @@ export {
   createKernelHeadlessStore,
   runKernelHeadless,
 } from './headless.js'
+export {
+  createKernelHeadlessController,
+  normalizeKernelHeadlessEvent,
+} from './headlessController.js'
+export { createKernelHeadlessInputQueue } from './headlessInputQueue.js'
+export { createKernelHeadlessProviderEnv } from './headlessProvider.js'
+export type {
+  KernelHeadlessAbortRequest,
+  KernelHeadlessController,
+  KernelHeadlessControllerOptions,
+  KernelHeadlessControllerState,
+  KernelHeadlessControllerStatus,
+  KernelHeadlessEvent,
+  KernelHeadlessTurnStarted,
+} from './headlessController.js'
+export type {
+  KernelHeadlessQueuedInterrupt,
+  KernelHeadlessQueuedUserTurn,
+  KernelHeadlessInputQueue,
+} from './headlessInputQueue.js'
+export type {
+  KernelHeadlessProviderEnvOptions,
+  KernelHeadlessProviderEnvResult,
+  KernelHeadlessProviderName,
+} from './headlessProvider.js'
 export { connectDefaultKernelHeadlessMcp } from './headlessMcp.js'
 export { prepareKernelHeadlessStartup } from './headlessStartup.js'
 export type { KernelHeadlessMcpConnectOptions } from './headlessMcp.js'
@@ -33,6 +58,7 @@ export type {
   KernelHeadlessSession,
   KernelHeadlessStore,
 } from './headless.js'
+export type { KernelHeadlessRunTurnRequest } from './headlessController.js'
 export type {
   KernelRuntimeEnvelopeBase,
   KernelRuntimeEnvelopeKind,
@@ -86,6 +112,8 @@ export {
   isKernelRuntimeEventOfType,
   isKernelTurnTerminalEvent,
   isKnownKernelRuntimeEventType,
+  reloadKernelRuntimeCapabilities,
+  resolveKernelRuntimeCapabilities,
   toKernelCapabilityView,
   toKernelCapabilityViews,
   KernelRuntimeRequestError,
